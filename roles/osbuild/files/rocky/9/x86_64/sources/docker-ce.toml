@@ -1,0 +1,8 @@
+# Docker CE EL path per docs.docker.com/engine/install (verified 2026-10-01)
+id = "docker-ce-stable"
+name = "Docker CE Stable"
+type = "yum-baseurl"
+url = "https://download.docker.com/linux/centos/9/x86_64/stable"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://download.docker.com/linux/centos/gpg"]

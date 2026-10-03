@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# systemctl stub. $SYSTEMCTL_DM_UNITS lists installed display-manager units;
+# $SYSTEMCTL_DEFAULT is the current default target.
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "systemctl $*"
+case ${1:-} in
+  get-default) echo "${SYSTEMCTL_DEFAULT:-multi-user.target}" ;;
+  list-unit-files)
+    for unit in ${SYSTEMCTL_DM_UNITS:-}; do printf '%s enabled enabled\n' "$unit"; done
+    ;;
+esac
+exit 0

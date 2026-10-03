@@ -1,0 +1,4 @@
+ansible-core>=2.15.0
+questionary>=2.0.0
+rich>=13.0.0
+ruamel.yaml>=0.18.0

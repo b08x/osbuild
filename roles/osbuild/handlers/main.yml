@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Handlers for osbuild role
+# image-builder-cli is stateless - no service management needed

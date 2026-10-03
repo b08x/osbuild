@@ -1,0 +1,50 @@
+# Static, non-composable part of the Rocky 10.2 workstation blueprint.
+# name/description/version/distro, packages, [customizations] (hostname =
+# osbuild_hostname), [customizations.kernel] and
+# [customizations.services] are rendered by templates/blueprint-components.toml.j2
+# from the selected components; do not define them here.
+#
+# Secure Boot is NOT compatible with the unsigned proprietary NVIDIA modules —
+# disable it or enroll a MOK on the target machine.
+#
+# sway and the wlroots stack are not built for EPEL 10 and are excluded.
+
+
+[customizations.installer.modules]
+enable = ["org.fedoraproject.Anaconda.Modules.Users"]
+disable = ["org.fedoraproject.Anaconda.Modules.Subscription"]
+
+[customizations.firewall]
+ports = ["24800:tcp"]
+
+[customizations.firewall.services]
+enabled = ["ssh", "ntp", "samba-client", "rsyncd"]
+
+[customizations.timezone]
+timezone = "America/New_York"
+ntpservers = ["2.rhel.pool.ntp.org"]
+
+[customizations.locale]
+languages = ["en_US.UTF-8"]
+keyboard = "us"
+
+[[customizations.files]]
+path = "/etc/dnf/dnf.conf"
+mode = "0755"
+data = """
+# see `man dnf.conf` for defaults and possible options
+
+[main]
+fastestmirror=1
+max_parallel_downloads=10
+clean_requirements_on_remove=True
+"""
+
+# Docker CE Stable
+[[customizations.repositories]]
+id = "docker-ce-stable"
+name = "Docker CE Stable - x86_64"
+baseurls = ["https://download.docker.com/linux/centos/10/x86_64/stable"]
+gpgcheck = false
+gpgkeys = ["https://download.docker.com/linux/centos/gpg"]
+enabled = true

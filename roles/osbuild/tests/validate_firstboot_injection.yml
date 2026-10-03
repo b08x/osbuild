@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Validation playbook for the first-login splash injection (tasks/blueprint.yml).
+# Prepares every static workstation blueprint plus one templated render into a
+# temporary output dir, twice each, then checks that each output is valid TOML
+# and carries the three files/firstboot/ entries exactly once, byte-identical.
+#
+#   ansible-playbook roles/osbuild/tests/validate_firstboot_injection.yml
+- name: Validate first-login splash injection
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  vars:
+    _role_dir: "{{ playbook_dir | dirname }}"
+    _out_dir: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/osbuild-firstboot-validate"
+  tasks:
+    - name: Reset output dir
+      ansible.builtin.file:
+        path: "{{ _out_dir }}"
+        state: "{{ item }}"
+        mode: "0755"
+      loop: [absent, directory]
+
+    - name: Find static workstation blueprints
+      ansible.builtin.find:
+        paths: "{{ _role_dir }}/files"
+        patterns: "*.toml"
+        recurse: true
+      register: _static
+
+    - name: Keep only workstation blueprints
+      ansible.builtin.set_fact:
+        _static_paths: "{{ _static.files | map(attribute='path') | select('search', '/workstation/') | sort }}"
+
+    - name: Prepare each static blueprint twice
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: blueprint.yml
+      vars:
+        osbuild_output_dir: "{{ _out_dir }}"
+        osbuild_use_blueprint_template: false
+        osbuild_static_blueprint_path: "{{ item.0 }}"
+        osbuild_blueprint_name: "{{ item.0 | basename | splitext | first }}"
+      loop: "{{ _static_paths | product([1, 2]) | list }}"
+      loop_control:
+        label: "{{ item.0 | basename }} (run {{ item.1 }})"
+
+    - name: Load distribution repository variables
+      ansible.builtin.include_vars:
+        file: "{{ _role_dir }}/vars/{{ ansible_distribution }}.yml"
+
+    - name: Load package taxonomy
+      ansible.builtin.include_vars:
+        file: "{{ _role_dir }}/../../vars/packages/{{ ansible_distribution }}.yml"
+
+    - name: Prepare the templated blueprint twice
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: blueprint.yml
+      vars:
+        osbuild_output_dir: "{{ _out_dir }}"
+        osbuild_use_blueprint_template: true
+        osbuild_blueprint_name: templated
+      loop: [1, 2]
+      loop_control:
+        label: "templated (run {{ item }})"
+
+    - name: Check injected entries
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ _role_dir }}/tests/firstboot/check_injection.py"
+          - "{{ _out_dir }}"
+          - "{{ _role_dir }}/files/firstboot"
+          - "{{ _static_paths | length + 1 }}"
+      register: _check
+      changed_when: false
+
+    - name: Show check result
+      ansible.builtin.debug:
+        var: _check.stdout_lines

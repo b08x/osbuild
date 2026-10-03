@@ -1,0 +1,133 @@
+---
+# tasks/bootc.yml
+# Build bootc container images and bootable disk images using bootc-image-builder
+# Based on Universal Blue template: https://github.com/ublue-os/image-template
+
+- name: Install bootc prerequisites
+  ansible.builtin.dnf:
+    name:
+      - podman
+      - buildah
+      - skopeo
+      - jq
+    state: present
+  become: true
+
+- name: Create bootc workspace
+  ansible.builtin.file:
+    path: "{{ osbuild_bootc_workspace }}"
+    state: directory
+    mode: "0755"
+
+- name: Create build_files subdirectory
+  ansible.builtin.file:
+    path: "{{ osbuild_bootc_workspace }}/build_files"
+    state: directory
+    mode: "0755"
+
+- name: Template bootc Containerfile
+  ansible.builtin.template:
+    src: Containerfile.bootc.j2
+    dest: "{{ osbuild_bootc_workspace }}/Containerfile"
+    mode: "0644"
+
+    backup: true
+- name: Template build.sh script
+  ansible.builtin.template:
+    src: build.sh.j2
+    dest: "{{ osbuild_bootc_workspace }}/build_files/build.sh"
+    mode: "0755"
+
+    backup: true
+- name: Copy build-time Ansible playbook
+  ansible.builtin.copy:
+    src: bootc/build.yml
+    dest: "{{ osbuild_bootc_workspace }}/build_files/build.yml"
+    mode: "0644"
+
+    backup: true
+- name: Copy Ansible templates directory
+  ansible.builtin.copy:
+    src: "{{ role_path }}/templates/"
+    dest: "{{ osbuild_bootc_workspace }}/templates/"
+    mode: preserve
+
+    backup: true
+- name: Template disk configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ osbuild_bootc_workspace }}/build_files/{{ item.dest }}"
+    mode: "0644"
+    backup: true
+  loop:
+    - { src: "disk.toml.j2", dest: "disk.toml" }
+    - { src: "iso.toml.j2", dest: "iso.toml" }
+
+- name: Build bootc container image
+  containers.podman.podman_image:
+    name: "{{ osbuild_bootc_image_name }}"
+    tag: "{{ osbuild_bootc_image_tag }}"
+    path: "{{ osbuild_bootc_workspace }}"
+    build:
+      format: oci
+      extra_args: "--pull=newer --network=host"
+  become: true
+  register: bootc_build_result
+
+- name: Display bootc container build result
+  ansible.builtin.debug:
+    msg: "bootc container image built: {{ osbuild_bootc_image_name }}:{{ osbuild_bootc_image_tag }}"
+
+- name: Verify container image content locally
+  ansible.builtin.command:
+    cmd: "podman run --rm {{ osbuild_bootc_image_name }}:{{ osbuild_bootc_image_tag }} rpm -qa"
+  become: true
+  register: podman_verify_rpm
+  changed_when: false
+
+- name: Display package count in built container
+  ansible.builtin.debug:
+    msg: "Built container contains {{ podman_verify_rpm.stdout_lines | length }} RPM packages."
+
+- name: Build bootable disk image using image-builder
+  when: osbuild_bootc_build_disk_image | default(false)
+  block:
+    - name: Create output directory
+      ansible.builtin.file:
+        path: "{{ osbuild_bootc_output_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Build bootable image with unified image-builder
+      ansible.builtin.command:
+        cmd: >
+          image-builder build {{ 'bootc-installer' if osbuild_bootc_image_type == 'iso' else osbuild_bootc_image_type }}
+          --bootc-ref {{ osbuild_bootc_image_name }}:{{ osbuild_bootc_image_tag }}
+          {% if osbuild_bootc_image_type == 'iso' %}
+          --bootc-installer-payload-ref {{ osbuild_bootc_image_name }}:{{ osbuild_bootc_image_tag }}
+          {% endif %}
+          --bootc-default-fs {{ osbuild_bootc_rootfs }}
+          --output-dir {{ osbuild_bootc_output_dir }}
+          --progress verbose
+      register: bootc_disk_build
+      become: true
+      timeout: "{{ osbuild_bootc_build_timeout }}"
+      changed_when: true
+
+    - name: Display bootc disk image build result
+      ansible.builtin.debug:
+        msg: "bootc disk image ({{ osbuild_bootc_image_type }}) created in {{ osbuild_bootc_output_dir }}"
+
+- name: Summary of bootc build
+  ansible.builtin.debug:
+    msg:
+      - "✅ bootc container image: {{ osbuild_bootc_image_name }}:{{ osbuild_bootc_image_tag }}"
+      - "✅ Workspace: {{ osbuild_bootc_workspace }}"
+      - >-
+        {{ ('✅ Disk image (' + osbuild_bootc_image_type + '): '
+            + osbuild_bootc_output_dir)
+           if osbuild_bootc_build_disk_image
+           else '⏭️  Disk image build skipped (set osbuild_bootc_build_disk_image: true)' }}
+      - ""
+      - "To switch to this image on a bootc system:"
+      - "  sudo bootc switch {{ osbuild_bootc_image_name }}:{{ osbuild_bootc_image_tag }}"

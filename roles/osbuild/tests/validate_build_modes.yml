@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Validation playbook for refactored osbuild build-mode branching logic.
+# Runs against isolated hosts (host1-host4) from tests/inventory and checks:
+# 1. Each supported mode resolves correctly.
+# 2. osbuild_build_bootc takes priority over osbuild_only_generate.
+- name: Validate bootc_image mode selection
+  hosts: host1
+  gather_facts: false
+  vars:
+    osbuild_build_bootc: true
+    osbuild_only_generate: false
+    osbuild_blueprint_name: dummy
+    osbuild_distro: fedora-43
+    osbuild_image_type: qcow2
+    osbuild_output_dir: /tmp/osbuild-test-out
+  tasks:
+    - name: Resolve build mode
+      ansible.builtin.include_tasks: ../tasks/select_build_mode.yml
+      tags: always
+    - name: Verify resolved mode
+      ansible.builtin.assert:
+        that:
+          - osbuild_resolved_build_mode == 'bootc_image'
+
+- name: Validate generate_only mode selection
+  hosts: host2
+  gather_facts: false
+  vars:
+    osbuild_build_bootc: false
+    osbuild_only_generate: true
+    osbuild_blueprint_name: dummy
+    osbuild_distro: fedora-43
+    osbuild_image_type: qcow2
+    osbuild_output_dir: /tmp/osbuild-test-out
+  tasks:
+    - name: Resolve build mode
+      ansible.builtin.include_tasks: ../tasks/select_build_mode.yml
+      tags: always
+    - name: Verify resolved mode
+      ansible.builtin.assert:
+        that:
+          - osbuild_resolved_build_mode == 'generate_only'
+
+- name: Validate traditional_iso mode selection
+  hosts: host3
+  gather_facts: false
+  vars:
+    osbuild_build_bootc: false
+    osbuild_only_generate: false
+    osbuild_blueprint_name: dummy
+    osbuild_distro: fedora-43
+    osbuild_image_type: qcow2
+    osbuild_output_dir: /tmp/osbuild-test-out
+  tasks:
+    - name: Resolve build mode
+      ansible.builtin.include_tasks: ../tasks/select_build_mode.yml
+      tags: always
+    - name: Verify resolved mode
+      ansible.builtin.assert:
+        that:
+          - osbuild_resolved_build_mode == 'traditional_iso'
+
+- name: Validate bootc_image wins over osbuild_only_generate
+  hosts: host4
+  gather_facts: false
+  vars:
+    osbuild_build_bootc: true
+    osbuild_only_generate: true
+    osbuild_blueprint_name: dummy
+    osbuild_distro: fedora-43
+    osbuild_image_type: qcow2
+    osbuild_output_dir: /tmp/osbuild-test-out
+  tasks:
+    - name: Resolve build mode
+      ansible.builtin.include_tasks: ../tasks/select_build_mode.yml
+      tags: always
+    - name: Verify resolved mode
+      ansible.builtin.assert:
+        that:
+          - osbuild_resolved_build_mode == 'bootc_image'

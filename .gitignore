@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Ansible & Image Build Artifacts
+*.retry
+*.log
+.ansible/
+/tmp/
+*.iso
+*.qcow2
+*.raw
+*.tar
+output/
+
+# OS / Editor
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

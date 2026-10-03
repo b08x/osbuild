@@ -1,0 +1,9 @@
+# CUDA rhel9 repo per developer.nvidia.com/cuda-downloads (verified 2026-10-01).
+# The rhel9 tree ships D42D0685.pub; CDF6BA43.pub 404s there.
+id = "cuda-el9-x86_64"
+name = "cuda-el9-x86_64"
+type = "yum-baseurl"
+url = "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/D42D0685.pub"]

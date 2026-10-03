@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# sudo stub: logs, then runs the command unless $SUDO_RC is non-zero.
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "sudo $*"
+[[ ${SUDO_RC:-0} -eq 0 ]] || exit "$SUDO_RC"
+exec "$@"

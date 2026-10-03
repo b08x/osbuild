@@ -1,0 +1,10 @@
+# EPEL 9 for RHEL-compatible clones (verified 2026-10-01)
+id = "epel"
+name = "Extra Packages for Enterprise Linux 9 - x86_64"
+type = "yum-baseurl"
+url = "https://mirror.us.leaseweb.net/epel/9/Everything/x86_64/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = [
+    "file:///usr/share/distribution-gpg-keys/epel/RPM-GPG-KEY-EPEL-9",
+]

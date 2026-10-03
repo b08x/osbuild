@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# dnf stub. $DNF_RC is the exit status. DNF_UPDATES=1 reports an upgraded
+# package; otherwise dnf reports "Nothing to do.".
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "dnf $*"
+if [[ ${DNF_UPDATES:-0} -eq 1 ]]; then
+  printf '%s\n' 'Dependencies resolved.' 'Upgraded:' '  kernel-0.0.1-1.x86_64' 'Complete!'
+else
+  printf '%s\n' 'Dependencies resolved.' 'Nothing to do.' 'Complete!'
+fi
+exit "${DNF_RC:-0}"

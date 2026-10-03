@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Syncopated First Boot
+Comment=Clone dotfiles with yadm and run yadm bootstrap
+Exec=/usr/local/bin/syncopated-firstboot-launcher
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5

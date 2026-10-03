@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Prepare a Rocky Linux 10.2 CUDA application container on gir.
+#
+# Generated with the Syncopated Appliance Builder skill
+# (.claude/skills/syncopated/). Uses the role default
+# (osbuild_only_generate: true): the play writes the blueprint and
+# build-<blueprint>.sh to osbuild_output_dir and builds nothing. Run the
+# script to build, or pass -e osbuild_only_generate=false to build here.
+#
+#   ansible-playbook playbooks/osbuild-rocky-cuda-container.yml
+#   bash /var/tmp/osbuild-images/build-rocky-10-2-cuda-container.sh
+#
+# Output is an OCI archive from image-builder's "container" image type. The
+# script copies it to osbuild_output_filename and loads it into the invoking
+# user's podman store as osbuild_container_tag.
+#
+# The image holds the full CUDA toolkit (cuda-toolkit: nvcc, headers,
+# libraries) but no NVIDIA kernel driver. The host must have the NVIDIA
+# driver and nvidia-container-toolkit with a generated CDI spec
+# (nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml):
+#
+#   podman run --rm --device nvidia.com/gpu=all localhost/rocky-10-2-cuda-container:<commit> nvidia-smi
+#   podman run --rm --device nvidia.com/gpu=all localhost/rocky-10-2-cuda-container:<commit> /usr/local/cuda/bin/nvcc --version
+#
+# As in osbuild-rocky-iso-nvidia.yml, gir is Fedora 43 and the role would
+# otherwise take its source list from the host distribution, so
+# osbuild_sources is emptied and the one non-base repo is passed explicitly.
+
+- name: Prepare Rocky Linux 10.2 CUDA application container
+  hosts: builder
+  become: true
+  gather_facts: false
+  vars:
+    osbuild_distro: "rocky-10.2"
+    osbuild_arch: "x86_64"
+    osbuild_image_type: container
+
+    osbuild_blueprint_name: "rocky-10-2-cuda-container"
+    osbuild_use_blueprint_template: false
+    osbuild_static_blueprint_path: "files/rocky/10/x86_64/container/rocky-10-2-cuda-container.toml"
+    osbuild_build_bootc: false
+
+    # The installer kickstart, wheel sudoers drop-in, first-login splash and
+    # Flathub remote are workstation ISO features. A container has no
+    # Anaconda, no users, no desktop session and no system flatpak;
+    # image-builder rejects installer customizations for the container type.
+    osbuild_kickstart_enabled: false
+    osbuild_kickstart_sudoers: false
+    osbuild_firstboot_enabled: false
+    osbuild_flathub_enabled: false
+
+    osbuild_components:
+      - base
+
+    osbuild_sources: []
+    osbuild_extra_repo_urls:
+      - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
+
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+    osbuild_output_filename: "rocky-10-2-cuda-container-{{ _git_commit }}.tar"
+    osbuild_container_tag: "localhost/rocky-10-2-cuda-container:{{ _git_commit }}"
+
+    osbuild_build_retries: 1
+
+  pre_tasks:
+    - name: Gather facts as unprivileged connection user
+      ansible.builtin.setup:
+      become: false
+      tags: ["always"]
+
+    - name: Set image name commit
+      ansible.builtin.set_fact:
+        _git_commit: >-
+          {{ lookup('ansible.builtin.pipe',
+             'git -C ' ~ (playbook_dir | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*"') }}
+      tags: ["always"]
+
+    - name: List image types known to the installed image-builder
+      ansible.builtin.command: image-builder list
+      register: _image_builder_list
+      changed_when: false
+      tags: ["always"]
+
+    - name: Verify image-builder can build the requested distro and image type
+      ansible.builtin.assert:
+        that:
+          - _wanted in _image_builder_list.stdout_lines
+        fail_msg: >-
+          '{{ _wanted }}' is not in `image-builder list` on {{ inventory_hostname }}.
+          Upgrade image-builder or change osbuild_distro.
+        success_msg: "image-builder supports '{{ _wanted }}'."
+      vars:
+        _wanted: "{{ osbuild_distro }} type:{{ osbuild_image_type }} arch:{{ osbuild_arch }}"
+      tags: ["always"]
+
+  roles:
+    - role: osbuild

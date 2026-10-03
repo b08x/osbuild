@@ -1,0 +1,26 @@
+# Installer kickstart (roles/osbuild/files/{{ osbuild_kickstart_file }}). Injected
+# into every prepared blueprint by tasks/blueprint.yml; edit the source file,
+# not this. lang/keyboard/timezone come from osbuild_locale, osbuild_keyboard
+# and osbuild_timezone{{ '; the first %pre writes the osbuild_kickstart_* disk
+# layout variables for the %pre in the source file' if osbuild_kickstart_partitioning == 'auto' else '' }}.
+
+[customizations.installer.kickstart]
+contents = '''
+lang {{ osbuild_locale }}
+keyboard {{ osbuild_keyboard }}
+timezone {{ osbuild_timezone }} --utc
+{% if osbuild_kickstart_partitioning == 'auto' %}
+%pre --interpreter=/usr/bin/bash --erroronfail
+cat >/tmp/syncopated-layout.env <<'EOF'
+MIN_MIB={{ (osbuild_kickstart_disk_min_gib | int) * 1024 }}
+ROOT_PCT={{ osbuild_kickstart_root_percent | int }}
+ROOT_MIN_MIB={{ (osbuild_kickstart_root_min_gib | int) * 1024 }}
+RESERVE_PCT={{ osbuild_kickstart_reserve_percent | int }}
+USR_PCT={{ osbuild_kickstart_usr_percent | int }}
+USR_MAX_MIB={{ (osbuild_kickstart_usr_max_gib | int) * 1024 }}
+VAR_MAX_MIB={{ (osbuild_kickstart_var_max_gib | int) * 1024 }}
+HOME_MIN_MIB={{ (osbuild_kickstart_home_min_gib | int) * 1024 }}
+EOF
+%end
+{% endif %}
+{{ lookup('ansible.builtin.file', osbuild_kickstart_file, rstrip=false) }}'''

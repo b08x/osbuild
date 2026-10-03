@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+# Custom kernel command line parameters for {{ osbuild_blueprint_name }}
+# This file is templated at build time into /usr/etc/kernel/cmdline.d/
+{{ item.cmdline }}

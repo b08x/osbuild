@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "nvidia" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "NVIDIA proprietary driver, CUDA toolkit and container toolkit"
+repo_urls:
+  - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
+  - "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
+services:
+  - "nvidia-cdi-refresh"
+  - "nvidia-persistenced"
+kernel_args:
+  - "rd.driver.blacklist=nouveau"
+  - "rd.driver.blacklist=nova-core"
+  - "modprobe.blacklist=nouveau"
+  - "nvidia-drm.modeset=1"
+fragment: nvidia.toml
+packages:
+  - "nvidia-driver"
+  - "nvidia-driver-cuda"
+  - "nvidia-driver-cuda-libs"
+  - "nvidia-driver-libs"
+  - "nvidia-gpu-firmware"
+  - "nvidia-persistenced"
+  - "nvidia-settings"
+  - "nvtop"
+  - "cuda-toolkit"
+  - "nvidia-container-toolkit"

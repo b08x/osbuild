@@ -1,0 +1,235 @@
+{
+  "id": "2026-10-03-135644",
+  "generated_at": "2026-10-03T17:56:44.454714943Z",
+  "language": "en",
+  "pages": [
+    {
+      "slug": "1-overview-purpose-and-value-of-the-osbuild-role",
+      "title": "Overview: Purpose and Value of the OSBuild Role",
+      "file": "1-overview-purpose-and-value-of-the-osbuild-role.md",
+      "section": "Get Started",
+      "level": "Beginner"
+    },
+    {
+      "slug": "2-quick-start-setting-up-and-running-your-first-build",
+      "title": "Quick Start: Setting Up and Running Your First Build",
+      "file": "2-quick-start-setting-up-and-running-your-first-build.md",
+      "section": "Get Started",
+      "level": "Beginner"
+    },
+    {
+      "slug": "3-prerequisites-system-requirements-and-dependencies",
+      "title": "Prerequisites: System Requirements and Dependencies",
+      "file": "3-prerequisites-system-requirements-and-dependencies.md",
+      "section": "Get Started",
+      "level": "Beginner"
+    },
+    {
+      "slug": "4-repository-structure-and-key-files-explained",
+      "title": "Repository Structure and Key Files Explained",
+      "file": "4-repository-structure-and-key-files-explained.md",
+      "section": "Get Started",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "5-introduction-to-image-building-with-osbuild",
+      "title": "Introduction to Image Building with OSBuild",
+      "file": "5-introduction-to-image-building-with-osbuild.md",
+      "section": "Deep Dive",
+      "group": "Core Concepts",
+      "level": "Beginner"
+    },
+    {
+      "slug": "6-understanding-blueprints-definition-and-customization",
+      "title": "Understanding Blueprints: Definition and Customization",
+      "file": "6-understanding-blueprints-definition-and-customization.md",
+      "section": "Deep Dive",
+      "group": "Core Concepts",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "7-kickstart-files-automation-and-configuration",
+      "title": "Kickstart Files: Automation and Configuration",
+      "file": "7-kickstart-files-automation-and-configuration.md",
+      "section": "Deep Dive",
+      "group": "Core Concepts",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "8-build-modes-selecting-and-configuring-for-your-use-case",
+      "title": "Build Modes: Selecting and Configuring for Your Use Case",
+      "file": "8-build-modes-selecting-and-configuring-for-your-use-case.md",
+      "section": "Deep Dive",
+      "group": "Core Concepts",
+      "level": "Advanced"
+    },
+    {
+      "slug": "9-default-variables-and-overrides-in-defaults-main-yml",
+      "title": "Default Variables and Overrides in `defaults/main.yml`",
+      "file": "9-default-variables-and-overrides-in-defaults-main-yml.md",
+      "section": "Deep Dive",
+      "group": "Configuration and Customization",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "10-managing-repositories-and-gpg-keys",
+      "title": "Managing Repositories and GPG Keys",
+      "file": "10-managing-repositories-and-gpg-keys.md",
+      "section": "Deep Dive",
+      "group": "Configuration and Customization",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "11-template-files-structure-and-customization",
+      "title": "Template Files: Structure and Customization",
+      "file": "11-template-files-structure-and-customization.md",
+      "section": "Deep Dive",
+      "group": "Configuration and Customization",
+      "level": "Advanced"
+    },
+    {
+      "slug": "12-firstboot-scripts-injection-and-execution",
+      "title": "Firstboot Scripts: Injection and Execution",
+      "file": "12-firstboot-scripts-injection-and-execution.md",
+      "section": "Deep Dive",
+      "group": "Configuration and Customization",
+      "level": "Advanced"
+    },
+    {
+      "slug": "13-blueprint-creation-and-validation",
+      "title": "Blueprint Creation and Validation",
+      "file": "13-blueprint-creation-and-validation.md",
+      "section": "Deep Dive",
+      "group": "Build Process",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "14-osbuild-composer-workflow-and-integration",
+      "title": "OSBuild Composer: Workflow and Integration",
+      "file": "14-osbuild-composer-workflow-and-integration.md",
+      "section": "Deep Dive",
+      "group": "Build Process",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "15-disk-image-and-iso-configuration",
+      "title": "Disk Image and ISO Configuration",
+      "file": "15-disk-image-and-iso-configuration.md",
+      "section": "Deep Dive",
+      "group": "Build Process",
+      "level": "Advanced"
+    },
+    {
+      "slug": "16-handling-post-installation-tasks-with-systemd-services",
+      "title": "Handling Post-Installation Tasks with Systemd Services",
+      "file": "16-handling-post-installation-tasks-with-systemd-services.md",
+      "section": "Deep Dive",
+      "group": "Build Process",
+      "level": "Advanced"
+    },
+    {
+      "slug": "17-overview-of-supported-linux-distributions-almalinux-fedora-rocky",
+      "title": "Overview of Supported Linux Distributions (AlmaLinux, Fedora, Rocky)",
+      "file": "17-overview-of-supported-linux-distributions-almalinux-fedora-rocky.md",
+      "section": "Deep Dive",
+      "group": "Supported Platforms and Distributions",
+      "level": "Beginner"
+    },
+    {
+      "slug": "18-distribution-specific-variables-and-configurations",
+      "title": "Distribution-Specific Variables and Configurations",
+      "file": "18-distribution-specific-variables-and-configurations.md",
+      "section": "Deep Dive",
+      "group": "Supported Platforms and Distributions",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "19-adding-support-for-new-distributions",
+      "title": "Adding Support for New Distributions",
+      "file": "19-adding-support-for-new-distributions.md",
+      "section": "Deep Dive",
+      "group": "Supported Platforms and Distributions",
+      "level": "Advanced"
+    },
+    {
+      "slug": "20-testing-framework-bats-and-python-tests",
+      "title": "Testing Framework: BATS and Python Tests",
+      "file": "20-testing-framework-bats-and-python-tests.md",
+      "section": "Deep Dive",
+      "group": "Testing and Validation",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "21-validating-kickstart-and-firstboot-injection",
+      "title": "Validating Kickstart and Firstboot Injection",
+      "file": "21-validating-kickstart-and-firstboot-injection.md",
+      "section": "Deep Dive",
+      "group": "Testing and Validation",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "22-schema-validation-and-best-practices",
+      "title": "Schema Validation and Best Practices",
+      "file": "22-schema-validation-and-best-practices.md",
+      "section": "Deep Dive",
+      "group": "Testing and Validation",
+      "level": "Advanced"
+    },
+    {
+      "slug": "23-debugging-build-failures-and-log-analysis",
+      "title": "Debugging Build Failures and Log Analysis",
+      "file": "23-debugging-build-failures-and-log-analysis.md",
+      "section": "Deep Dive",
+      "group": "Advanced Topics",
+      "level": "Advanced"
+    },
+    {
+      "slug": "24-performance-optimization-for-large-scale-builds",
+      "title": "Performance Optimization for Large-Scale Builds",
+      "file": "24-performance-optimization-for-large-scale-builds.md",
+      "section": "Deep Dive",
+      "group": "Advanced Topics",
+      "level": "Advanced"
+    },
+    {
+      "slug": "25-integrating-custom-packages-and-repositories",
+      "title": "Integrating Custom Packages and Repositories",
+      "file": "25-integrating-custom-packages-and-repositories.md",
+      "section": "Deep Dive",
+      "group": "Advanced Topics",
+      "level": "Advanced"
+    },
+    {
+      "slug": "26-security-hardening-in-image-builds",
+      "title": "Security Hardening in Image Builds",
+      "file": "26-security-hardening-in-image-builds.md",
+      "section": "Deep Dive",
+      "group": "Advanced Topics",
+      "level": "Advanced"
+    },
+    {
+      "slug": "27-architectural-review-design-principles-and-decisions",
+      "title": "Architectural Review: Design Principles and Decisions",
+      "file": "27-architectural-review-design-principles-and-decisions.md",
+      "section": "Deep Dive",
+      "group": "Architecture and Design",
+      "level": "Advanced"
+    },
+    {
+      "slug": "28-migration-log-tracking-changes-and-updates",
+      "title": "Migration Log: Tracking Changes and Updates",
+      "file": "28-migration-log-tracking-changes-and-updates.md",
+      "section": "Deep Dive",
+      "group": "Architecture and Design",
+      "level": "Advanced"
+    },
+    {
+      "slug": "29-extending-the-role-best-practices-for-contributors",
+      "title": "Extending the Role: Best Practices for Contributors",
+      "file": "29-extending-the-role-best-practices-for-contributors.md",
+      "section": "Deep Dive",
+      "group": "Architecture and Design",
+      "level": "Advanced"
+    }
+  ]
+}

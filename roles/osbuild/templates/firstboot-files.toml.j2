@@ -1,0 +1,10 @@
+# First-login splash (roles/osbuild/files/firstboot/). Injected into every
+# prepared blueprint by tasks/blueprint.yml; edit the source files, not this.
+{% for f in _osbuild_firstboot_files %}
+
+[[customizations.files]]
+path = "{{ f.path }}"
+mode = "{{ f.mode }}"
+data = '''
+{{ lookup('ansible.builtin.file', 'firstboot/' ~ f.src, rstrip=false) }}'''
+{% endfor %}

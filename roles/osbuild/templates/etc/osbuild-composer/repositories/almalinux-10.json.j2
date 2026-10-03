@@ -1,0 +1,18 @@
+{
+    "x86_64": [
+        {% for repo_name, repo_data in repo.items() %}
+        {
+            "name": "{{ repo_name }}",
+            "check_gpg": {{ repo_data.check_gpg | to_json }},
+            {% if repo_data.metalink is defined %}
+            "metalink": "{{ repo_data.metalink }}"
+            {% else %}
+            "baseurl": "{{ repo_data.baseurl }}"
+            {% endif %}
+            {% if repo_gpgkeys is defined and repo_name in repo_gpgkeys %}
+            ,"gpgkey": {{ repo_gpgkeys[repo_name] | to_json }}
+            {% endif %}
+        }{{ "," if not loop.last else "" }}
+        {% endfor %}
+    ]
+}

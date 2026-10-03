@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# lsblk stub. Disk list from $LSBLK_DISKS (lines: NAME TYPE RM RO SIZE [TRAN]),
+# partition parents from $LSBLK_PARENTS (lines: /dev/PART PARENT).
+case "$*" in
+  "-dbno NAME,TYPE,RM,RO,SIZE,TRAN") cat "$LSBLK_DISKS" ;;
+  "-no PKNAME "*) awk -v d="${*: -1}" '$1 == d { print $2 }' "$LSBLK_PARENTS" ;;
+  "-dno NAME "*) dev="${*: -1}"; echo "${dev#/dev/}" ;;
+  *) echo "lsblk stub: unexpected args: $*" >&2; exit 2 ;;
+esac

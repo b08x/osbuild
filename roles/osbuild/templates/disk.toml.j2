@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# Disk configuration for bootc QCOW2/RAW image builds
+# Used by bootc-image-builder for {{ osbuild_blueprint_name }}
+
+# =============================================================================
+# Filesystem Customizations
+# =============================================================================
+
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "{{ osbuild_bootc_root_size | default('20 GiB') }}"
+
+{% if osbuild_bootc_home_size is defined %}
+[[customizations.filesystem]]
+mountpoint = "/home"
+minsize = "{{ osbuild_bootc_home_size }}"
+{% endif %}
+
+# NOTE: bootc-image-builder does not support mounting /var itself as a standalone
+# partition (only subdirectories of /var like /var/data are supported).
+# Customizing /var itself causes image-builder/bootc-image-builder to fail.
+# {% if osbuild_bootc_var_size is defined %}
+# [[customizations.filesystem]]
+# mountpoint = "/var"
+# minsize = "{{ osbuild_bootc_var_size }}"
+# {% endif %}

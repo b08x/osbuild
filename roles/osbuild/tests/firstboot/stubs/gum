@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# gum stub. choose/input/confirm answers come from $GUM_QUEUE, one per line.
+# For input, the answer "__default__" returns the --value argument.
+# An empty queue makes the prompt exit 130 (user pressed Ctrl-C).
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "gum $*"
+cmd=${1:-}
+shift || true
+case $cmd in
+  style)
+    args=()
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --bold | --italic | --underline) ;;
+        --*) shift ;;
+        *) args+=("$1") ;;
+      esac
+      shift
+    done
+    if [[ ${#args[@]} -gt 0 ]]; then printf '%s\n' "${args[@]}"; else cat; fi
+    ;;
+  choose | input | confirm)
+    value=
+    for ((i = 1; i <= $#; i++)); do
+      [[ ${!i} == --value ]] && { j=$((i + 1)); value=${!j}; }
+      [[ ${!i} == --value=* ]] && value=${!i#--value=}
+    done
+    answer=$(stub_pop "${GUM_QUEUE:-/nonexistent}") || exit 130
+    case $cmd in
+      input) [[ $answer == __default__ ]] && answer=$value; printf '%s\n' "$answer" ;;
+      confirm) [[ $answer == yes ]] ;;
+      *) printf '%s\n' "$answer" ;;
+    esac
+    ;;
+esac

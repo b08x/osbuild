@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT-0
+# This file is a backward-compatibility redirect.
+# The canonical package taxonomy lives in ../../vars/packages/{Distribution}.yml
+#
+# This file is intentionally empty. The osbuild role loads the canonical
+# taxonomy via: include_vars: "{{ playbook_dir }}/../../vars/packages/{{ ansible_distribution }}.yml"
+#
+# The legacy flat lists (osbuild_sway_packages, osbuild_nvidia_packages, etc.)
+# have been absorbed into the canonical taxonomy under osbuild_legacy.* in each
+# distribution file.

@@ -1,0 +1,47 @@
+# Rocky Linux 10.2 CUDA application container (image-builder type "container").
+#
+# An OCI image with the full CUDA toolkit (nvcc, headers, libraries) and a
+# host compiler. It carries no NVIDIA kernel driver: the host's driver and
+# libcuda are injected at run time by nvidia-container-toolkit through CDI:
+#
+#   podman run --rm --device nvidia.com/gpu=all <image> nvidia-smi
+#
+# cuda-toolkit comes from the CUDA rhel10 repo, which must be passed to
+# image-builder as --extra-repo; [[customizations.repositories]] does not
+# feed depsolve. The "cuda" meta package is deliberately not used: it pulls
+# in nvidia-driver and the kernel module, which do not belong in a container.
+
+name = "rocky-10-2-cuda-container"
+description = "Rocky Linux 10.2 CUDA toolkit application container"
+version = "1.0.0"
+distro = "rocky-10.2"
+
+[[packages]]
+name = "cuda-toolkit"
+version = "*"
+
+# nvcc needs a host C/C++ compiler and make to build anything.
+[[packages]]
+name = "gcc-c++"
+version = "*"
+
+[[packages]]
+name = "make"
+version = "*"
+
+[[packages]]
+name = "git"
+version = "*"
+
+[[packages]]
+name = "which"
+version = "*"
+
+# Put the CUDA toolchain on PATH for interactive (login) shells:
+#   podman run -it <image> bash -l
+[[customizations.files]]
+path = "/etc/profile.d/cuda.sh"
+mode = "0644"
+data = """
+export PATH=/usr/local/cuda/bin${PATH:+:${PATH}}
+"""

@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Validation playbook for the installer kickstart injection (tasks/blueprint.yml).
+# Prepares every static workstation blueprint plus one templated render twice
+# with osbuild_kickstart_enabled (idempotence: the second run must not add a
+# second block) and once with it disabled, then checks each output with
+# tests/kickstart/check_kickstart.py. A blueprint that still carries
+# [[customizations.user]] must be rejected by the conflict assert.
+#
+#   ansible-playbook roles/osbuild/tests/validate_kickstart_injection.yml
+#   ansible-playbook roles/osbuild/tests/validate_kickstart_injection.yml -e ksvalidator=.venv/bin/ksvalidator
+- name: Validate installer kickstart injection
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  vars:
+    _role_dir: "{{ playbook_dir | dirname }}"
+    _tmp: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}"
+    _out_on: "{{ _tmp }}/osbuild-kickstart-validate/enabled"
+    _out_off: "{{ _tmp }}/osbuild-kickstart-validate/disabled"
+    _out_conflict: "{{ _tmp }}/osbuild-kickstart-validate/conflict"
+    ksvalidator: ""
+  tasks:
+    - name: Reset output dirs
+      ansible.builtin.file:
+        path: "{{ item.0 }}"
+        state: "{{ item.1 }}"
+        mode: "0755"
+      loop: "{{ [_out_on, _out_off, _out_conflict] | product(['absent', 'directory']) | list }}"
+
+    - name: Find static workstation blueprints
+      ansible.builtin.find:
+        paths: "{{ _role_dir }}/files"
+        patterns: "*.toml"
+        recurse: true
+      register: _static
+
+    - name: Keep only workstation blueprints
+      ansible.builtin.set_fact:
+        _static_paths: "{{ _static.files | map(attribute='path') | select('search', '/workstation/') | sort }}"
+
+    - name: Prepare each static blueprint twice with the kickstart enabled
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: blueprint.yml
+      vars:
+        osbuild_output_dir: "{{ _out_on }}"
+        osbuild_use_blueprint_template: false
+        osbuild_static_blueprint_path: "{{ item.0 }}"
+        osbuild_blueprint_name: "{{ item.0 | basename | splitext | first }}"
+      loop: "{{ _static_paths | product([1, 2]) | list }}"
+      loop_control:
+        label: "{{ item.0 | basename }} (run {{ item.1 }})"
+
+    - name: Prepare each static blueprint with the kickstart disabled
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: blueprint.yml
+      vars:
+        osbuild_output_dir: "{{ _out_off }}"
+        osbuild_use_blueprint_template: false
+        osbuild_kickstart_enabled: false
+        osbuild_static_blueprint_path: "{{ item }}"
+        osbuild_blueprint_name: "{{ item | basename | splitext | first }}"
+      loop: "{{ _static_paths }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
+    - name: Load distribution repository variables
+      ansible.builtin.include_vars:
+        file: "{{ _role_dir }}/vars/{{ ansible_distribution }}.yml"
+
+    - name: Load package taxonomy
+      ansible.builtin.include_vars:
+        file: "{{ _role_dir }}/../../vars/packages/{{ ansible_distribution }}.yml"
+
+    - name: Prepare the templated blueprint twice with the kickstart enabled
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: blueprint.yml
+      vars:
+        osbuild_output_dir: "{{ _out_on }}"
+        osbuild_use_blueprint_template: true
+        osbuild_blueprint_name: templated
+      loop: [1, 2]
+      loop_control:
+        label: "templated (run {{ item }})"
+
+    - name: Prepare the templated blueprint with the kickstart disabled
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: blueprint.yml
+      vars:
+        osbuild_output_dir: "{{ _out_off }}"
+        osbuild_use_blueprint_template: true
+        osbuild_kickstart_enabled: false
+        osbuild_blueprint_name: templated
+
+    - name: Check kickstart in enabled and disabled outputs
+      ansible.builtin.command:
+        argv: "{{ ['python3', _role_dir ~ '/tests/kickstart/check_kickstart.py', item.dir,
+                   _role_dir ~ '/files/kickstart/syncopated.ks', _static_paths | length + 1, item.mode,
+                   _defaults.osbuild_locale, _defaults.osbuild_keyboard, _defaults.osbuild_timezone]
+                  + ([ksvalidator | realpath] if (ksvalidator | length > 0) else []) }}"
+      vars:
+        # Read, not include_vars: included vars would outrank the per-run
+        # osbuild_kickstart_enabled overrides above.
+        _defaults: "{{ lookup('ansible.builtin.file', _role_dir ~ '/defaults/main.yml') | from_yaml }}"
+      loop:
+        - { dir: "{{ _out_on }}", mode: enabled }
+        - { dir: "{{ _out_off }}", mode: disabled }
+      loop_control:
+        label: "{{ item.mode }}"
+      register: _check
+      changed_when: false
+
+    - name: Show check results
+      ansible.builtin.debug:
+        msg: "{{ _check.results | map(attribute='stdout_lines') | flatten }}"
+
+    - name: Write a blueprint that still defines a user
+      ansible.builtin.copy:
+        dest: "{{ _out_conflict }}/conflict-src.toml"
+        mode: "0644"
+        content: |
+          name = "conflict"
+          version = "0.0.1"
+
+          [[customizations.user]]
+          name = "someone"
+
+    - name: Reject a blueprint that conflicts with the kickstart
+      block:
+        - name: Prepare the conflicting blueprint
+          ansible.builtin.include_role:
+            name: "{{ _role_dir }}"
+            tasks_from: blueprint.yml
+          vars:
+            osbuild_output_dir: "{{ _out_conflict }}"
+            osbuild_use_blueprint_template: false
+            osbuild_static_blueprint_path: "{{ _out_conflict }}/conflict-src.toml"
+            osbuild_blueprint_name: conflict
+
+        - name: Conflict was not rejected
+          ansible.builtin.fail:
+            msg: "tasks/blueprint.yml accepted a user table next to the kickstart"
+      rescue:
+        - name: Confirm the conflict assert caused the failure
+          ansible.builtin.assert:
+            that:
+              - "'which image-builder rejects' in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Unexpected failure: {{ ansible_failed_result.msg | default(ansible_failed_result) }}"

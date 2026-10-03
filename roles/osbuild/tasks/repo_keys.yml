@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Fetch PGP gpgkeys for osbuild-composer repositories
+#
+# Supports any URL scheme accepted by ansible.builtin.get_url:
+#   - https://, http://  (remote fetch with cert validation + timeout)
+#   - file://           (local file read; useful for distribution-gpg-keys)
+#
+# Provides:
+#   repo_gpgkeys: {repo_name: pem_content}  in-memory dict, used by fedora-43.json.j2
+#
+# Reliability:
+#   - HTTPS with cert validation (default get_url behavior)
+#   - 30s timeout per fetch
+#   - Content sanity check via assert (must contain '-----END PGP PUBLIC KEY BLOCK-----')
+#   - Fail fast: get_url failures abort the role with the repo name and URL
+#   - Idempotent: default get_url force: false (won't re-download if cached file present)
+#   - Parallel: ansible.cfg forks: 10 — get_url runs concurrently across repos
+
+- name: Fetch gpgkeys for osbuild-composer repositories
+  become: true
+  tags:
+    - repos
+    - gpgkeys
+    - always
+  block:
+    - name: Install distribution-gpg-keys package
+      ansible.builtin.dnf:
+        name: distribution-gpg-keys
+        state: present
+
+    - name: Ensure gpgkey cache directory exists
+      ansible.builtin.file:
+        path: "{{ osbuild_gpgkey_cache_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Verify local gpgkey files exist before fetching
+      ansible.builtin.stat:
+        path: "{{ item.value.gpgkey_url | urlsplit('path') }}"
+      loop: "{{ repo | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - item.value.gpgkey_url is defined
+        - item.value.gpgkey_url | length > 0
+        - item.value.check_gpg | default(true)
+        - item.value.gpgkey_url is match('file://')
+      register: local_gpgkey_stats
+
+    - name: Fail early on missing local gpgkey files
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: >-
+          gpgkey for '{{ item.item.key }}' points at
+          {{ item.item.value.gpgkey_url }}, which does not exist on this
+          host. Install or update the distribution-gpg-keys package, or
+          override the repo's gpgkey_url with a bundled or remote key.
+        success_msg: "Local gpgkey present for '{{ item.item.key }}'"
+      loop: "{{ local_gpgkey_stats.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      when: item is not skipped
+
+    - name: Fetch gpgkey for each repository
+      ansible.builtin.get_url:
+        url: "{{ item.value.gpgkey_url }}"
+        dest: "{{ osbuild_gpgkey_cache_dir }}/{{ item.key }}.gpg"
+        mode: "0644"
+        timeout: 30
+        validate_certs: true
+      loop: "{{ repo | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - item.value.gpgkey_url is defined
+        - item.value.gpgkey_url | length > 0
+        - item.value.check_gpg | default(true)
+      register: gpgkey_fetch_results
+
+    - name: Read fetched gpgkey content
+      ansible.builtin.slurp:
+        src: "{{ osbuild_gpgkey_cache_dir }}/{{ item.key }}.gpg"
+      loop: "{{ repo | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - item.value.gpgkey_url is defined
+        - item.value.gpgkey_url | length > 0
+        - item.value.check_gpg | default(true)
+      register: gpgkey_content
+
+    - name: Assert gpgkey contains valid PGP markers
+      ansible.builtin.assert:
+        that:
+          - item is not failed
+          - item is not skipped
+          - item.content is defined
+          - (item.content | b64decode) is search('-----BEGIN PGP PUBLIC KEY BLOCK-----')
+          - (item.content | b64decode) is search('-----END PGP PUBLIC KEY BLOCK-----')
+        fail_msg: "Fetched gpgkey for '{{ item.item.key }}' is malformed or missing PGP markers"
+        success_msg: "Valid PGP key for '{{ item.item.key }}'"
+      loop: "{{ gpgkey_content.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      when:
+        - item is not skipped
+
+    - name: Build in-memory repo_gpgkeys fact
+      ansible.builtin.set_fact:
+        repo_gpgkeys: "{{ dict(repo_names | zip(repo_pems) | list) }}"
+      vars:
+        repo_names: "{{ gpgkey_content.results | selectattr('skipped', 'undefined') | map(attribute='item.key') | list }}"
+        repo_pems: "{{ gpgkey_content.results | selectattr('skipped', 'undefined') | map(attribute='content') | map('b64decode') | list }}"

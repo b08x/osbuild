@@ -1,0 +1,8 @@
+# RPM Fusion EL publishes updates-only channels (verified 2026-10-01)
+id = "rpmfusion-nonfree-updates"
+name = "RPM Fusion Nonfree Updates for EL 9"
+type = "yum-baseurl"
+url = "http://download1.rpmfusion.org/nonfree/el/updates/9/x86_64/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-el-9"]

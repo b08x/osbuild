@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Component validation - schema, dependency, and conflict checking
+
+- name: Check all components are defined
+  ansible.builtin.assert:
+    that: item in osbuild_component_defs.keys()
+    fail_msg: "Component '{{ item }}' not found in osbuild_component_defs (available: {{ osbuild_component_defs.keys() | join(', ') }})"
+  loop: "{{ osbuild_components }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Check all components have required schema fields
+  ansible.builtin.assert:
+    that:
+      - osbuild_component_defs[item].label is defined
+      - osbuild_component_defs[item].packages is defined
+      - osbuild_component_defs[item].requires is defined
+      - osbuild_component_defs[item].conflicts is defined
+      - osbuild_component_defs[item].size_impact is defined
+      - osbuild_component_defs[item].build_time_impact is defined
+      - osbuild_component_defs[item].secure_boot_compatible is defined
+    fail_msg: "Component '{{ item }}' is missing required schema fields"
+  loop: "{{ osbuild_components }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Build list of selected component conflicts
+  ansible.builtin.set_fact:
+    _selected_conflicts: >-
+      {{
+        _selected_conflicts | default([]) +
+        (osbuild_component_defs[item].conflicts | default([]))
+      }}
+  loop: "{{ osbuild_components }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Check for conflicting components selected together
+  ansible.builtin.assert:
+    that: item not in osbuild_components
+    fail_msg: >
+      Conflict detected: '{{ item }}' is listed as a conflict by one of the
+      selected components but is also in osbuild_components.
+      Remove '{{ item }}' or the component that conflicts with it.
+  loop: "{{ _selected_conflicts | default([]) | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  when: _selected_conflicts | default([]) | length > 0
+
+- name: Check required dependencies are satisfied
+  ansible.builtin.assert:
+    that: >-
+      (osbuild_component_defs[item].requires | default([])) | difference(osbuild_components) | length == 0
+    fail_msg: >-
+      Component '{{ item }}' requires {{ osbuild_component_defs[item].requires | join(', ') }}
+      but missing: {{ (osbuild_component_defs[item].requires | default([])) | difference(osbuild_components) | join(', ') }}.
+      Add the missing components to osbuild_components.
+  loop: "{{ osbuild_components }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Display validated components with metadata
+  ansible.builtin.debug:
+    msg:
+      - "✓ Validated {{ osbuild_components | length }} components: {{ osbuild_components | join(', ') }}"
+      - "Size impacts: {{ osbuild_components | map('extract', osbuild_component_defs) | map(attribute='size_impact') | list | join(', ') }}"
+      - "Build time impacts: {{ osbuild_components | map('extract', osbuild_component_defs) | map(attribute='build_time_impact') | list | join(', ') }}"

@@ -1,0 +1,8 @@
+id = "fedora-nvidia"
+name = "negativo17 - Nvidia"
+type = "yum-baseurl"
+url = "https://negativo17.org/repos/nvidia/fedora-43/x86_64/"
+check_gpg = true
+check_ssl = true
+check_repogpg = false
+system = false

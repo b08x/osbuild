@@ -1,0 +1,8 @@
+id = "rpmfusion-nonfree"
+name = "RPM Fusion Nonfree for Fedora 43"
+type = "yum-metalink"
+url = "https://mirrors.rpmfusion.org/metalink?repo=nonfree-fedora-43&arch=x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://southfront.mm.fcix.net/rpmfusion/nonfree/fedora/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020"]
+

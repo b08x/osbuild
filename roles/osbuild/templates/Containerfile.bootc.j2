@@ -1,0 +1,127 @@
+# {{ ansible_managed }}
+# Containerfile for bootc-based {{ osbuild_blueprint_name }}
+# Components: {{ osbuild_components | join(', ') }}
+#
+# Architecture: Ansible Role Inversion Pattern
+# - Ansible runs AT BUILD TIME (not post-deployment)
+# - Configurations target /usr/etc (vendor defaults) instead of /etc
+# - Multi-stage build separates build tools from runtime image
+
+# =============================================================================
+# Stage 1: Build context (build scripts and Ansible playbooks)
+# =============================================================================
+FROM scratch AS ctx
+COPY build_files /
+
+# =============================================================================
+# Stage 2: Ansible build environment
+# =============================================================================
+# This stage installs ansible-core and runs the build.yml playbook
+# to compile configurations into /usr/etc at build time
+FROM {{ osbuild_bootc_base_image }} AS ansible-builder
+
+# Install ansible-core for build-time configuration compilation
+RUN dnf5 install -y --nodocs ansible-core && \
+    dnf5 clean all
+
+# Copy Ansible playbook and templates
+COPY --from=ctx /build.yml /tmp/ansible/build.yml
+COPY templates/ /tmp/ansible/templates/
+
+# Run Ansible playbook to compile build-time configuration
+# This targets /usr/etc (immutable vendor defaults) instead of /etc
+{% set filtered_defs = {} %}
+{% for c in osbuild_components %}
+{%   if c in osbuild_component_defs %}
+{%     set _ = filtered_defs.update({c: osbuild_component_defs[c]}) %}
+{%   endif %}
+{% endfor %}
+RUN cd /tmp/ansible && \
+    ansible-playbook build.yml \
+      -e '{"osbuild_components":{{ osbuild_components | to_json }},"osbuild_blueprint_name":"{{ osbuild_blueprint_name }}"{% if osbuild_hostname is defined %},"osbuild_hostname":"{{ osbuild_hostname }}"{% endif %},"osbuild_component_defs":{{ filtered_defs | to_json }}}' \
+      -v
+
+# =============================================================================
+# Stage 3: Main runtime image
+# =============================================================================
+FROM {{ osbuild_bootc_base_image }}
+
+# Copy build-time compiled configurations from ansible-builder stage
+COPY --from=ansible-builder /usr/etc /usr/etc
+COPY --from=ansible-builder /usr/lib/systemd /usr/lib/systemd
+
+# Copy image-builder configuration (disk/installer)
+# The unified image-builder CLI looks for these in /usr/lib/image-builder/bootc/
+RUN mkdir -p /usr/lib/image-builder/bootc
+COPY --from=ctx /disk.toml /usr/lib/image-builder/bootc/config.toml
+COPY --from=ctx /iso.toml /usr/lib/image-builder/bootc/iso.toml
+
+# Image metadata
+LABEL org.opencontainers.image.title="{{ osbuild_blueprint_name }}" \
+      org.opencontainers.image.description="{{ osbuild_blueprint_description }}" \
+      org.opencontainers.image.version="{{ osbuild_blueprint_version }}" \
+      com.redhat.bootc.build="true" \
+      com.redhat.bootc.ansible-inverted="true"
+
+# =============================================================================
+# Make /opt immutable (required for some packages like docker-desktop, chrome)
+# =============================================================================
+# Some bootable images have /opt symlinked to /var/opt to make it mutable.
+# However, packages that write to /opt during installation will have their
+# files wiped on bootc deploy. Making /opt immutable prevents this.
+
+RUN rm -rf /opt && mkdir -p /opt
+
+# =============================================================================
+# Run customizations
+# =============================================================================
+# Mount build context, use caching for faster rebuilds, run build script
+RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=tmpfs,dst=/tmp \
+    /ctx/build.sh
+
+{% if 'nvidia' in osbuild_components %}
+# =============================================================================
+# NVIDIA CDI (Container Device Interface) Setup
+# =============================================================================
+# Create NVIDIA CDI generation script for Podman GPU access
+RUN cat > /usr/local/bin/nvidia-cdi-generate.sh << 'EOFSCRIPT'
+{% include 'snippets/nvidia-cdi.sh.j2' %}
+
+EOFSCRIPT
+
+RUN chmod +x /usr/local/bin/nvidia-cdi-generate.sh
+
+# NOTE: NVIDIA CDI systemd service is now templated at build-time by Ansible
+# into /usr/lib/systemd/system/ (vendor units) - see files/bootc/build.yml
+# Enable NVIDIA CDI service
+RUN systemctl enable nvidia-cdi-refresh.service
+
+{% endif %}
+{% if 'nvidia' in osbuild_components %}
+# =============================================================================
+# Kernel parameters (if customizations needed)
+# =============================================================================
+# Note: Kernel parameters should be set via bootc configuration or GRUB
+# For NVIDIA, blacklist nouveau driver:
+# rd.driver.blacklist=nouveau modprobe.blacklist=nouveau nvidia-drm.modeset=1
+{% endif %}
+
+# =============================================================================
+# Verify final image
+# =============================================================================
+# bootc container lint checks for common issues
+# NOTE: Disabled because we intentionally use /usr/etc for Ansible Role Inversion pattern
+# bootc considers /usr/etc an implementation detail, but we use it for immutable vendor configs
+# RUN bootc container lint
+
+# =============================================================================
+# Metadata
+# =============================================================================
+# Set working directory
+WORKDIR /root
+
+# Default command
+CMD ["/bin/bash"]

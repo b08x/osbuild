@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: MIT-0
+---
+# vars file for osbuild — Rocky Linux
+#
+# Rocky Linux uses CRB (CodeReady Builder) + EPEL instead of RPM Fusion —
+# the same EL topology as AlmaLinux, differing only in mirror URLs and
+# release keys. BaseOS/AppStream baseurls are taken verbatim from the
+# upstream osbuild/images registry (data/repositories/rocky-{9,10}.json,
+# https://github.com/osbuild/images); CRB follows the same documented
+# tree layout at https://dl.rockylinux.org (verified 2026-10-01).
+#
+# GPG key strategy:
+#   - Prefer file:// URLs to /usr/share/distribution-gpg-keys/ when bundled
+#   - Use https:// URLs for keys not bundled (fetched at build time by repo_keys.yml)
+#   - Omit gpgkey_url for repos with check_gpg: false
+
+repo:
+  # BaseOS/AppStream per upstream osbuild/images rocky-{9,10}.json;
+  # CRB per the dl.rockylinux.org pub tree layout (citations.md item 6).
+  rocky-baseos:
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/BaseOS/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    check_gpg: true
+  rocky-appstream:
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/AppStream/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    check_gpg: true
+  rocky-crb:
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/CRB/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    check_gpg: true
+  # EPEL builds for all RHEL-compatible clones; Rocky resolves epel-release
+  # from its extras repository (https://docs.fedoraproject.org/en-US/epel/,
+  # citations.md item 8).
+  epel:
+    baseurl: "https://mirror.us.leaseweb.net/epel/{{ _distro_major_version }}/Everything/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/epel/RPM-GPG-KEY-EPEL-{{ _distro_major_version }}"
+    check_gpg: true
+  # RPM Fusion for EL only publishes an "updates" channel — el/releases/{9,10}
+  # and el/nvidia-driver/{9,10} both 404 upstream, so those repos are omitted
+  # here rather than defined against a dead URL. RPM Fusion paths and keys
+  # are keyed by major version (el/updates/9), not point release; the keys
+  # use the "-el-<major>" naming from distribution-gpg-keys, not Fedora's
+  # "-fedora-2020" keys. Same situation as AlmaLinux 10
+  # (roles/osbuild/vars/AlmaLinux.yml, citations.md item 10).
+  rpmfusion-free-updates:
+    baseurl: "http://download1.rpmfusion.org/free/el/updates/{{ _distro_major_version }}/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-el-{{ _distro_major_version }}"
+    check_gpg: true
+  rpmfusion-nonfree-updates:
+    baseurl: "http://download1.rpmfusion.org/nonfree/el/updates/{{ _distro_major_version }}/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-el-{{ _distro_major_version }}"
+    check_gpg: true
+  # NVIDIA publishes dnf repos at .../cuda/repos/rhel{9,10}/x86_64/ and
+  # supports Rocky Linux as a target (https://developer.nvidia.com/cuda-downloads,
+  # citations.md item 11). The gpgkey FILENAME DIFFERS per major version:
+  # the rhel9 repo ships D42D0685.pub (CDF6BA43.pub 404s there) while the
+  # rhel10 repo ships CDF6BA43.pub — both verified live 2026-10-01.
+  cuda-el9-x86_64:
+    baseurl: "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/{{ osbuild_arch }}"
+    gpgkey_url: "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/{{ osbuild_arch }}/D42D0685.pub"
+    check_gpg: true
+  cuda-el10-x86_64:
+    baseurl: "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/{{ osbuild_arch }}"
+    gpgkey_url: "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/{{ osbuild_arch }}/CDF6BA43.pub"
+    check_gpg: true
+  # Container toolkit repo is distro-agnostic
+  # (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+  nvidia-container-toolkit:
+    baseurl: "https://nvidia.github.io/libnvidia-container/stable/rpm/{{ osbuild_arch }}"
+    gpgkey_url: "https://nvidia.github.io/libnvidia-container/gpgkey"
+    check_gpg: true
+  # Docker CE publishes EL repos at .../linux/centos/{9,10}/...; works on
+  # RHEL-compatible clones (https://docs.docker.com/engine/install/,
+  # citations.md item 12).
+  docker-ce-stable:
+    baseurl: "https://download.docker.com/linux/centos/{{ _distro_major_version }}/{{ osbuild_arch }}/stable"
+    gpgkey_url: "https://download.docker.com/linux/centos/gpg"
+    check_gpg: true
+  # VS Code / Google Chrome: distro-agnostic yum repos, identical to the
+  # Alma paths (citations.md item 13).
+  vscode:
+    baseurl: "https://packages.microsoft.com/yumrepos/vscode"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/microsoft/microsoft.asc"
+    check_gpg: true
+  google-chrome:
+    baseurl: "http://dl.google.com/linux/chrome/rpm/stable/x86_64"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/google/linux_signing_key.pub"
+    check_gpg: true

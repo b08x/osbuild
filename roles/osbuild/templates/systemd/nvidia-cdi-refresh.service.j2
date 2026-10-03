@@ -1,0 +1,17 @@
+[Unit]
+Description=Generate NVIDIA CDI specification for Podman
+Documentation=https://github.com/NVIDIA/nvidia-container-toolkit
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/usr/bin/nvidia-ctk
+ConditionPathExists=/usr/local/bin/nvidia-cdi-generate.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nvidia-cdi-generate.sh
+RemainAfterExit=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

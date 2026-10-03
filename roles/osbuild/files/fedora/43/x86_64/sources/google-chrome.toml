@@ -1,0 +1,7 @@
+id = "google-chrome"
+name = "Google Chrome"
+type = "yum-baseurl"
+url = "http://dl.google.com/linux/chrome/rpm/stable/x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://dl.google.com/linux/linux_signing_key.pub"]

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# yadm stub: repo lives at $HOME/.local/share/yadm/repo.git like real yadm.
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "yadm $*"
+repo="$HOME/.local/share/yadm/repo.git"
+case ${1:-} in
+  introspect) [[ ${2:-} == repo ]] && echo "$repo" ;;
+  clone)
+    [[ ${YADM_CLONE_RC:-0} -eq 0 ]] || exit "$YADM_CLONE_RC"
+    mkdir -p "$repo"
+    ;;
+  bootstrap) exit "${YADM_BOOTSTRAP_RC:-0}" ;;
+esac
+exit 0

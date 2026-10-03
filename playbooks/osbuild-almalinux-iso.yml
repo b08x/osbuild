@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Build the AlmaLinux 10.2 workstation ISO installer on tinybot.
+#
+# Uses the static, pre-verified blueprint at
+# roles/osbuild/files/almalinux/10/x86_64/workstation/almalinux-10-2-workstation.toml
+# rather than the dynamic Jinja2 template — that blueprint's package list was
+# checked package-by-package against live AlmaLinux 10 / EPEL 10 / RPM Fusion
+# EL 10 repodata and intentionally excludes sway (no EPEL 10 build).
+#
+# tinybot is itself AlmaLinux 10, so it builds its own distro's installer.
+
+- name: Build AlmaLinux 10.2 workstation ISO installer
+  hosts: tinybot
+  become: true
+  gather_facts: false
+  vars:
+    # image-builder 52.1 (installed on tinybot) only ships distro definitions
+    # up to almalinux-10.2 — `image-builder list` has no almalinux-10.3 entry
+    # yet, so 10.2 is what's actually buildable today.
+    osbuild_distro: "almalinux-10.2"
+    osbuild_arch: "x86_64"
+
+    osbuild_blueprint_name: "almalinux-10-2-workstation"
+    osbuild_blueprint_version: "1.0.0"
+    osbuild_blueprint_description: "AlmaLinux Workstation 10.2"
+
+    # Static blueprint, not the Jinja2 template — the file already has its
+    # full package list and customizations baked in.
+    osbuild_use_blueprint_template: false
+    osbuild_static_blueprint_path: "files/almalinux/10/x86_64/workstation/almalinux-10-2-workstation.toml"
+
+    # Build mode: traditional ISO, not bootc. The role default
+    # (osbuild_only_generate: true) writes the blueprint and
+    # build-<blueprint>.sh; pass -e osbuild_only_generate=false to build here.
+    # "minimal-installer" is Fedora-only in image-builder; AlmaLinux only
+    # exposes image-installer/network-installer (confirmed via
+    # `image-builder list | grep almalinux-10.2` on tinybot).
+    osbuild_build_bootc: false
+    osbuild_image_type: image-installer
+
+    # Components only drive --extra-repo sources and gpgkey fetching here
+    # (the static blueprint already carries its own packages); anaconda is
+    # required for an installer ISO.
+    osbuild_components:
+      - base
+      - anaconda
+      - development
+      - container-tools
+
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+    # _git_commit is set in pre_tasks: short HEAD hash of this repo, with a
+    # "-dirty" suffix when the working tree has uncommitted changes.
+    osbuild_output_filename: "almalinux-10-2-workstation-{{ _git_commit }}.iso"
+
+    osbuild_build_retries: 1
+    osbuild_extra_repo_urls: []
+
+  pre_tasks:
+    # Lookups run on the controller; set_fact evaluates this once, so every
+    # role task sees the same image name.
+    - name: Set image name commit
+      ansible.builtin.set_fact:
+        _git_commit: >-
+          {{ lookup('ansible.builtin.pipe',
+             'git -C ' ~ (playbook_dir | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*"') }}
+      tags: ["always"]
+
+    - name: Gather facts as unprivileged connection user
+      ansible.builtin.setup:
+      become: false
+      tags: ["always"]
+
+    - name: Verify build host is AlmaLinux
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "AlmaLinux"
+          - ansible_distribution_major_version == "10"
+        fail_msg: >-
+          This playbook builds the AlmaLinux 10.2 blueprint and must run on an
+          AlmaLinux 10 host. Detected: {{ ansible_distribution }}
+          {{ ansible_distribution_version }}.
+        success_msg: "Target distribution '{{ ansible_distribution }} {{ ansible_distribution_version }}' is supported."
+
+  roles:
+    - role: osbuild

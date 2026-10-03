@@ -1,0 +1,9 @@
+# CRB follows the documented dl.rockylinux.org pub tree layout; upstream
+# osbuild/images ships BaseOS/AppStream only (verified 2026-10-01)
+id = "rocky-crb"
+name = "Rocky Linux 9 - CRB"
+type = "yum-baseurl"
+url = "https://dl.rockylinux.org/pub/rocky/9/CRB/x86_64/os/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-9"]

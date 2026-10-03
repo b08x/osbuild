@@ -1,0 +1,7 @@
+id = "cuda-fedora43-x86_64"
+name = "cuda-fedora43-x86_64"
+type = "yum-baseurl"
+url = "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64/1940C73E.pub"]

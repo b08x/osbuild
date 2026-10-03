@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "intel-graphics" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "Intel media driver and firmware (RPM Fusion Nonfree)"
+repo_urls:
+  - "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64"
+services: []
+kernel_args: []
+packages:
+  - "intel-media-driver"
+  - "intel-audio-firmware"
+  - "intel-gmmlib"
+  - "intel-gpu-firmware"
+  - "intel-vpl-gpu-rt"
+  - "intel-vsc-firmware"

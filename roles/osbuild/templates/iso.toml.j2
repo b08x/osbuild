@@ -1,0 +1,31 @@
+# {{ ansible_managed }}
+# ISO configuration for bootc installer builds
+# Used by bootc-image-builder for {{ osbuild_blueprint_name }}
+# Based on Universal Blue pattern
+
+# =============================================================================
+# Anaconda Installer Configuration
+# =============================================================================
+
+[customizations.installer.kickstart]
+contents = """
+# Kickstart for bootc installer
+# The installer payload is embedded in the ISO and handled by bootc-image-builder
+"""
+
+[customizations.installer.modules]
+# Enable required Anaconda modules
+enable = [
+  "org.fedoraproject.Anaconda.Modules.Storage",
+  "org.fedoraproject.Anaconda.Modules.Runtime",
+  "org.fedoraproject.Anaconda.Modules.Network",
+  "org.fedoraproject.Anaconda.Modules.Security",
+  "org.fedoraproject.Anaconda.Modules.Services",
+  "org.fedoraproject.Anaconda.Modules.Users",
+  "org.fedoraproject.Anaconda.Modules.Timezone"
+]
+
+# Disable unnecessary modules
+disable = [
+  "org.fedoraproject.Anaconda.Modules.Subscription"
+]

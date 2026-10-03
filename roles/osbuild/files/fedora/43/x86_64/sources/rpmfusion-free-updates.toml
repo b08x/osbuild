@@ -1,0 +1,8 @@
+id = "rpmfusion-free-updates"
+name = "RPM Fusion Free Updates for Fedora 43"
+type = "yum-metalink"
+url = "https://mirrors.rpmfusion.org/metalink?repo=free-fedora-updates-released-43&arch=x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://us.mirrors.cicku.me/rpmfusion/free/fedora/RPM-GPG-KEY-rpmfusion-free-fedora-2020"]
+

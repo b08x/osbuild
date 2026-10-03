@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# findmnt stub. Mounts from $FINDMNT_MAP (lines: MOUNTPOINT SOURCE).
+[ "$1" = -no ] && [ "$2" = SOURCE ] || { echo "findmnt stub: unexpected args: $*" >&2; exit 2; }
+src=$(awk -v m="$3" '$1 == m { print $2 }' "$FINDMNT_MAP")
+[ -n "$src" ] || exit 1
+echo "$src"

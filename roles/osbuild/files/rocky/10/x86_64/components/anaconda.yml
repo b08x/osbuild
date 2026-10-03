@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "anaconda" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "Anaconda installer environment"
+repo_urls: []
+services: []
+kernel_args: []
+packages:
+  - "anaconda"
+  - "anaconda-dracut"
+  - "anaconda-gui"
+  - "dracut-live"
+  - "dracut-network"

@@ -1,0 +1,9 @@
+id = "epel"
+name = "Extra Packages for Enterprise Linux 10 - x86_64"
+type = "yum-baseurl"
+url = "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = [
+    "file:///usr/share/distribution-gpg-keys/epel/RPM-GPG-KEY-EPEL-10",
+]

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT-0
+galaxy_info:
+  author: b08x
+  description: Custom image builder for Fedora, AlmaLinux, and Rocky Linux workstations using image-builder CLI
+  company: b08x
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Fedora
+      versions:
+        - "43"
+    - name: AlmaLinux
+      versions:
+        - "8"
+        - "9"
+        - "10"
+    - name: EL # Enterprise Linux clones (Rocky 9/10, others)
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - osbuild
+    - image
+    - builder
+    - workstation
+    - bootc
+    - iso
+    - fedora
+    - almalinux
+    - rocky
+
+dependencies: []

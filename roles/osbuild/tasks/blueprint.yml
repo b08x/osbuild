@@ -1,0 +1,202 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint preparation for image-builder-cli (stateless)
+
+- name: Decide whether the blueprint is composed from components
+  ansible.builtin.set_fact:
+    _osbuild_use_components: "{{ osbuild_blueprint_components | length > 0 }}"
+
+- name: Render blueprint from Jinja2 template
+  ansible.builtin.template:
+    src: "{{ osbuild_blueprint_template }}"
+    dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
+    mode: "0644"
+    backup: true
+  when: osbuild_use_blueprint_template | bool and not _osbuild_use_components
+
+- name: Render blueprint from components
+  ansible.builtin.template:
+    src: blueprint-components.toml.j2
+    dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
+    mode: "0644"
+    backup: true
+  when: _osbuild_use_components
+
+- name: Copy static blueprint file
+  ansible.builtin.copy:
+    src: "{{ osbuild_static_blueprint_path }}"
+    dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
+    mode: "0644"
+    backup: true
+  when: not osbuild_use_blueprint_template | bool and not _osbuild_use_components
+
+- name: Set blueprint file path
+  ansible.builtin.set_fact:
+    blueprint_file_path: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
+
+# The first-login splash lives once in files/firstboot/ and is appended to
+# every blueprint here, after the copy/template step, so static and templated
+# blueprints carry identical bytes. TOML ''' literal strings need no escaping
+# but cannot contain ''' themselves.
+- name: Inject first-login splash files
+  when: osbuild_firstboot_enabled | bool
+  vars:
+    _osbuild_firstboot_files:
+      - { src: syncopated-firstboot, path: /usr/local/bin/syncopated-firstboot, mode: "0755" }
+      - { src: syncopated-firstboot-launcher, path: /usr/local/bin/syncopated-firstboot-launcher, mode: "0755" }
+      - { src: syncopated-firstboot.desktop, path: /etc/xdg/autostart/syncopated-firstboot.desktop, mode: "0644" }
+  block:
+    - name: Assert first-login files fit in TOML literal strings
+      ansible.builtin.assert:
+        that: "\"'''\" not in lookup('ansible.builtin.file', 'firstboot/' ~ item.src, rstrip=false)"
+        fail_msg: "files/firstboot/{{ item.src }} contains ''' and cannot be embedded in a TOML literal string"
+        quiet: true
+      loop: "{{ _osbuild_firstboot_files }}"
+      loop_control:
+        label: "{{ item.src }}"
+
+    - name: Append first-login files to blueprint
+      ansible.builtin.blockinfile:
+        path: "{{ blueprint_file_path }}"
+        marker: "# {mark} syncopated-firstboot"
+        block: "{{ lookup('ansible.builtin.template', 'firstboot-files.toml.j2') }}"
+        insertafter: EOF
+
+# The Flathub remote is shipped as a flatpakrepo file (files/flatpak/), which
+# flatpak imports as a system remote, plus the flatpak package itself.
+- name: Inject Flathub system remote
+  when: osbuild_flathub_enabled | bool
+  block:
+    - name: Assert Flathub repo file fits in a TOML literal string
+      ansible.builtin.assert:
+        that: "\"'''\" not in lookup('ansible.builtin.file', 'flatpak/flathub.flatpakrepo', rstrip=false)"
+        fail_msg: "files/flatpak/flathub.flatpakrepo contains ''' and cannot be embedded in a TOML literal string"
+        quiet: true
+
+    - name: Append Flathub remote to blueprint
+      ansible.builtin.blockinfile:
+        path: "{{ blueprint_file_path }}"
+        marker: "# {mark} syncopated-flathub"
+        block: "{{ lookup('ansible.builtin.template', 'flathub-remote.toml.j2') }}"
+        insertafter: EOF
+
+- name: Append release file to blueprint
+  ansible.builtin.blockinfile:
+    path: "{{ blueprint_file_path }}"
+    marker: "# {mark} syncopated-release"
+    block: "{{ lookup('ansible.builtin.template', 'release-file.toml.j2') }}"
+    insertafter: EOF
+  when: osbuild_release_file_enabled | bool
+
+# The installer kickstart lives once in files/kickstart/ and is appended the
+# same way. image-builder rejects user-supplied kickstart contents next to
+# [[customizations.user]], [[customizations.group]], unattended or
+# sudo-nopasswd, so a blueprint that still carries them fails here instead of
+# deep inside the build.
+- name: Inject installer kickstart
+  when: osbuild_kickstart_enabled | bool
+  block:
+    - name: Read prepared blueprint
+      ansible.builtin.slurp:
+        src: "{{ blueprint_file_path }}"
+      register: _osbuild_blueprint_raw
+
+    - name: Assert blueprint has no settings that conflict with a kickstart
+      ansible.builtin.assert:
+        that: _osbuild_kickstart_conflicts | length == 0
+        fail_msg: >-
+          {{ blueprint_file_path }} contains {{ _osbuild_kickstart_conflicts | join(', ') }},
+          which image-builder rejects next to [customizations.installer.kickstart].
+          Remove them or set osbuild_kickstart_enabled: false.
+        quiet: true
+      vars:
+        _osbuild_kickstart_conflicts: >-
+          {{ _osbuild_blueprint_raw.content | b64decode
+             | regex_findall('(?m)^\s*(\[\[customizations\.(?:user|group)\]\]|unattended|sudo-nopasswd)(?=\s|=|$)')
+             | unique }}
+
+    - name: Assert kickstart partitioning mode is known
+      ansible.builtin.assert:
+        that: osbuild_kickstart_partitioning in ['auto', 'interactive']
+        fail_msg: "osbuild_kickstart_partitioning must be auto or interactive, got '{{ osbuild_kickstart_partitioning }}'"
+        quiet: true
+
+    - name: Assert kickstart disk layout variables are sane
+      when: osbuild_kickstart_partitioning == 'auto'
+      ansible.builtin.assert:
+        that:
+          - _layout | map('string') | select('match', '^[0-9]+$') | list | length == _layout | length
+          - osbuild_kickstart_root_percent | int + osbuild_kickstart_reserve_percent | int < 100
+          - osbuild_kickstart_usr_percent | int > 0
+          - osbuild_kickstart_usr_percent | int < 100
+          - osbuild_kickstart_root_min_gib | int > 0
+          - osbuild_kickstart_disk_min_gib | int > osbuild_kickstart_root_min_gib | int
+        fail_msg: >-
+          osbuild_kickstart_* layout values must be non-negative integers,
+          root_percent + reserve_percent below 100, usr_percent between 1 and 99,
+          and disk_min_gib above root_min_gib. Got {{ _layout }}.
+        quiet: true
+      vars:
+        _layout:
+          - "{{ osbuild_kickstart_disk_min_gib }}"
+          - "{{ osbuild_kickstart_root_percent }}"
+          - "{{ osbuild_kickstart_root_min_gib }}"
+          - "{{ osbuild_kickstart_reserve_percent }}"
+          - "{{ osbuild_kickstart_usr_percent }}"
+          - "{{ osbuild_kickstart_usr_max_gib }}"
+          - "{{ osbuild_kickstart_var_max_gib }}"
+          - "{{ osbuild_kickstart_home_min_gib }}"
+
+    - name: Assert kickstart fits in a TOML literal string
+      ansible.builtin.assert:
+        that: "\"'''\" not in lookup('ansible.builtin.file', osbuild_kickstart_file, rstrip=false)"
+        fail_msg: "files/{{ osbuild_kickstart_file }} contains ''' and cannot be embedded in a TOML literal string"
+        quiet: true
+
+    - name: Append installer kickstart to blueprint
+      ansible.builtin.blockinfile:
+        path: "{{ blueprint_file_path }}"
+        marker: "# {mark} syncopated-kickstart"
+        block: "{{ lookup('ansible.builtin.template', 'kickstart.toml.j2') }}"
+        insertafter: EOF
+
+- name: Append passwordless sudo for wheel to blueprint
+  ansible.builtin.blockinfile:
+    path: "{{ blueprint_file_path }}"
+    marker: "# {mark} syncopated-sudoers"
+    block: "{{ lookup('ansible.builtin.template', 'kickstart-sudoers.toml.j2') }}"
+    insertafter: EOF
+  when: osbuild_kickstart_sudoers | bool
+
+- name: Display blueprint path
+  ansible.builtin.debug:
+    msg: "Blueprint ready: {{ blueprint_file_path }}"
+
+# Exit 3 means no TOML parser (Python < 3.11 without python3-tomli): the check
+# is skipped. Any other non-zero exit is a parse error and fails the play.
+- name: TOML syntax check
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import sys
+        try:
+            import tomllib as toml
+        except ImportError:
+            try:
+                import tomli as toml
+            except ImportError:
+                sys.exit(3)
+        with open(sys.argv[1], "rb") as f:
+            toml.load(f)
+      - "{{ blueprint_file_path }}"
+  register: _osbuild_toml_check
+  changed_when: false
+  failed_when: _osbuild_toml_check.rc not in [0, 3]
+
+- name: Report TOML syntax check
+  ansible.builtin.debug:
+    msg: >-
+      {{ '✓ Blueprint TOML syntax is valid' if _osbuild_toml_check.rc == 0
+         else '⚠ TOML validation skipped (no tomllib or python3-tomli)' }}

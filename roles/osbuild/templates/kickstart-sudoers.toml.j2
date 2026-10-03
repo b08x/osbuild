@@ -1,0 +1,9 @@
+# Passwordless sudo for wheel. Anaconda's "Make this user administrator" adds
+# the user to wheel; image-builder rejects sudo-nopasswd next to a kickstart.
+
+[[customizations.files]]
+path = "/etc/sudoers.d/90-wheel-nopasswd"
+mode = "0440"
+data = '''
+%wheel ALL=(ALL) NOPASSWD: ALL
+'''

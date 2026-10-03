@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Build execution for image-builder
+
+- name: Display build configuration
+  ansible.builtin.debug:
+    msg: |
+      Starting build for blueprint: {{ osbuild_blueprint_name }}
+      Image type: {{ osbuild_image_type }}
+      Distribution: {{ osbuild_distro }}
+      Timeout: {{ osbuild_build_timeout }} seconds
+      Output directory: {{ osbuild_output_dir }}
+
+- name: Initialize build status
+  ansible.builtin.set_fact:
+    build_status: "RUNNING"
+
+- name: Execute image-builder build
+  block:
+    - name: Build extra-repo flags
+      ansible.builtin.set_fact:
+        extra_repo_flags: >-
+          {%- for url in osbuild_extra_repo_urls | default([]) -%}
+          --extra-repo "{{ url }}"{% if not loop.last %} {% endif %}{%- endfor -%}
+
+    - name: Display build command
+      ansible.builtin.debug:
+        msg: |
+          image-builder build {{ osbuild_image_type }} \
+            --distro {{ osbuild_distro }} \
+            --blueprint {{ osbuild_blueprint_name }}.toml \
+            --extra-repo "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64" \
+            {{ extra_repo_flags }}
+      when: osbuild_verbose | bool
+
+    - name: Run image-builder with repository sources
+      ansible.builtin.shell: >
+        image-builder build {{ osbuild_image_type }}
+        --distro {{ osbuild_distro }}
+        --blueprint {{ osbuild_blueprint_name }}.toml \
+        {{ extra_repo_flags }}
+      args:
+        chdir: "{{ osbuild_output_dir }}"
+        executable: /bin/bash
+      register: image_build_exec
+      become: true
+      async: "{{ osbuild_build_timeout }}"
+      poll: 30
+      changed_when: false
+
+    - name: Set build status to finished
+      ansible.builtin.set_fact:
+        build_status: "FINISHED"
+
+  rescue:
+    # Shape 2 (real recovery): this records state and writes the failure report
+    # rather than swallowing. The 'Finalize build failure' task at the end of
+    # this file re-raises on build_status == FAILED, so the play still fails.
+    - name: Set build status to failed
+      ansible.builtin.set_fact:
+        build_status: "FAILED"
+
+    - name: Capture failure logs
+      ansible.builtin.copy:
+        content: |
+          Build Failure Report
+          ====================
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Blueprint: {{ osbuild_blueprint_name }}
+          Image Type: {{ osbuild_image_type }}
+          Distribution: {{ osbuild_distro }}
+          Status: FAILED
+
+          STDOUT:
+          {{ image_build_exec.stdout | default('No stdout captured') }}
+
+          STDERR:
+          {{ image_build_exec.stderr | default('No stderr captured') }}
+        dest: "{{ osbuild_log_dir }}/build-failure-{{ ansible_date_time.epoch }}.log"
+        mode: "0644"
+        backup: true
+      when: osbuild_keep_logs | bool
+
+- name: Handle successful build
+  when: build_status == "FINISHED"
+  block:
+    - name: Display success message
+      ansible.builtin.debug:
+        msg: "Build completed successfully."
+
+    - name: Find generated image file
+      ansible.builtin.find:
+        paths: "{{ osbuild_output_dir }}"
+        patterns: "*.iso,*.qcow2,*.img"
+        recurse: true
+        depth: 2
+      register: image_files
+
+    - name: Verify image exists
+      ansible.builtin.assert:
+        that:
+          - image_files.files | length > 0
+        fail_msg: "Image build reported success but no image file was found"
+
+    - name: Rename image to friendly name
+      ansible.builtin.copy:
+        src: "{{ (image_files.files | sort(attribute='mtime', reverse=true) | first).path }}"
+        dest: "{{ osbuild_output_dir }}/{{ osbuild_output_filename }}"
+        mode: "0644"
+        remote_src: true
+        backup: true
+      when: image_files.files | length > 0
+
+    - name: Get image file info
+      ansible.builtin.stat:
+        path: "{{ osbuild_output_dir }}/{{ osbuild_output_filename }}"
+      register: final_image
+
+    - name: Display build summary
+      ansible.builtin.debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║              BUILD COMPLETED SUCCESSFULLY                      ║
+          ╚════════════════════════════════════════════════════════════════╝
+
+          Blueprint: {{ osbuild_blueprint_name }}
+          Image Type: {{ osbuild_image_type }}
+          Distribution: {{ osbuild_distro }}
+
+          Output File: {{ osbuild_output_dir }}/{{ osbuild_output_filename }}
+          Image Size: {{ (final_image.stat.size / 1024 / 1024 / 1024) | round(2) }} GB
+
+- name: Finalize build failure
+  when: build_status == "FAILED"
+  ansible.builtin.fail:
+    msg: |
+      Image build failed.
+      Check logs at {{ osbuild_log_dir }}/build-failure-*.log for details.

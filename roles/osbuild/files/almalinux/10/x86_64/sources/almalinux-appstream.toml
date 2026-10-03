@@ -1,0 +1,7 @@
+id = "almalinux-appstream"
+name = "AlmaLinux 10 - AppStream"
+type = "yum-metalink"
+url = "https://mirrors.almalinux.org/metalink?repo=appstream-10&arch=x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-10"]

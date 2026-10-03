@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "gnome-desktop" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "GNOME desktop on Wayland"
+repo_urls: []
+services:
+  - "gdm"
+kernel_args: []
+packages:
+  - "@graphical-admin-tools"
+  - "NetworkManager-l2tp-gnome"
+  - "NetworkManager-libreswan-gnome"
+  - "NetworkManager-openconnect-gnome"
+  - "NetworkManager-openvpn-gnome"
+  - "bluez"
+  - "bolt"
+  - "fprintd-pam"
+  - "gdm"
+  - "gnome-keyring-pam"
+  - "gnome-online-accounts"
+  - "gnome-session-wayland-session"
+  - "gnome-software"
+  - "gnome-text-editor"
+  - "gnome-tweaks"
+  - "gvfs"
+  - "gvfs-smb"
+  - "kitty"
+  - "nautilus"
+  - "pinentry-gnome3"
+  - "wl-clipboard"
+  - "xdg-desktop-portal"
+  - "xdg-desktop-portal-gtk"
+  - "xorg-x11-server-Xwayland"
+  - "yad"

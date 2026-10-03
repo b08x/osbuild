@@ -1,0 +1,7 @@
+id ="docker-ce-stable"
+name = "Docker CE Stable"
+type = "yum-baseurl"
+url = "https://download.docker.com/linux/fedora/43/x86_64/stable"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://download.docker.com/linux/fedora/gpg"]

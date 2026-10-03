@@ -1,0 +1,8 @@
+id = "updates"
+name = "Fedora 43 - x86_64 - Updates"
+type = "yum-metalink"
+url = "https://mirrors.fedoraproject.org/metalink?repo=updates-released-f43&arch=x86_64"
+check_gpg = false
+check_ssl = true
+check_repogpg = false
+system = false

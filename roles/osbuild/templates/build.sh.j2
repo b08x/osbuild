@@ -1,0 +1,217 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Build script for {{ osbuild_blueprint_name }} bootc image
+# Components: {{ osbuild_components | join(', ') }}
+
+set -ouex pipefail
+
+# =============================================================================
+# Repository Bootstrap — Install Third-Party Repos Before Packages
+# =============================================================================
+# Components define their required sources. Before installing any packages,
+# we install the release RPMs for each required third-party repository.
+# Standard RPMFusion repos are common to all builds.
+
+echo "Bootstrapping third-party repositories..."
+
+# --- Common: RPMFusion (free + nonfree) ---
+# RPMFusion release packages install the .repo files under /etc/yum.repos.d/
+# dnf5 install -y --nodocs rpmfusion-free-release rpmfusion-nonfree-release
+
+# --- Component-specific repository setup ---
+{% set ns = namespace(dnf_repos=[], copr_repos=[]) %}
+{% for c in osbuild_components %}
+{%   if c in osbuild_component_defs %}
+{%     set comp = osbuild_component_defs[c] %}
+{%     if not (comp.blueprint_only is defined and comp.blueprint_only) %}
+{%       if comp.bootc_repos is defined and comp.bootc_repos | length > 0 %}
+{%         set ns.dnf_repos = ns.dnf_repos + comp.bootc_repos %}
+{%       endif %}
+{%       if comp.copr_repos is defined and comp.copr_repos | length > 0 %}
+{%         set ns.copr_repos = ns.copr_repos + comp.copr_repos %}
+{%       endif %}
+{%     endif %}
+{%   endif %}
+{% endfor %}
+
+{% for repo in ns.dnf_repos | unique %}
+{{ repo }}
+{% endfor %}
+
+{% if ns.copr_repos | length > 0 %}
+# Install dnf5-plugins-core for COPR support if not present
+dnf5 install -y dnf5-plugins-core
+{% for repo in ns.copr_repos | unique %}
+echo "Enabling COPR repo: {{ repo }}..."
+dnf5 copr enable -y {{ repo }}
+{% endfor %}
+{% endif %}
+
+echo "Repository bootstrap complete."
+
+# =============================================================================
+# Repository Priority — Ensure Base Repos Have Priority Over Third-Party
+# =============================================================================
+# Fedora base repos get highest priority (0). Third-party repos get lower
+# priority so that Fedora packages always win on name conflicts.
+
+# =============================================================================
+# Package Installation — Component-Driven
+# =============================================================================
+# Each selected component installs its packages via dnf5.
+# Components with blueprint_only=true are skipped for bootc builds.
+
+echo "Components to process: {{ osbuild_components | join(', ') }}"
+
+{% set ns2 = namespace(bootc=[]) %}
+{% for c in osbuild_components %}
+{%   if c in osbuild_component_defs %}
+{%     if not (osbuild_component_defs[c].blueprint_only | default(false)) %}
+{%       set ns2.bootc = ns2.bootc + [c] %}
+{%     endif %}
+{%   else %}
+echo "Warning: Component '{{ c }}' not found in osbuild_component_defs, skipping..."
+{%   if c == '[' or c == ']' or c == "'" or c == '"' or c == ',' %}
+echo "Note: It looks like osbuild_components might have been passed as a string instead of a list."
+{%   endif %}
+{%   endif %}
+{% endfor %}
+{% set bootc_components = ns2.bootc %}
+
+{% for c in bootc_components %}
+{% set comp = osbuild_component_defs[c] %}
+{% if comp.packages is defined and comp.packages | length > 0 %}
+# -----------------------------------------------------------------------------
+# {{ comp.label }}
+# -----------------------------------------------------------------------------
+echo "Installing {{ comp.label | lower }}..."
+dnf5 install -y --nodocs {{ comp.packages | join(' ') }}
+
+{% endif %}
+{% endfor %}
+
+# =============================================================================
+# Flatpak Installation — Component-Driven
+# =============================================================================
+{% set flatpak_ns = namespace(apps=[]) %}
+{% for c in bootc_components %}
+{% if osbuild_component_defs[c].flatpaks is defined %}
+{% set flatpak_ns.apps = flatpak_ns.apps + osbuild_component_defs[c].flatpaks %}
+{% endif %}
+{% endfor %}
+
+{% if flatpak_ns.apps | length > 0 %}
+echo "Installing system Flatpaks..."
+# Ensure flatpak and flathub are configured
+dnf5 install -y flatpak
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+{% for app in flatpak_ns.apps | unique %}
+echo "Installing {{ app }}..."
+flatpak install -y flathub {{ app }}
+{% endfor %}
+{% endif %}
+
+# =============================================================================
+# User Configuration
+# =============================================================================
+
+echo "Configuring user: {{ osbuild_user_name }}..."
+
+# Create the user if it doesn't exist
+if ! id "{{ osbuild_user_name }}" &>/dev/null; then
+    # Add user with a safe fallback shell first
+    useradd -m -s /bin/bash \
+        -c "{{ osbuild_user_description }}" \
+        "{{ osbuild_user_name }}"
+
+    # Set password if provided
+    if [ -n '{{ osbuild_user_password }}' ]; then
+        echo '{{ osbuild_user_name }}:{{ osbuild_user_password }}' | chpasswd -e
+    fi
+fi
+
+# Attempt to set preferred shell to ZSH if it exists
+if [ -x /usr/bin/zsh ]; then
+    usermod -s /usr/bin/zsh "{{ osbuild_user_name }}"
+fi
+
+# Add user to groups one-by-one, only if the group exists
+{% for group in osbuild_user_groups %}
+if getent group "{{ group }}" >/dev/null; then
+    echo "Adding {{ osbuild_user_name }} to group: {{ group }}"
+    usermod -aG "{{ group }}" "{{ osbuild_user_name }}"
+else
+    echo "Warning: group '{{ group }}' does not exist, skipping..."
+fi
+{% endfor %}
+
+# Configure sudoers
+echo '{{ osbuild_user_name }} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/99-user
+chmod 0440 /etc/sudoers.d/99-user
+
+# Add SSH key if provided
+if [ -n '{{ osbuild_user_ssh_key }}' ]; then
+    mkdir -p "/home/{{ osbuild_user_name }}/.ssh"
+    cat > "/home/{{ osbuild_user_name }}/.ssh/authorized_keys" << 'EOFSSH'
+{{ osbuild_user_ssh_key }}
+EOFSSH
+    chown -R '{{ osbuild_user_name }}:{{ osbuild_user_name }}' "/home/{{ osbuild_user_name }}/.ssh"
+    chmod 700 "/home/{{ osbuild_user_name }}/.ssh"
+    chmod 600 "/home/{{ osbuild_user_name }}/.ssh/authorized_keys"
+fi
+
+# =============================================================================
+# Service Management
+# =============================================================================
+
+{% if osbuild_bootc_enable_podman_socket %}
+echo "Enabling Podman socket..."
+systemctl enable podman.socket
+{% endif %}
+
+{% if 'nvidia' in osbuild_components %}
+# NVIDIA CDI service is enabled in Containerfile
+echo "NVIDIA CDI service will be enabled (see Containerfile)"
+{% endif %}
+
+{% set svc_ns = namespace(services=[]) %}
+{% for c in bootc_components %}
+{% if osbuild_component_defs[c].services is defined %}
+{% set svc_ns.services = svc_ns.services + osbuild_component_defs[c].services %}
+{% endif %}
+{% endfor %}
+
+{% for service in svc_ns.services | unique %}
+systemctl enable {{ service }}
+{% endfor %}
+
+# =============================================================================
+# Graphical Target Configuration
+# =============================================================================
+if systemctl list-unit-files | grep -qE "^(gdm|lightdm|sddm)\.service"; then
+    echo "Display manager detected. Setting default target to graphical.target..."
+    systemctl set-default graphical.target
+    # Move the symlink to /usr/lib/systemd/system/ to make it immutable (vendor default)
+    if [ -L /etc/systemd/system/default.target ]; then
+        ln -sf /usr/lib/systemd/system/graphical.target /usr/lib/systemd/system/default.target
+        rm /etc/systemd/system/default.target
+    fi
+fi
+
+# =============================================================================
+# DNF Cleanup
+# =============================================================================
+echo "Cleaning up DNF cache..."
+dnf5 clean all
+
+# =============================================================================
+# Verification
+# =============================================================================
+echo "Build script completed successfully!"
+echo "Image: {{ osbuild_blueprint_name }}"
+echo "Base: {{ osbuild_bootc_base_image }}"
+{% for c in bootc_components %}
+{% set comp = osbuild_component_defs[c] %}
+echo "{{ comp.label }}: Enabled"
+{% endfor %}

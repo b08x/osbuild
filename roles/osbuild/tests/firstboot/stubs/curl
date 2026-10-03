@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# curl stub: exit codes come from the $CURL_QUEUE file (default 0). On
+# success it writes a yadm wrapper that delegates to the yadm stub.
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "curl $*"
+rc=$(stub_pop "${CURL_QUEUE:-/nonexistent}") || rc=0
+if [[ $rc -ne 0 ]]; then
+  echo "curl: (6) Could not resolve host: github.com" >&2
+  exit "$rc"
+fi
+out=
+while [[ $# -gt 0 ]]; do
+  [[ $1 == -o ]] && { out=$2; shift; }
+  shift
+done
+[[ -n $out ]] || exit 2
+printf '#!/usr/bin/env bash\nexec "%s/yadm" "$@"\n' "${STUB_DIR:?}" >"$out"

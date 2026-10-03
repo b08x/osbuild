@@ -1,0 +1,271 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Main task orchestration for osbuild role
+# Explicit mode-selection structure with one create/import entry point.
+
+- name: Starting osbuild tasks
+  ansible.builtin.debug:
+    msg: "Starting osbuild tasks"
+  tags: ["always"]
+
+- name: Display role execution banner
+  ansible.builtin.debug:
+    msg: |
+      ╔════════════════════════════════════════════════════════════════╗
+      ║          OSBuild Custom Image Builder Role                     ║
+      ║          {{ ansible_distribution }} Image Generation            ║
+      ╚════════════════════════════════════════════════════════════════╝
+
+      Configuration:
+      - Blueprint: {{ osbuild_blueprint_name }}
+      - Distribution: {{ osbuild_distro }}
+      - Build Mode: {{ 'bootc Container Image' if osbuild_build_bootc else 'Traditional ISO (' + osbuild_image_type + ')' }}
+      - Components: {{ osbuild_components | join(', ') }}
+      {% if not osbuild_build_bootc %}
+      - Image Type: {{ osbuild_image_type }}
+      {% else %}
+      - bootc Base Image: {{ osbuild_bootc_base_image }}
+      - Build Disk Image: {{ osbuild_bootc_build_disk_image | default(false) }}
+      {% endif %}
+
+  tags: ["osbuild"]
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - osbuild_blueprint_name is defined
+      - osbuild_blueprint_name | length > 0
+      - osbuild_distro is defined
+      - osbuild_image_type is defined
+      - osbuild_output_dir is defined
+    fail_msg: "Required variables are not properly defined. Check defaults/main.yml"
+    success_msg: "Configuration validation passed"
+
+  tags: ["osbuild"]
+- name: Check operating system compatibility
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "RedHat"
+      - ansible_distribution in ["Fedora", "AlmaLinux", "Rocky"]
+    fail_msg: |
+      This role requires Fedora, AlmaLinux, or Rocky Linux as the build host.
+      Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}
+    success_msg: "Running on {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+  tags: ["osbuild"]
+- name: Load distribution-specific repository variables
+  ansible.builtin.include_vars:
+    file: "vars/{{ ansible_distribution }}.yml"
+
+  tags: ["osbuild"]
+- name: Load package taxonomy
+  ansible.builtin.include_vars:
+    # role_path (not playbook_dir): this file lives in the collection's own
+    # vars/packages/, two levels above roles/osbuild/, regardless of which
+    # playbook or directory depth invoked this role. Keyed by the build
+    # target (osbuild_distro), not the host, so cross-distro builds get the
+    # target's package names.
+    file: "{{ role_path }}/../../vars/packages/{{ osbuild_target_distribution }}.yml"
+
+  tags: ["osbuild"]
+- name: Resolve build mode
+  ansible.builtin.import_tasks: select_build_mode.yml
+  tags:
+    - always
+
+- name: Fetch gpgkeys for image-builder repositories
+  ansible.builtin.import_tasks: repo_keys.yml
+
+  tags: ["osbuild"]
+- name: Validate component selection
+  ansible.builtin.import_tasks: validate_components.yml
+  tags:
+    - always
+
+- name: Compute aggregated sources from selected components
+  ansible.builtin.set_fact:
+    osbuild_component_sources: >
+      {%- set ns = namespace(sources=[]) -%}
+      {%- for c in osbuild_components -%}
+      {%-   if c in osbuild_component_defs and osbuild_component_defs[c].sources is defined -%}
+      {%-     set ns.sources = ns.sources + osbuild_component_defs[c].sources -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ ns.sources | unique | list }}
+  tags:
+    - always
+
+- name: Load blueprint components
+  ansible.builtin.import_tasks: components.yml
+  when: osbuild_blueprint_components | length > 0
+  tags:
+    - always
+
+- name: Phase 1 - Infrastructure Setup
+  tags:
+    - always
+  block:
+    - name: Display phase
+      ansible.builtin.debug:
+        msg: "=== Phase 1: Infrastructure Setup ==="
+
+    - name: Import infrastructure provisioning tasks
+      ansible.builtin.import_tasks: install.yml
+      tags:
+        - install
+        - setup
+
+- name: Phase 2 - Repository Configuration
+  tags:
+    - always
+  block:
+    - name: Display phase
+      ansible.builtin.debug:
+        msg: "=== Phase 2: Repository Source Configuration ==="
+
+    - name: Import repository source tasks
+      ansible.builtin.import_tasks: sources.yml
+      tags:
+        - sources
+        - repos
+
+- name: MODE bootc_image
+  when: osbuild_resolved_build_mode == 'bootc_image'
+  tags:
+    - always
+  block:
+    - name: Import bootc workflow tasks
+      ansible.builtin.import_tasks: bootc.yml
+      tags:
+        - bootc
+        - container
+
+    - name: Set build status to finished
+      ansible.builtin.set_fact:
+        build_status: "FINISHED"
+      tags:
+        - always
+
+- name: MODE generate_only
+  when: osbuild_resolved_build_mode == 'generate_only'
+  tags:
+    - always
+  block:
+    - name: Import blueprint management tasks
+      ansible.builtin.import_tasks: blueprint.yml
+      tags:
+        - blueprint
+
+    - name: Write image-builder build script
+      ansible.builtin.template:
+        src: image-builder-build.sh.j2
+        dest: "{{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh"
+        mode: "0755"
+
+    - name: Display configuration-only mode
+      ansible.builtin.debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║              IMAGE BUILD CONFIGURATION GENERATED               ║
+          ╚════════════════════════════════════════════════════════════════╝
+
+          Blueprint:    {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml
+          Build script: {{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh
+
+          To build the image, run on {{ inventory_hostname }}:
+
+            bash {{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh
+
+          To build inside the play instead, pass -e osbuild_only_generate=false.
+
+    - name: Set build status to generated
+      ansible.builtin.set_fact:
+        build_status: "GENERATED"
+      tags:
+        - always
+
+- name: MODE traditional_iso
+  when: osbuild_resolved_build_mode == 'traditional_iso'
+  tags:
+    - always
+  block:
+    - name: Display phase
+      ansible.builtin.debug:
+        msg: "=== Phase 3: Blueprint Preparation ==="
+
+    - name: Import blueprint management tasks
+      ansible.builtin.import_tasks: blueprint.yml
+      tags:
+        - blueprint
+
+    - name: Import image build tasks
+      ansible.builtin.import_tasks: build.yml
+      tags:
+        - build
+        - compose
+
+    - name: Build retry logic
+      when: osbuild_build_retries | int > 0 and build_status != "FINISHED"
+      block:
+        - name: Wait before retry
+          ansible.builtin.pause:
+            seconds: 60
+
+        - name: Retry build
+          ansible.builtin.import_tasks: build.yml
+
+      rescue:
+        - name: All retries exhausted
+          ansible.builtin.fail:
+            msg: "Build failed after {{ osbuild_build_retries }} retries"
+
+    - name: Set build status to finished
+      ansible.builtin.set_fact:
+        build_status: "FINISHED"
+      tags:
+        - always
+
+- name: Display completion summary
+  ansible.builtin.debug:
+    msg: |
+      ╔════════════════════════════════════════════════════════════════╗
+      ║              OSBuild Role Execution Complete                   ║
+      ╚════════════════════════════════════════════════════════════════╝
+
+      Blueprint: {{ osbuild_blueprint_name }}
+      Status: {{ build_status | default('UNKNOWN') }}
+
+      {% if build_status == 'FINISHED' %}
+      Image Location: {{ osbuild_output_dir }}/{{ osbuild_output_filename }}
+
+      Verification Steps:
+      1. Check image integrity:
+         sha256sum {{ osbuild_output_dir }}/{{ osbuild_output_filename }}
+
+      2. Test in virtual machine:
+         virt-install --name test-{{ osbuild_blueprint_name }} \
+           --memory 4096 --vcpus 2 \
+           --disk size=40 \
+           --cdrom {{ osbuild_output_dir }}/{{ osbuild_output_filename }} \
+           --os-variant fedora{{ osbuild_distro | regex_replace('fedora-', '') }}
+
+      3. Flash to USB (for physical hardware):
+         sudo dd if={{ osbuild_output_dir }}/{{ osbuild_output_filename }} \
+           of=/dev/sdX bs=4M status=progress oflag=sync
+
+      {% elif build_status == 'GENERATED' %}
+      Configuration ready in: {{ osbuild_output_dir }}
+      Blueprint: {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml
+
+      To build, run on {{ inventory_hostname }}:
+        bash {{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh
+
+      {% else %}
+      Build did not complete successfully.
+      Check logs at: {{ osbuild_log_dir }}
+      {% endif %}
+
+      Build Output:
+      Blueprint: {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml
+      Final Image: {{ osbuild_output_dir }}/{{ osbuild_output_filename }}
+  tags:
+    - always

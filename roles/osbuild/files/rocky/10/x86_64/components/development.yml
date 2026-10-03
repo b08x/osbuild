@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "development" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "Compilers, language toolchains and -devel packages"
+# rbenv and ruby-build-rbenv are EPEL 10 packages (verified 2026-10-03);
+# nodejs and nodejs-npm are AppStream. Rocky 10 has no package named "npm".
+repo_urls:
+  - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+services: []
+kernel_args: []
+packages:
+  - "@development"
+  - "@rpm-development-tools"
+  - "bats"
+  - "btrfs-progs-devel"
+  - "cargo"
+  - "chromium-headless"
+  - "gcc"
+  - "gcc-c++"
+  - "golang"
+  - "lm_sensors-devel"
+  - "nodejs"
+  - "nodejs-npm"
+  - "postgresql-server"
+  - "postgresql-contrib"
+  - "pgvector"
+  - "rbenv"
+  - "ruby-build-rbenv"
+  - "ruby-devel"

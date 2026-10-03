@@ -1,0 +1,108 @@
+---
+# SPDX-License-Identifier: MIT-0
+# Distribution-specific package name mappings
+# This file defines package name differences between Fedora, RHEL, AlmaLinux, and Rocky
+# Usage: {{ package_bag.core.kernel | distro_map(osbuild_distro) }}
+
+# =============================================================================
+# Distribution Mapping Function (Jinja2 helper)
+# =============================================================================
+# This is a helper that can be used in templates to map package names
+# based on the target distribution.
+#
+# Usage in templates:
+#   {{ package_bag.core.kernel | distro_map(osbuild_distro) | join(' ') }}
+#
+# The distro_map filter is defined in the osbuild role's main.yml as:
+#   distro_map: "{{ package_mappings | default({}) | get(distro, package) }}"
+
+package_mappings:
+  # Kernel packages
+  kernel:
+    fedora: kernel
+    rhel: kernel
+    almalinux: kernel
+    rocky: kernel
+  kernel-devel:
+    fedora: kernel-devel
+    rhel: kernel-devel
+    almalinux: kernel-devel
+    rocky: kernel-devel
+  kernel-headers:
+    fedora: kernel-headers
+    rhel: kernel-headers
+    almalinux: kernel-headers
+    rocky: kernel-headers
+  kernel-modules:
+    fedora: kernel-modules
+    rhel: kernel-modules
+    almalinux: kernel-modules
+    rocky: kernel-modules
+  kernel-modules-core:
+    fedora: kernel-modules-core
+    rhel: kernel-modules-core
+    almalinux: kernel-modules-core
+    rocky: kernel-modules-core
+  kernel-modules-extra:
+    fedora: kernel-modules-extra
+    rhel: kernel-modules-extra
+    almalinux: kernel-modules-extra
+    rocky: kernel-modules-extra
+
+  # Ansible packages
+  ansible:
+    fedora: ansible
+    rhel: ansible-core
+    almalinux: ansible-core
+    rocky: ansible-core
+  linux-system-roles:
+    fedora: linux-system-roles
+    rhel: rhel-system-roles
+    almalinux: rhel-system-roles
+    rocky: rhel-system-roles
+
+  # Networking packages
+  NetworkManager-config-connectivity:
+    fedora: NetworkManager-config-connectivity-fedora
+    rhel: NetworkManager-config-connectivity-redhat
+    almalinux: NetworkManager-config-connectivity-redhat
+    rocky: NetworkManager-config-connectivity-redhat
+
+  # NVIDIA packages
+  nvidia-driver:
+    fedora: nvidia-driver
+    rhel: kmod-nvidia
+    almalinux: kmod-nvidia
+    rocky: kmod-nvidia
+
+  # Audio packages
+  pipewire-jack:
+    fedora: pipewire-jack-audio-connection-kit
+    rhel: pipewire-jack-audio-connection-kit
+    almalinux: pipewire-jack-audio-connection-kit
+    rocky: pipewire-jack-audio-connection-kit
+
+# =============================================================================
+# Distribution-specific repository names
+# =============================================================================
+repo_mappings:
+  rpmfusion-free:
+    fedora: rpmfusion-free-release
+    rhel: rpmfusion-free-release
+    almalinux: rpmfusion-free-release
+    rocky: rpmfusion-free-release
+  rpmfusion-nonfree:
+    fedora: rpmfusion-nonfree-release
+    rhel: rpmfusion-nonfree-release
+    almalinux: rpmfusion-nonfree-release
+    rocky: rpmfusion-nonfree-release
+
+# =============================================================================
+# Distribution-specific group names
+# =============================================================================
+group_mappings:
+  c-development:
+    fedora: c-development
+    rhel: development-tools
+    almalinux: development-tools
+    rocky: development-tools

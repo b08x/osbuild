@@ -1,0 +1,8 @@
+# NVIDIA Container Toolkit repo is distro-agnostic (verified 2026-10-01)
+id = "nvidia-container-toolkit"
+name = "NVIDIA Container Toolkit"
+type = "yum-baseurl"
+url = "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://nvidia.github.io/libnvidia-container/gpgkey"]

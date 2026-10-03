@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: MIT-0
+---
+# vars file for osbuild
+#
+# Repository gpgkey strategy (refactored 2026-06-06):
+#   - Prefer file:// URLs to /usr/share/distribution-gpg-keys/ when the key is bundled there
+#     (installed by the `distribution-gpg-keys` package, which is signed by the Fedora release key)
+#   - Use https:// URLs for repos whose keys are not bundled (current keys fetched at build time)
+#   - Omit gpgkey_url for repos with check_gpg: false (e.g., antigravity-rpm)
+#
+# Keys are fetched at build time by roles/osbuild/tasks/repo_keys.yml.
+# Each key is verified to contain a valid '-----END PGP PUBLIC KEY BLOCK-----' marker before use.
+#
+# To verify a key URL: curl -sSL -o /dev/null -w "%{http_code}\n" <url>
+# To inspect the key content: curl -sSL <url> | head -5
+# See trackboi card card-should-refactor-gpgkeys-to-runtime-url-fetch-eli-1snigie
+# for the URL verification log and the distribution-gpg-keys package inventory.
+
+repo:
+  fedora:
+    metalink: "https://mirrors.fedoraproject.org/metalink?repo=fedora-43&arch=x86_64"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/fedora/RPM-GPG-KEY-fedora-43-primary"
+    check_gpg: true
+  updates:
+    metalink: "https://mirrors.fedoraproject.org/metalink?repo=updates-released-f43&arch=x86_64"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/fedora/RPM-GPG-KEY-fedora-43-primary"
+    check_gpg: true
+  rpmfusion-free:
+    baseurl: "http://download1.rpmfusion.org/free/fedora/releases/43/Everything/x86_64/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-fedora-43"
+    check_gpg: true
+  rpmfusion-nonfree:
+    baseurl: "http://download1.rpmfusion.org/nonfree/fedora/releases/43/Everything/x86_64/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-fedora-43"
+    check_gpg: true
+  rpmfusion-free-updates:
+    baseurl: "http://download1.rpmfusion.org/free/fedora/updates/43/x86_64/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-fedora-43"
+    check_gpg: true
+  rpmfusion-nonfree-updates:
+    baseurl: "http://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-fedora-43"
+    check_gpg: true
+  rpmfusion-nonfree-nvidia-driver:
+    baseurl: "http://download1.rpmfusion.org/nonfree/fedora/nvidia-driver/43/x86_64/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020"
+    check_gpg: true
+  intel_oneAPI:
+    baseurl: "https://yum.repos.intel.com/oneapi/"
+    gpgkey_url: "https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB"
+    check_gpg: true
+  cuda-fedora43-x86_64:
+    baseurl: "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64"
+    gpgkey_url: "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64/1940C73E.pub"
+    check_gpg: true
+  nvidia-container-toolkit:
+    baseurl: "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
+    gpgkey_url: "https://nvidia.github.io/libnvidia-container/gpgkey"
+    check_gpg: true
+  docker-ce-stable:
+    baseurl: "https://download.docker.com/linux/fedora/43/x86_64/stable"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/docker/fedora.gpg"
+    check_gpg: true
+  vscode:
+    baseurl: "https://packages.microsoft.com/yumrepos/vscode"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/microsoft/microsoft.asc"
+    check_gpg: true
+  antigravity-rpm:
+    baseurl: "https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm"
+    check_gpg: false
+  yadm:
+    baseurl: "https://download.opensuse.org/repositories/home:/TheLocehiliosan:/yadm/Fedora_43/"
+    gpgkey_url: "https://download.opensuse.org/repositories/home:/TheLocehiliosan:/yadm/Fedora_43/repodata/repomd.xml.key"
+    check_gpg: true
+  google-chrome:
+    baseurl: "http://dl.google.com/linux/chrome/rpm/stable/x86_64"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/google/linux_signing_key.pub"
+    check_gpg: true

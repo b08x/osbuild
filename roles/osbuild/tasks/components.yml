@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Load blueprint component files (osbuild_blueprint_components) and derive the
+# merged package, service, kernel-argument, repo-URL and fragment lists that
+# templates/blueprint-components.toml.j2 renders.
+
+- name: Load blueprint component files
+  ansible.builtin.set_fact:
+    _osbuild_bp_components: >-
+      {{ _osbuild_bp_components | default({})
+         | combine({item: lookup('ansible.builtin.file', osbuild_components_dir ~ '/' ~ item ~ '.yml') | from_yaml}) }}
+  loop: "{{ osbuild_blueprint_components }}"
+
+- name: Assert component files have the required fields
+  ansible.builtin.assert:
+    that:
+      - _osbuild_bp_components[item] is mapping
+      - _osbuild_bp_components[item].packages | default([]) | length > 0
+      - _osbuild_bp_components[item].label is defined
+    fail_msg: "{{ osbuild_components_dir }}/{{ item }}.yml needs a label and a non-empty packages list"
+    quiet: true
+  loop: "{{ osbuild_blueprint_components }}"
+
+- name: Merge component data
+  ansible.builtin.set_fact:
+    _osbuild_bp_packages: >-
+      {{ (osbuild_blueprint_components | map('extract', _osbuild_bp_components, 'packages') | flatten | list
+          + (osbuild_extra_packages | default([]))) | unique | list }}
+    _osbuild_bp_services: >-
+      {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+         | map(attribute='services', default=[]) | flatten | unique | list }}
+    _osbuild_bp_kernel_args: >-
+      {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+         | map(attribute='kernel_args', default=[]) | flatten | unique | list }}
+    _osbuild_bp_fragments: >-
+      {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+         | map(attribute='fragment', default='') | select | unique | list }}
+    osbuild_extra_repo_urls: >-
+      {{ ((osbuild_extra_repo_urls | default([]))
+          + (osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+             | map(attribute='repo_urls', default=[]) | flatten | list)) | unique | list }}

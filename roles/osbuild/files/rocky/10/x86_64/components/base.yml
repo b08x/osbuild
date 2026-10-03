@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "base" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "Base system: kernel, networking, CLI tools, ansible runtime"
+# fastfetch, fd-find, ... come from EPEL 10
+repo_urls:
+  - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+services:
+  - "sshd"
+  - "NetworkManager"
+  - "firewalld"
+  - "chronyd"
+kernel_args: []
+packages:
+  - "@headless-management"
+  - "@system-tools"
+  - "NetworkManager"
+  - "ansible-core"
+  - "ansible-collection-ansible-posix"
+  - "aria2"
+  - "bash"
+  - "bind-utils"
+  - "btrfs-progs"
+  - "chrony"
+  - "coreutils"
+  - "dracut"
+  - "dracut-config-rescue"
+  - "efi-filesystem"
+  - "erofs-utils"
+  - "fastfetch"
+  - "fd-find"
+  - "firewalld"
+  - "fwupd"
+  - "fwupd-efi"
+  - "fzf"
+  - "gum"
+  - "htop"
+  - "kernel"
+  - "kernel-devel"
+  - "kernel-headers"
+  - "kernel-modules"
+  - "kernel-modules-core"
+  - "kernel-modules-extra"
+  - "kernel-tools"
+  - "kernel-tools-libs"
+  - "rhel-system-roles"
+  - "lnav"
+  - "micro"
+  - "net-tools"
+  - "nfs-utils"
+  - "plymouth-system-theme"
+  - "polkit"
+  - "python3-firewall"
+  - "ranger"
+  - "rsync"
+  - "tar"
+  - "tuned"
+  - "tuned-ppd"
+  - "uv"
+  - "zsh"
+  - "yq"

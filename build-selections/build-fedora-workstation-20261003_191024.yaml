@@ -1,0 +1,44 @@
+---
+# OSBuild Package Selection Manifest
+metadata:
+  generated_at: '2026-10-03T23:10:24.408039+00:00'
+  distro: Fedora
+  blueprint: workstation
+  total_packages: 20
+  total_groups: 0
+  total_flatpaks: 0
+  selected_components:
+    - System/base
+    - System/kernel
+    - System/networking
+build_specification:
+  distro: Fedora
+  blueprint_name: workstation
+  packages: &id001
+    - NetworkManager
+    - NetworkManager-config-connectivity-fedora
+    - bash
+    - bind-utils
+    - chrony
+    - cifs-utils
+    - coreutils
+    - erofs-utils
+    - firewalld
+    - kernel
+    - kernel-devel
+    - kernel-headers
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+    - kernel-tools
+    - kernel-tools-libs
+    - nbd
+    - rsync
+    - tar
+  groups: []
+  flatpaks: []
+  package_pins: {}
+ansible_vars:
+  osbuild_distro: fedora-43
+  osbuild_blueprint_name: workstation
+  osbuild_extra_packages: *id001

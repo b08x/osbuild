@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "cockpit" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "Cockpit web console"
+repo_urls: []
+services: []
+kernel_args: []
+packages:
+  - "cockpit"
+  - "cockpit-bridge"
+  - "cockpit-machines"
+  - "cockpit-podman"
+  - "cockpit-packagekit"
+  - "cockpit-storaged"
+  - "cockpit-ws"
+  - "cockpit-ws-selinux"

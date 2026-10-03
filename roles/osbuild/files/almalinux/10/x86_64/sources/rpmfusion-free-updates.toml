@@ -1,0 +1,7 @@
+id = "rpmfusion-free-updates"
+name = "RPM Fusion Free Updates for EL 10"
+type = "yum-baseurl"
+url = "http://download1.rpmfusion.org/free/el/updates/10/x86_64/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-el-10"]

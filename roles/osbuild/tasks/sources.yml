@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Repository source preparation
+# Build repo URL list from vars/Fedora.yml repo definitions
+
+- name: Build extra repository URLs from component sources
+  # Union with any caller-provided osbuild_extra_repo_urls rather than
+  # clobbering them — playbooks that pass explicit extra repos (e.g. the
+  # NVIDIA variant's CUDA EL10 / container-toolkit URLs) must survive this
+  # aggregation. Sources absent from the `repo` dictionary are silently
+  # skipped (documented pitfall); explicit URLs bypass that dictionary.
+  ansible.builtin.set_fact:
+    osbuild_extra_repo_urls: >-
+      {%- set ns = namespace(urls=osbuild_extra_repo_urls | default([]) | list) -%}
+      {%- for s in osbuild_sources -%}
+      {%-   if s in repo -%}
+      {%-     if repo[s].metalink is defined -%}
+      {%-       set ns.urls = ns.urls + [repo[s].metalink] -%}
+      {%-     elif repo[s].baseurl is defined -%}
+      {%-       set ns.urls = ns.urls + [repo[s].baseurl] -%}
+      {%-     endif -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ ns.urls | unique | list }}
+
+- name: Display repository URLs
+  ansible.builtin.debug:
+    msg: |
+      Repository sources configured: {{ osbuild_extra_repo_urls | length }}
+      {% for url in osbuild_extra_repo_urls %}
+      - {{ url }}
+      {% endfor %}

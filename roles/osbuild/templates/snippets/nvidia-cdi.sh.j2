@@ -1,0 +1,28 @@
+#!/bin/bash
+# Generate NVIDIA CDI specification for Podman container GPU access
+# This script waits for NVIDIA device nodes to appear before generating CDI config
+
+set -euo pipefail
+
+timeout=30
+echo "Waiting for NVIDIA device nodes..."
+
+while [ $timeout -gt 0 ]; do
+  if [ -e /dev/nvidia0 ]; then
+    echo "NVIDIA device found, generating CDI specification..."
+    mkdir -p /etc/cdi
+    nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    echo "CDI specification generated successfully at /etc/cdi/nvidia.yaml"
+    exit 0
+  fi
+  sleep 1
+  ((timeout--))
+done
+
+echo "ERROR: NVIDIA device not found after 30 seconds" >&2
+echo "This may indicate:" >&2
+echo "  - NVIDIA driver not loaded" >&2
+echo "  - No NVIDIA GPU present" >&2
+echo "  - Driver compilation failed" >&2
+exit 1
+

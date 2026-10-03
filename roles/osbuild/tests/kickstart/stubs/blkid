@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# blkid stub. Labels from $BLKID_MAP (lines: LABEL DEVICE).
+[ "$1" = -L ] || { echo "blkid stub: unexpected args: $*" >&2; exit 2; }
+dev=$(awk -v l="$2" '$1 == l { print $2 }' "$BLKID_MAP")
+[ -n "$dev" ] || exit 2
+echo "$dev"

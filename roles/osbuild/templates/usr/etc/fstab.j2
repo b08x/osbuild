@@ -1,0 +1,20 @@
+# /etc/fstab
+# Created by Ansible during build for {{ variant }} variant
+
+# Root filesystem
+UUID=root-uuid	/	{{ distro | replace('fedora-', '') | lower }}	defaults	0	0
+
+# Home filesystem
+UUID=home-uuid	/home	{{ distro | replace('fedora-', '') | lower }}	defaults	0	2
+
+# Var filesystem
+UUID=var-uuid	/var	{{ distro | replace('fedora-', '') | lower }}	defaults	0	2
+
+# Boot filesystem
+UUID=boot-uuid	/boot	ext4	defaults	0	2
+
+# EFI filesystem
+UUID=efi-uuid	/boot/efi	vfat	umask=0077,shortname=winnt	0	2
+
+# Swap
+UUID=swap-uuid	none	swap	sw	0	0

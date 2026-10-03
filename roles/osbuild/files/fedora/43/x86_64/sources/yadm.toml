@@ -1,0 +1,7 @@
+id = "home_TheLocehiliosan_yadm"
+name = "Yet Another Dotfiles Manager (Fedora_43)"
+type = "yum-baseurl"
+url = "https://download.opensuse.org/repositories/home:/TheLocehiliosan:/yadm/Fedora_43/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://download.opensuse.org/repositories/home:/TheLocehiliosan:/yadm/Fedora_43/repodata/repomd.xml.key"]

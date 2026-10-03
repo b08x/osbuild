@@ -1,0 +1,13 @@
+# Flathub system remote (roles/osbuild/files/flatpak/flathub.flatpakrepo).
+# Injected into every prepared blueprint by tasks/blueprint.yml; edit the
+# source file, not this. flatpak imports each *.flatpakrepo in
+# /etc/flatpak/remotes.d as a system remote, the same result as
+# `flatpak remote-add --system flathub <url>`, without network at install.
+# flatpak itself comes from the blueprint's desktop groups; [[packages]]
+# cannot be added here because blueprints define packages as an inline array.
+
+[[customizations.files]]
+path = "/etc/flatpak/remotes.d/flathub.flatpakrepo"
+mode = "0644"
+data = '''
+{{ lookup('ansible.builtin.file', 'flatpak/flathub.flatpakrepo', rstrip=false) }}'''

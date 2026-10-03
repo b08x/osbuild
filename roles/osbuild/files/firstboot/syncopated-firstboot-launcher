@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# syncopated-firstboot-launcher: XDG autostart entry point. Opens a terminal
+# that runs syncopated-firstboot as the logged-in user, unless that user's
+# marker file exists. The script asks for elevated rights itself only for
+# the one system change it makes.
+
+set -u
+
+marker=${XDG_STATE_HOME:-$HOME/.local/state}/syncopated/firstboot.done
+script=${SYNCOPATED_FIRSTBOOT:-/usr/local/bin/syncopated-firstboot}
+
+[[ -e $marker ]] && exit 0
+[[ ${EUID:-$(id -u)} -ne 0 ]] || exit 0
+
+cmd="$(printf '%q' "$script"); read -rp 'Press Enter to close…' _"
+
+for term in xdg-terminal-exec ptyxis kgx gnome-terminal kitty foot alacritty xterm; do
+    command -v "$term" >/dev/null 2>&1 || continue
+    case $term in
+        kitty) exec "$term" --start-as fullscreen bash -c "$cmd" ;;
+        xdg-terminal-exec | foot) exec "$term" bash -c "$cmd" ;;
+        ptyxis) exec ptyxis --new-window -- bash -c "$cmd" ;;
+        kgx | gnome-terminal) exec "$term" -- bash -c "$cmd" ;;
+        alacritty | xterm) exec "$term" -e bash -c "$cmd" ;;
+    esac
+done
+
+echo "syncopated-firstboot-launcher: no terminal emulator found; run $script manually." >&2
+exit 1

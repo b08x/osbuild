@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Rocky Linux 10.2 workstation ISO installer (NVIDIA), interactive
+# partitioning variant.
+#
+# Identical to osbuild-rocky-iso-nvidia.yml (same static blueprint, extra
+# repos and build host) except for the installer kickstart:
+# osbuild_kickstart_partitioning: interactive embeds
+# files/kickstart/syncopated-interactive.ks, which has no %pre disk selection
+# and no storage commands. Anaconda's Installation Destination screen then
+# has to be completed by the user, next to Root Password and User Creation.
+#
+# Uses its own blueprint name so its blueprint, build script and ISO do not
+# overwrite the automatic-partitioning variant's in osbuild_output_dir:
+#
+#   ansible-playbook playbooks/osbuild-rocky-iso-nvidia-interactive.yml
+#   bash /var/tmp/osbuild-images/build-rocky-10-2-workstation-nvidia-interactive.sh
+#
+# See osbuild-rocky-iso-nvidia.yml for the repository and host notes.
+
+- name: Build Rocky Linux 10.2 workstation ISO installer (NVIDIA, interactive partitioning)
+  hosts: builder
+  become: true
+  gather_facts: false
+  vars:
+    # Must match a name `image-builder list` reports; major-only "rocky-10"
+    # is not a known distro. image-builder 84 on gir ships rocky-10.0/10.1/10.2
+    # image-installer for x86_64.
+    osbuild_distro: "rocky-10.2"
+    osbuild_arch: "x86_64"
+
+    osbuild_blueprint_name: "rocky-10-2-workstation-nvidia-interactive"
+    osbuild_blueprint_version: "1.0.0"
+    osbuild_blueprint_description: "Rocky Linux Workstation 10.2 (NVIDIA, interactive partitioning)"
+
+    # Leave disk selection and layout to Anaconda's Installation Destination
+    # screen instead of the %pre script.
+    osbuild_kickstart_partitioning: interactive
+
+    # Static blueprint, not the Jinja2 template — the file already has its
+    # full package list, NVIDIA packages, kernel args, CDI service, and
+    # repository entries baked in.
+    osbuild_use_blueprint_template: false
+    osbuild_static_blueprint_path: "files/rocky/10/x86_64/workstation/rocky-10-2-workstation-nvidia.toml"
+
+    # Build mode: traditional ISO, not bootc. The role default
+    # (osbuild_only_generate: true) writes the blueprint and
+    # build-<blueprint>.sh; pass -e osbuild_only_generate=false to build here.
+    # "minimal-installer" is Fedora-only; EL distributions expose
+    # image-installer.
+    osbuild_build_bootc: false
+    osbuild_image_type: image-installer
+
+    # Neither component contributes sources (both define `sources: []`);
+    # anaconda is required for an installer ISO. The nvidia component is
+    # deliberately omitted — its sources resolve against the host's Fedora
+    # `repo` dictionary.
+    osbuild_components:
+      - base
+      - anaconda
+
+    # Suppress the host-derived (Fedora) common source list. See header.
+    osbuild_sources: []
+
+    osbuild_extra_repo_urls:
+      - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
+      - "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
+      - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+      - "http://download1.rpmfusion.org/free/el/updates/10/x86_64"
+      - "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64"
+
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+    # _git_commit is set in pre_tasks: short HEAD hash of this repo, with a
+    # "-dirty" suffix when the working tree has uncommitted changes.
+    osbuild_output_filename: "rocky-10-2-workstation-nvidia-interactive-{{ _git_commit }}.iso"
+
+    osbuild_build_retries: 1
+
+  pre_tasks:
+    - name: Gather facts as unprivileged connection user
+      ansible.builtin.setup:
+      become: false
+      tags: ["always"]
+
+    - name: Verify build host is Fedora or an EL 10 distribution
+      ansible.builtin.assert:
+        that:
+          - >-
+            ansible_distribution == "Fedora" or
+            (ansible_distribution in ["AlmaLinux", "Rocky"] and
+             ansible_distribution_major_version == "10")
+        fail_msg: >-
+          This playbook builds the Rocky Linux 10.2 NVIDIA blueprint and must
+          run on a Fedora or EL 10 host. Detected: {{ ansible_distribution }}
+          {{ ansible_distribution_version }}.
+        success_msg: "Build host '{{ ansible_distribution }} {{ ansible_distribution_version }}' is supported."
+      tags: ["always"]
+
+    # Lookups run on the controller; set_fact evaluates this once, so every
+    # role task sees the same image name.
+    - name: Set image name commit
+      ansible.builtin.set_fact:
+        _git_commit: >-
+          {{ lookup('ansible.builtin.pipe',
+             'git -C ' ~ (playbook_dir | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*"') }}
+      tags: ["always"]
+
+    - name: List image types known to the installed image-builder
+      ansible.builtin.command: image-builder list
+      register: _image_builder_list
+      changed_when: false
+      tags: ["always"]
+
+    - name: Verify image-builder can build the requested distro and image type
+      ansible.builtin.assert:
+        that:
+          - _wanted in _image_builder_list.stdout_lines
+        fail_msg: >-
+          '{{ _wanted }}' is not in `image-builder list` on {{ inventory_hostname }}.
+          Upgrade image-builder or change osbuild_distro.
+        success_msg: "image-builder supports '{{ _wanted }}'."
+      vars:
+        _wanted: "{{ osbuild_distro }} type:{{ osbuild_image_type }} arch:{{ osbuild_arch }}"
+      tags: ["always"]
+
+  roles:
+    - role: osbuild

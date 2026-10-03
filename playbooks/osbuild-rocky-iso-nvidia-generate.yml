@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Generate-only variant of osbuild-rocky-iso-nvidia.yml.
+#
+# Writes <osbuild_blueprint_name>.toml and build-<osbuild_blueprint_name>.sh
+# to osbuild_output_dir and stops. It never runs image-builder. Build the ISO
+# later with:
+#   bash /var/tmp/osbuild-images/build-rocky-10-2-workstation-nvidia-gen.sh
+#
+# Differences from osbuild-rocky-iso-nvidia.yml:
+#   - osbuild_only_generate is pinned to true (a play var; the role default is
+#     also true, but this playbook does not depend on it).
+#   - blueprint name and ISO filename carry a "-gen" suffix, so both playbooks
+#     can run on the same host without overwriting each other's files.
+#
+# Uses the static, pre-verified NVIDIA blueprint at
+# roles/osbuild/files/rocky/10/x86_64/workstation/rocky-10-2-workstation-nvidia.toml
+# rather than the dynamic Jinja2 template — that blueprint's package list was
+# checked package-by-package against live Rocky 10 / EPEL 10 / RPM Fusion
+# EL 10 / CUDA rhel10 / NVIDIA Container Toolkit repodata.
+#
+# gir is Fedora 43, not EL 10. image-builder resolves `rocky-10.2` from its
+# own distro definitions, so the host does not need to match the target —
+# but the osbuild role selects its `repo` dictionary and common source list
+# from the HOST's ansible_distribution (vars/Fedora.yml,
+# osbuild_distro_sources_fedora). Left alone, that would pass Fedora 43
+# RPM Fusion URLs as --extra-repo to a Rocky compose. This playbook therefore
+# empties osbuild_sources and supplies every EL 10 extra repo explicitly.
+#
+# The blueprint's [[customizations.repositories]] entries only write .repo
+# files into the installed system; depsolve does not read them. Every
+# non-base repo the package list draws from must be an --extra-repo:
+#   - CUDA rhel10               nvidia-driver*, cuda-toolkit
+#   - NVIDIA Container Toolkit  nvidia-container-toolkit
+#   - EPEL 10                   fastfetch, fd-find, distrobox, ...
+#   - RPM Fusion EL 10 updates  ffmpeg, x264/x265, intel-media-driver
+# All five URLs returned repodata/repomd.xml HTTP 200 on 2026-10-01.
+#
+# Secure Boot is NOT compatible with the unsigned proprietary NVIDIA modules —
+# disable it or enroll a MOK on the target machine.
+
+- name: Generate Rocky Linux 10.2 workstation ISO blueprint and build script (NVIDIA)
+  hosts: builder
+  become: true
+  gather_facts: false
+  vars:
+    # Must match a name `image-builder list` reports; major-only "rocky-10"
+    # is not a known distro. image-builder 84 on gir ships rocky-10.0/10.1/10.2
+    # image-installer for x86_64.
+    osbuild_distro: "rocky-10.2"
+    osbuild_arch: "x86_64"
+
+    osbuild_blueprint_name: "rocky-10-2-workstation-nvidia-gen"
+    osbuild_blueprint_version: "1.0.0"
+    osbuild_blueprint_description: "Rocky Linux Workstation 10.2 (NVIDIA, generate-only)"
+
+    # Static blueprint, not the Jinja2 template — the file already has its
+    # full package list, NVIDIA packages, kernel args, CDI service, and
+    # repository entries baked in.
+    osbuild_use_blueprint_template: false
+    osbuild_static_blueprint_path: "files/rocky/10/x86_64/workstation/rocky-10-2-workstation-nvidia.toml"
+
+    # Build mode: traditional ISO, not bootc. Generate files only; do not
+    # invoke image-builder. "minimal-installer" is Fedora-only; EL
+    # distributions expose image-installer.
+    osbuild_only_generate: true
+    osbuild_build_bootc: false
+    osbuild_image_type: image-installer
+
+    # Neither component contributes sources (both define `sources: []`);
+    # anaconda is required for an installer ISO. The nvidia component is
+    # deliberately omitted — its sources resolve against the host's Fedora
+    # `repo` dictionary.
+    osbuild_components:
+      - base
+      - anaconda
+
+    # Suppress the host-derived (Fedora) common source list. See header.
+    osbuild_sources: []
+
+    osbuild_extra_repo_urls:
+      - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
+      - "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
+      - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+      - "http://download1.rpmfusion.org/free/el/updates/10/x86_64"
+      - "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64"
+
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+    # _git_commit is set in pre_tasks: short HEAD hash of this repo, with a
+    # "-dirty" suffix when the working tree has uncommitted changes.
+    osbuild_output_filename: "rocky-10-2-workstation-nvidia-gen-{{ _git_commit }}.iso"
+
+    osbuild_build_retries: 1
+
+  pre_tasks:
+    - name: Gather facts as unprivileged connection user
+      ansible.builtin.setup:
+      become: false
+      tags: ["always"]
+
+    - name: Verify build host is Fedora or an EL 10 distribution
+      ansible.builtin.assert:
+        that:
+          - >-
+            ansible_distribution == "Fedora" or
+            (ansible_distribution in ["AlmaLinux", "Rocky"] and
+             ansible_distribution_major_version == "10")
+        fail_msg: >-
+          This playbook builds the Rocky Linux 10.2 NVIDIA blueprint and must
+          run on a Fedora or EL 10 host. Detected: {{ ansible_distribution }}
+          {{ ansible_distribution_version }}.
+        success_msg: "Build host '{{ ansible_distribution }} {{ ansible_distribution_version }}' is supported."
+      tags: ["always"]
+
+    # Lookups run on the controller; set_fact evaluates this once, so every
+    # role task sees the same image name.
+    - name: Set image name commit
+      ansible.builtin.set_fact:
+        _git_commit: >-
+          {{ lookup('ansible.builtin.pipe',
+             'git -C ' ~ (playbook_dir | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*"') }}
+      tags: ["always"]
+
+    - name: List image types known to the installed image-builder
+      ansible.builtin.command: image-builder list
+      register: _image_builder_list
+      changed_when: false
+      tags: ["always"]
+
+    - name: Verify image-builder can build the requested distro and image type
+      ansible.builtin.assert:
+        that:
+          - _wanted in _image_builder_list.stdout_lines
+        fail_msg: >-
+          '{{ _wanted }}' is not in `image-builder list` on {{ inventory_hostname }}.
+          Upgrade image-builder or change osbuild_distro.
+        success_msg: "image-builder supports '{{ _wanted }}'."
+      vars:
+        _wanted: "{{ osbuild_distro }} type:{{ osbuild_image_type }} arch:{{ osbuild_arch }}"
+      tags: ["always"]
+
+  roles:
+    - role: osbuild

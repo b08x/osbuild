@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Terminal emulator stub that behaves like a real one: logs, then runs the
+# argument after "bash -c" in the background with no input.
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "${0##*/} $*"
+while [[ $# -gt 0 && $1 != -c ]]; do shift; done
+[[ $# -ge 2 ]] || exit 1
+bash -c "$2" </dev/null >>"${STUB_LOG%.log}.window.out" 2>&1 &
+exit 0

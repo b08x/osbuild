@@ -1,0 +1,6 @@
+id = "antigravity-rpm"
+name = "Antigravity RPM Repository"
+type = "yum-baseurl"
+url = "https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm"
+check_gpg = false
+check_ssl = true

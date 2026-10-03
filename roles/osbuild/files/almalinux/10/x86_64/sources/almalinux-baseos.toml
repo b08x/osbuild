@@ -1,0 +1,7 @@
+id = "almalinux-baseos"
+name = "AlmaLinux 10 - BaseOS"
+type = "yum-metalink"
+url = "https://mirrors.almalinux.org/metalink?repo=baseos-10&arch=x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-10"]

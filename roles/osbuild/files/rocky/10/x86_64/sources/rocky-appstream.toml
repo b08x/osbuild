@@ -1,0 +1,8 @@
+# AppStream per upstream osbuild/images rocky-10.json (verified 2026-10-01)
+id = "rocky-appstream"
+name = "Rocky Linux 10 - AppStream"
+type = "yum-baseurl"
+url = "https://dl.rockylinux.org/pub/rocky/10/AppStream/x86_64/os/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-10"]

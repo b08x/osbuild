@@ -1,0 +1,7 @@
+id = "oneAPI"
+name = "Intel oneAPI Repository"
+type = "yum-baseurl"
+url = "https://yum.repos.intel.com/oneapi"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB"]

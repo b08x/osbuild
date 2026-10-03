@@ -1,0 +1,623 @@
+#!/usr/bin/env bash
+# syncopated-firstboot: first-login splash that updates the system with dnf,
+# offers a reboot when updates were installed, then clones a dotfiles
+# repository with yadm and runs `yadm bootstrap` in a separate terminal
+# window, as the logged-in user.
+#
+# The autostart launcher (syncopated-firstboot-launcher) stops opening this
+# script once the per-user marker exists. Running it by name always shows the
+# splash, so setup can be repeated at any time.
+#
+# Overrides (used by the bats tests): SYNCOPATED_OS_RELEASE,
+# SYNCOPATED_YADM_URL, SYNCOPATED_DOTFILES_URL, SYNCOPATED_CHECK_TOOLS,
+# SYNCOPATED_NO_ANIM=1 (skip the splash reveal delay),
+# SYNCOPATED_WINDOW_TIMEOUT (seconds to wait for the bootstrap window to start).
+
+OS_RELEASE=${SYNCOPATED_OS_RELEASE:-/etc/os-release}
+STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/syncopated
+MARKER=$STATE_DIR/firstboot.done
+YADM_URL=${SYNCOPATED_YADM_URL:-https://github.com/yadm-dev/yadm/raw/master/yadm}
+DOTFILES_URL=${SYNCOPATED_DOTFILES_URL:-https://github.com/b08x/dots.git}
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+WINDOW_TIMEOUT=${SYNCOPATED_WINDOW_TIMEOUT:-15}
+read -r -a CHECK_TOOLS <<<"${SYNCOPATED_CHECK_TOOLS:-git yadm gum ansible podman zsh flatpak nvidia-smi}"
+
+# Step return codes.
+RC_OK=0
+RC_FAILED=1
+RC_SKIPPED=2
+
+STEPS=(update yadm clone bootstrap system 'done')
+# Set by update_system when dnf installed or upgraded at least one package.
+UPDATES_INSTALLED=0
+# Exit status of yadm bootstrap in --bootstrap-window mode; 129 until it ends.
+BOOTSTRAP_RC=129
+declare -A STEP_STATE=()
+
+# Brand palette, sampled from the Syncopated logo: a violet mark and an ember
+# wordmark, each with a dim tone for the light glyphs. Each entry is
+# (hex for gum and 24-bit terminals, 256-color index for other terminals).
+VIOLET=('#7B4FE0' 98)
+VIOLET_DIM=('#4B3A8C' 60)
+VIOLET_LIGHT=('#A98BF0' 141)
+EMBER=('#D2601A' 166)
+EMBER_DIM=('#7A3A1C' 94)
+
+# Theme gum's prompts with the palette. GUM_* values already set by the user win.
+export GUM_CHOOSE_HEADER_FOREGROUND=${GUM_CHOOSE_HEADER_FOREGROUND:-${VIOLET_LIGHT[0]}}
+export GUM_CHOOSE_CURSOR_FOREGROUND=${GUM_CHOOSE_CURSOR_FOREGROUND:-${EMBER[0]}}
+export GUM_CHOOSE_SELECTED_FOREGROUND=${GUM_CHOOSE_SELECTED_FOREGROUND:-${EMBER[0]}}
+export GUM_INPUT_HEADER_FOREGROUND=${GUM_INPUT_HEADER_FOREGROUND:-${VIOLET_LIGHT[0]}}
+export GUM_INPUT_PROMPT_FOREGROUND=${GUM_INPUT_PROMPT_FOREGROUND:-${EMBER[0]}}
+export GUM_INPUT_CURSOR_FOREGROUND=${GUM_INPUT_CURSOR_FOREGROUND:-${EMBER[0]}}
+
+# Splash art (~/Images/brand-logo-selectionB-ascii-art.txt, trailing blanks
+# and the common 3-column indent removed). Columns before ART_SPLIT are the
+# mark; the rest is the wordmark. Glyphs in ART_DIM_GLYPHS take the dim tone.
+ART_SPLIT=42
+ART_DIM_GLYPHS=".'\`,:;^\"!Iil"
+mapfile -t ART <<'ART'
+                    Il
+                 "+(tt)>.
+               ,[ftfff//)I
+              <tttt\1)/\/\<
+           'i1tt/f[}_,_/\|\;
+         ,_|tt////(_<~{\|||_
+      ^<)tt//////\//\\\||((-   ..
+  ':+)tt\|////\\\\||||(((()1: ,:.                                                                                                   .``                          ``.
+`I<++i,">)\\\\\|||||((((()((_l"                                                                                                     ,))^                        ,)):
+.     ;[\\\\\||||((((()))([<+{?;                 .^,^.     ``.   .``  .``  ^"`       .^"`.       '"^'     ``  ^"`.      `"^. ``   ``l));``'     .^,"'       `"^ ^)):
+    ;{\\\\||||((((())))({+<]1{{{<              .+{}[{1+'  ^1)I   i)}. :))~]{))[,   l])11))-"  '<{)11)}>. "))+]{1)1~'  ![)1{}]))^ "111))111_   ,_}[][{-"  .<{)1{}-)):
+  .+\\|||||(((((()))1)1->-11}}}[}I             ^))-l!<:   ^))I . i){. :))+`.`[)?  <)1I'.^+[~ .])?"'',])? "))?,'':[)? l))!''"?))^  `'I)):``.  "))}~<~}))^ _){:''"-)):
+  '}|||||((((()))111)[<~}1}}}}[[[-              "i<_-[]I  ^))I   <){. :))`   +)?  [)_    ';" '))l    i)1 "))I    <)1 <)}    l)1'    :))`     l)1_<~<~>~^ })+    :)):
+  `?((((((()))1111){~<]1{}}}[[[[]]"            ;}}iI!1)-  .[){i!~{){. ;))"   -)[  ;1)]>i+))+  i))_ii-))! "))1_ii?))i ^{)}>i_{))_.   :))-><"  .?)[iIi]_^  l))]>i+{)):
+(ffrx/)()))1111{11->_{{}[[[[[]]]]]I             :~]]]+I.   `i+-_;i)}. "__`   !_>   'l_]]?<,    ^i-]]-!`  "))li?]?<,   '!-]]<`!__.   .>_---,    ;+][]+l'   "<?]?>,__^
+?j)(j())11111{{1]<~[{[[[[[]]]]]???i                         `ii!![)1.                                    ,)):
+"f)|/1)1111{{1}~>?{}[[[[]]]]????--+                         :????-_l                                     `__"
+ {||)11{{{{}}_>_}}[[]]]]]????----__`
+.}1{1{{{{}{1-<]}[]]]]]????----_____,
+,[l<{{+-}}{1{}[?_]]]_~?-+,i-_>>__;<!
+'.  ,:  I>'..;I. :~l. :l.  ,^  ;,  "
+ART
+
+# --- output ------------------------------------------------------------------
+
+have_gum() {
+  command -v gum >/dev/null 2>&1
+}
+
+# style COLOR LINE... : print lines in a foreground color (hex or 256-color).
+style() {
+  local color=$1
+  shift
+  if have_gum; then
+    gum style --foreground "$color" "$@"
+  else
+    printf '%s\n' "$@"
+  fi
+}
+
+info() { style "${VIOLET_LIGHT[0]}" "➜ $*"; }
+ok() { style "${EMBER[0]}" "✓ $*"; }
+warn() { style '#E0A030' "! $*" >&2; }
+err() { style '#D03030' "✗ $*" >&2; }
+
+# fg HEX INDEX : print the SGR sequence for a foreground color. Uses 24-bit
+# color when the terminal reports it in COLORTERM, else the 256-color index.
+fg() {
+  local hex=${1#\#}
+  if [[ ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]]; then
+    printf '\e[38;2;%d;%d;%dm' "0x${hex:0:2}" "0x${hex:2:2}" "0x${hex:4:2}"
+  else
+    printf '\e[38;5;%sm' "$2"
+  fi
+}
+
+# os_field KEY : print the value of KEY from os-release, without quotes.
+os_field() {
+  local key=$1 line value
+  [[ -r $OS_RELEASE ]] || return 1
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line == "$key="* ]] || continue
+    value=${line#*=}
+    value=${value#[\"\']}
+    value=${value%[\"\']}
+    printf '%s\n' "$value"
+    return 0
+  done <"$OS_RELEASE"
+  return 1
+}
+
+os_label() {
+  local name version
+  name=$(os_field NAME) || name=Linux
+  version=$(os_field VERSION_ID) || version=
+  printf '%s\n' "$name${version:+ $version}"
+}
+
+restore_terminal() {
+  [[ -t 1 ]] || return 0
+  tput sgr0 2>/dev/null
+  tput cnorm 2>/dev/null
+  return 0
+}
+
+# paint_art WIDTH : fill ART_PAINTED with the ART lines cut to WIDTH columns,
+# each glyph colored by region (mark or wordmark) and weight (dim or full).
+paint_art() {
+  local width=$1 row col line ch tone prev out
+  local -A seq=(
+    [mark]=$(fg "${VIOLET[@]}") [mark_dim]=$(fg "${VIOLET_DIM[@]}")
+    [word]=$(fg "${EMBER[@]}") [word_dim]=$(fg "${EMBER_DIM[@]}")
+  )
+  ART_PAINTED=()
+  for ((row = 0; row < ${#ART[@]}; row++)); do
+    line=${ART[row]:0:width} out='' prev=''
+    for ((col = 0; col < ${#line}; col++)); do
+      ch=${line:col:1}
+      if [[ $ch == ' ' ]]; then
+        out+=' '
+        continue
+      fi
+      # The logo image draws "{1{}" on the mark's second-to-last row in ember.
+      if ((col < ART_SPLIT)) && ! ((row == 19 && col >= 10 && col <= 13)); then
+        tone=mark
+      else
+        tone=word
+      fi
+      [[ $ART_DIM_GLYPHS == *"$ch"* ]] && tone+=_dim
+      [[ $tone == "$prev" ]] || out+=${seq[$tone]}
+      prev=$tone
+      out+=$ch
+    done
+    ART_PAINTED+=("$out"$'\e[0m')
+  done
+}
+
+# Full-screen splash: the art centered, revealed row by row, then held with a
+# pulsing "press enter to begin" until Enter. A terminal narrower than the art
+# shows the mark only. Prints the art uncolored and returns at once when stdin
+# or stdout is not a terminal. SYNCOPATED_NO_ANIM=1 skips the reveal delay.
+splash() {
+  if [[ ! -t 0 || ! -t 1 ]] || ! tput cup 0 0 >/dev/null 2>&1; then
+    printf '%s\n' "${ART[@]}"
+    return 0
+  fi
+  local rows cols width=0 height=${#ART[@]} line row top left prompt='press enter to begin' prow pcol lit=1 rc
+  rows=$(tput lines)
+  cols=$(tput cols)
+  for line in "${ART[@]}"; do
+    ((${#line} > width)) && width=${#line}
+  done
+  ((width > cols)) && width=$((ART_SPLIT < cols ? ART_SPLIT : cols))
+  paint_art "$width"
+
+  top=$(((rows - height - 2) / 2))
+  ((top < 0)) && top=0
+  left=$(((cols - width) / 2))
+  prow=$((top + height + 2 < rows ? top + height + 2 : rows - 1))
+  pcol=$(((cols - ${#prompt}) / 2))
+  ((pcol < 0)) && pcol=0
+
+  clear
+  tput civis 2>/dev/null
+  for ((row = 0; row < height; row++)); do
+    tput cup $((top + row)) "$left"
+    printf '%s' "${ART_PAINTED[row]}"
+    [[ -n ${SYNCOPATED_NO_ANIM:-} ]] || sleep 0.03
+  done
+  while :; do
+    tput cup "$prow" "$pcol"
+    if ((lit)); then fg "${EMBER[@]}"; else fg "${EMBER_DIM[@]}"; fi
+    printf '%s\e[0m' "$prompt"
+    lit=$((1 - lit))
+    read -r -s -t 0.8 _
+    rc=$?
+    # 0 = Enter, >128 = timeout (pulse again), anything else = EOF/error.
+    ((rc > 128)) || break
+  done
+  clear
+  tput cnorm 2>/dev/null
+}
+
+banner() {
+  local label
+  label=$(os_label)
+  if have_gum; then
+    gum style --border double --border-foreground "${VIOLET[0]}" --foreground "${EMBER[0]}" \
+      --align center --width 60 --padding "1 2" \
+      "SYNCOPATED" "$label" "First login setup"
+  else
+    printf '%s\n' \
+      "============================================================" \
+      "  SYNCOPATED  |  $label  |  First login setup" \
+      "============================================================"
+  fi
+}
+
+draw_steps() {
+  local step state icon lines=()
+  for step in "${STEPS[@]}"; do
+    state=${STEP_STATE[$step]:-pending}
+    case $state in
+      ok) icon='✓' ;;
+      failed) icon='✗' ;;
+      skipped) icon='-' ;;
+      *) icon='·' ;;
+    esac
+    lines+=("$icon $step ($state)")
+  done
+  if have_gum; then
+    gum style --border rounded --border-foreground "${VIOLET_DIM[0]}" --padding "0 2" "${lines[@]}"
+  else
+    printf '  %s\n' "${lines[@]}"
+  fi
+}
+
+# --- prompts -------------------------------------------------------------------
+
+# choose HEADER OPTION... : print the selected option. Fails on cancel/EOF.
+choose() {
+  local header=$1 reply opt i
+  shift
+  if have_gum; then
+    gum choose --header "$header" "$@"
+    return
+  fi
+  printf '%s\n' "$header" >&2
+  for ((i = 1; i <= $#; i++)); do
+    printf '  %d) %s\n' "$i" "${!i}" >&2
+  done
+  while :; do
+    read -r -p "Choose [1-$#]: " reply || return 1
+    if [[ $reply =~ ^[0-9]+$ ]] && ((reply >= 1 && reply <= $#)); then
+      printf '%s\n' "${!reply}"
+      return 0
+    fi
+    for opt in "$@"; do
+      [[ $reply == "$opt" ]] && { printf '%s\n' "$opt"; return 0; }
+    done
+    printf 'Enter a number from 1 to %d.\n' "$#" >&2
+  done
+}
+
+# prompt_url DEFAULT : print the URL the user entered. Fails on cancel/EOF.
+prompt_url() {
+  local default=$1 reply
+  if have_gum; then
+    gum input --header "Dotfiles repository URL" --value "$default" --width 70
+    return
+  fi
+  read -r -e -i "$default" -p "Dotfiles repository URL: " reply || return 1
+  printf '%s\n' "${reply:-$default}"
+}
+
+# --- steps ---------------------------------------------------------------------
+
+acquire_lock() {
+  command -v flock >/dev/null 2>&1 || return 0
+  local dir=${XDG_RUNTIME_DIR:-$STATE_DIR}
+  mkdir -p "$dir" 2>/dev/null || return 0
+  exec {LOCK_FD}>"$dir/syncopated-firstboot.lock" || return 0
+  flock -n "$LOCK_FD"
+}
+
+write_marker() {
+  mkdir -p "$STATE_DIR" && date -Is >"$MARKER"
+}
+
+wait_for_network() {
+  command -v nm-online >/dev/null 2>&1 || return 0
+  info "Waiting for the network (up to 30 s)"
+  nm-online -q -t 30 || warn "The network is not online yet."
+}
+
+ensure_yadm() {
+  if command -v yadm >/dev/null 2>&1; then
+    ok "yadm found: $(command -v yadm)"
+    return "$RC_OK"
+  fi
+  local bin=$HOME/.local/bin tmp
+  mkdir -p "$bin" || return "$RC_FAILED"
+  while :; do
+    info "Downloading yadm from $YADM_URL"
+    tmp=$(mktemp "$bin/.yadm.XXXXXX") || return "$RC_FAILED"
+    if curl -fsSL --connect-timeout 15 -o "$tmp" "$YADM_URL"; then
+      chmod 0755 "$tmp" && mv -f "$tmp" "$bin/yadm" || return "$RC_FAILED"
+      [[ :$PATH: == *":$bin:"* ]] || PATH=$bin:$PATH
+      ok "yadm installed: $bin/yadm"
+      return "$RC_OK"
+    fi
+    rm -f "$tmp"
+    err "GitHub is unreachable: could not download yadm."
+    [[ $(choose "Download failed. Retry?" "Retry" "Skip") == Retry ]] || return "$RC_SKIPPED"
+  done
+}
+
+clone_dotfiles() {
+  local repo url
+  repo=$(yadm introspect repo 2>/dev/null)
+  if [[ -n $repo && -d $repo ]]; then
+    case $(choose "A yadm repository already exists at $repo." "Run bootstrap only" "Skip") in
+      "Run bootstrap only") return "$RC_OK" ;;
+      *) return "$RC_SKIPPED" ;;
+    esac
+  fi
+  url=$DOTFILES_URL
+  while :; do
+    url=$(prompt_url "$url") || return "$RC_SKIPPED"
+    if [[ -z $url ]]; then
+      warn "Enter a repository URL."
+      url=$DOTFILES_URL
+      continue
+    fi
+    info "Checking $url"
+    git ls-remote -q "$url" >/dev/null 2>&1 && break
+    err "Cannot read repository $url. Check the URL and the network, then try again."
+  done
+  if ! yadm clone --no-bootstrap "$url"; then
+    err "yadm clone failed."
+    return "$RC_FAILED"
+  fi
+  ok "Cloned $url"
+}
+
+# open_terminal COMMAND : start a new terminal window running COMMAND with
+# bash, in the background. Fails without a graphical session or a known
+# terminal emulator. Same terminal order as syncopated-firstboot-launcher.
+open_terminal() {
+  local cmd=$1 term
+  [[ -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} ]] || return 1
+  for term in xdg-terminal-exec ptyxis kgx gnome-terminal kitty foot alacritty xterm; do
+    command -v "$term" >/dev/null 2>&1 || continue
+    case $term in
+      xdg-terminal-exec | kitty | foot) "$term" bash -c "$cmd" ;;
+      ptyxis) ptyxis --new-window -- bash -c "$cmd" ;;
+      kgx | gnome-terminal) "$term" -- bash -c "$cmd" ;;
+      alacritty | xterm) "$term" -e bash -c "$cmd" ;;
+    esac </dev/null >/dev/null 2>&1 &
+    disown
+    return 0
+  done
+  return 1
+}
+
+# wait_window_start STATUS_FILE : wait up to WINDOW_TIMEOUT seconds for the
+# bootstrap window to write "running". On timeout, write "cancelled" so a
+# window that starts late exits without running bootstrap.
+wait_window_start() {
+  local status=$1 tries=$((WINDOW_TIMEOUT * 2))
+  while ((tries-- > 0)); do
+    [[ -s $status ]] && return 0
+    sleep 0.5
+  done
+  printf 'cancelled\n' >"$status"
+  return 1
+}
+
+# Run yadm bootstrap in a new terminal window and wait for its exit status.
+# Falls back to this terminal when no window can be opened.
+run_bootstrap() {
+  local status rc yadm_bin
+  yadm_bin=$(command -v yadm) || yadm_bin=yadm
+  status=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/syncopated-bootstrap.XXXXXX") || return "$RC_FAILED"
+  if open_terminal "$(printf '%q ' "$SELF" --bootstrap-window "$status" "$yadm_bin")" &&
+    wait_window_start "$status"; then
+    info "yadm bootstrap is running in a new window. Answer its prompts there; this window waits for it."
+    while [[ $(<"$status") == running ]]; do
+      sleep 0.5
+    done
+    rc=$(<"$status")
+  else
+    info "No new terminal window available. Running yadm bootstrap here; answer its prompts in this terminal."
+    yadm bootstrap
+    rc=$?
+  fi
+  rm -f "$status"
+  if [[ $rc != 0 ]]; then
+    err "yadm bootstrap exited with an error (status $rc)."
+    return "$RC_FAILED"
+  fi
+  ok "yadm bootstrap finished"
+}
+
+# --bootstrap-window STATUS_FILE [YADM] : body of the bootstrap window. Writes
+# "running" to STATUS_FILE, runs yadm bootstrap, then writes its exit status.
+# Closing the window early records 129. Does nothing when STATUS_FILE is
+# missing or already written (the first window timed out and gave up).
+bootstrap_window() {
+  local status=${1:-} yadm_bin=${2:-yadm}
+  [[ -n $status && -e $status && ! -s $status ]] || return 1
+  printf 'running\n' >"$status"
+  # shellcheck disable=SC2064 # expand $status now; BOOTSTRAP_RC at exit.
+  trap "[[ -e '$status' && \$(<'$status') == running ]] && printf '%s\\n' \"\$BOOTSTRAP_RC\" >'$status'" EXIT
+  banner
+  info "Running yadm bootstrap. Answer its prompts in this window."
+  "$yadm_bin" bootstrap
+  BOOTSTRAP_RC=$?
+  printf '%s\n' "$BOOTSTRAP_RC" >"$status"
+  if ((BOOTSTRAP_RC == 0)); then
+    ok "yadm bootstrap finished. Setup continues in the first window."
+  else
+    err "yadm bootstrap exited with status $BOOTSTRAP_RC."
+  fi
+  read -rp 'Press Enter to close this window…' _
+  return 0
+}
+
+# Apply every available package update. dnf prints "Nothing to do." when
+# there is nothing to install; any other successful run installed something.
+update_system() {
+  if ! command -v dnf >/dev/null 2>&1; then
+    info "dnf not found; system update skipped."
+    return "$RC_SKIPPED"
+  fi
+  local log rc
+  log=$(mktemp) || return "$RC_FAILED"
+  info "Updating the system: sudo dnf -y upgrade --refresh"
+  sudo dnf -y upgrade --refresh 2>&1 | tee "$log"
+  rc=${PIPESTATUS[0]}
+  if ((rc != 0)); then
+    rm -f "$log"
+    err "System update failed (dnf exit $rc). Run later: sudo dnf upgrade --refresh"
+    return "$RC_FAILED"
+  fi
+  if grep -q '^Nothing to do\.' "$log"; then
+    ok "System is up to date"
+  else
+    UPDATES_INSTALLED=1
+    ok "System updated"
+  fi
+  rm -f "$log"
+  return "$RC_OK"
+}
+
+# Offer a reboot after installed updates. Returns 0 only when the reboot was
+# started. No marker is written, so the splash opens again at the next login,
+# where the update finds nothing to do and setup continues.
+offer_reboot() {
+  local action
+  action=$(choose "Updates were installed. Reboot now? Setup continues at the next login." \
+    "Reboot now" "Continue setup") || action="Continue setup"
+  [[ $action == "Reboot now" ]] || return 1
+  info "Rebooting. The splash opens again at the next login."
+  if ! sudo systemctl reboot; then
+    warn "Could not reboot (sudo failed). Continuing setup."
+    return 1
+  fi
+}
+
+# Boot to the display manager when one is installed.
+set_graphical_target() {
+  local units
+  units=$(systemctl list-unit-files --no-legend gdm.service lightdm.service sddm.service 2>/dev/null)
+  if [[ -z $units ]]; then
+    info "No display manager installed; default target unchanged."
+    return "$RC_OK"
+  fi
+  if [[ $(systemctl get-default 2>/dev/null) == graphical.target ]]; then
+    ok "Default target is already graphical.target"
+    return "$RC_OK"
+  fi
+  if sudo systemctl set-default graphical.target; then
+    ok "Default target set to graphical.target"
+  else
+    warn "Could not set graphical.target (sudo failed). Run: sudo systemctl set-default graphical.target"
+  fi
+  return "$RC_OK"
+}
+
+# run_step NAME COMMAND... : run a step, record its state, redraw the list.
+run_step() {
+  local name=$1 rc
+  shift
+  "$@"
+  rc=$?
+  case $rc in
+    "$RC_OK") STEP_STATE[$name]=ok ;;
+    "$RC_SKIPPED") STEP_STATE[$name]=skipped ;;
+    *) STEP_STATE[$name]=failed ;;
+  esac
+  draw_steps
+  return "$rc"
+}
+
+report() {
+  local tool rows=()
+  for tool in "${CHECK_TOOLS[@]}"; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      rows+=("✓ ready    $tool")
+    else
+      rows+=("✗ missing  $tool")
+    fi
+  done
+  if have_gum; then
+    gum style --border rounded --border-foreground "${EMBER_DIM[0]}" --padding "0 2" "Tool check" "${rows[@]}"
+  else
+    printf '%s\n' "Tool check" "${rows[@]/#/  }"
+  fi
+}
+
+main() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    err "Run syncopated-firstboot as your own user, not as root."
+    return 1
+  fi
+  if ! acquire_lock; then
+    warn "syncopated-firstboot is already running."
+    return 0
+  fi
+  trap restore_terminal EXIT
+
+  splash
+  banner
+  [[ -e $MARKER ]] && info "Setup was completed before ($(<"$MARKER")). Running again."
+  draw_steps
+
+  wait_for_network
+  run_step update update_system
+  if ((UPDATES_INSTALLED)) && offer_reboot; then
+    return 0
+  fi
+
+  local action rc step
+  action=$(choose "Clone your dotfiles with yadm and run yadm bootstrap?" \
+    "Set up dotfiles" "Skip for now" "Never ask again") || action="Skip for now"
+  case $action in
+    "Set up dotfiles") ;;
+    "Never ask again")
+      write_marker
+      ok "The splash will not open at login again. Run syncopated-firstboot to start it manually."
+      return 0
+      ;;
+    *)
+      info "Skipped. The splash opens again at the next login, or run syncopated-firstboot."
+      return 0
+      ;;
+  esac
+
+  run_step yadm ensure_yadm &&
+    run_step clone clone_dotfiles &&
+    run_step bootstrap run_bootstrap &&
+    run_step system set_graphical_target
+  rc=$?
+  for step in "${STEPS[@]}"; do
+    [[ -n ${STEP_STATE[$step]:-} ]] || STEP_STATE[$step]=skipped
+  done
+
+  case $rc in
+    "$RC_OK")
+      STEP_STATE[done]=ok
+      write_marker
+      ;;
+    "$RC_SKIPPED") ;;
+    *) STEP_STATE[done]=failed ;;
+  esac
+  draw_steps
+  report
+
+  case $rc in
+    "$RC_OK")
+      ok "Setup complete. The splash will not open at login again."
+      return 0
+      ;;
+    "$RC_SKIPPED")
+      info "Setup skipped. The splash opens again at the next login, or run syncopated-firstboot."
+      return 0
+      ;;
+    *)
+      err "Setup did not finish. The splash opens again at the next login, or run syncopated-firstboot."
+      return 1
+      ;;
+  esac
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  set -uo pipefail
+  if [[ ${1:-} == --bootstrap-window ]]; then
+    bootstrap_window "${@:2}"
+    exit
+  fi
+  main "$@"
+  exit
+fi

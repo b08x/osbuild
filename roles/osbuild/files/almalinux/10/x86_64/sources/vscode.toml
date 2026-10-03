@@ -1,0 +1,7 @@
+id = "vscode"
+name = "Visual Studio Code"
+type = "yum-baseurl"
+url = "https://packages.microsoft.com/yumrepos/vscode"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/microsoft/microsoft.asc"]

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "multimedia" for Rocky Linux 10 (x86_64).
+# Split from workstation/rocky-10-2-workstation-nvidia.toml; every name
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "ffmpeg and codecs (RPM Fusion Free)"
+repo_urls:
+  - "http://download1.rpmfusion.org/free/el/updates/10/x86_64"
+services: []
+kernel_args: []
+packages:
+  - "ffmpeg"
+  - "x264"
+  - "x265"

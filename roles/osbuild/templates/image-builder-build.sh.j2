@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible') }}
+# Build {{ osbuild_blueprint_name }} ({{ osbuild_distro }} {{ osbuild_image_type }} {{ osbuild_arch }}).
+# Written by the osbuild role in generate-only mode (osbuild_only_generate: true).
+# Runs the same image-builder command as tasks/build.yml, then copies the
+# newest image to {{ osbuild_output_filename }}{{ ' and loads it into podman' if osbuild_image_type in ['container', 'container-minimal'] else '' }}.
+#
+#   bash {{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")"
+
+stamp=$(mktemp)
+trap 'rm -f "$stamp"' EXIT
+
+sudo image-builder build {{ osbuild_image_type | quote }} \
+  --distro {{ osbuild_distro | quote }} \
+  --arch {{ osbuild_arch | quote }} \
+  --blueprint {{ (osbuild_blueprint_name ~ '.toml') | quote }}{% for url in osbuild_extra_repo_urls | default([]) %} \
+  --extra-repo {{ url | quote }}{% endfor %}
+
+
+image=$(find . -maxdepth 2 -type f \( -name '*.iso' -o -name '*.qcow2' -o -name '*.img' -o -name '*.tar' \) \
+  -newer "$stamp" -printf '%T@ %p\n' | sort -rn | head -n1 | cut -d' ' -f2-)
+if [ -z "$image" ]; then
+  echo "image-builder finished but no new image was found under $PWD" >&2
+  exit 1
+fi
+sudo cp "$image" {{ osbuild_output_filename | quote }}
+sudo chown "$(id -u):$(id -g)" {{ osbuild_output_filename | quote }}
+ls -lh {{ osbuild_output_filename | quote }}
+{% if osbuild_image_type in ['container', 'container-minimal'] %}
+
+# Container types produce an OCI archive; load it into the invoking user's
+# (rootless) podman store and tag it.
+podman load -i {{ osbuild_output_filename | quote }} \
+  | sed -n 's/^Loaded image: //p' \
+  | xargs -r -I{} podman tag {} {{ osbuild_container_tag | quote }}
+podman image ls {{ osbuild_container_tag | regex_replace(':[^:/]*$', '') | quote }}
+{% endif %}

@@ -1,0 +1,136 @@
+---
+# Build-time Ansible playbook for bootc image configuration
+# This playbook runs INSIDE the Containerfile during container build
+# All configurations target /usr/etc (immutable vendor defaults) instead of /etc
+#
+# The Ansible Role Inversion Pattern:
+# - Traditional: Ansible runs post-deployment, modifies /etc on live systems
+# - Inverted: Ansible runs at build-time, compiles config into /usr/etc in the image
+#
+# Benefits:
+# - Immutable infrastructure: configs are part of the image, not runtime state
+# - Atomic upgrades: bootc switch brings new configs atomically
+# - Declarative: the image IS the desired state, no drift
+# - Testable: validate configs in CI before building the image
+
+- name: Build-time configuration compilation for bootc image
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+
+  tasks:
+    # =========================================================================
+    # Systemd Unit Configuration
+    # =========================================================================
+    # Template systemd units into /usr/lib/systemd/system (vendor units)
+    # These are immutable vendor defaults that ship with the image
+
+    - name: Ensure systemd vendor directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /usr/lib/systemd/system
+        - /usr/lib/systemd/user
+
+    # NVIDIA CDI service (if nvidia component is enabled)
+    - name: Template NVIDIA CDI systemd service
+      ansible.builtin.template:
+        src: systemd/nvidia-cdi-refresh.service.j2
+        dest: /usr/lib/systemd/system/nvidia-cdi-refresh.service
+        mode: "0644"
+        backup: true
+      when: "'nvidia' in osbuild_components"
+
+    # =========================================================================
+    # /usr/etc Configuration (Immutable Vendor Defaults)
+    # =========================================================================
+    # /usr/etc contains vendor/build-time defaults that are part of the image
+    # At runtime, systemd merges /usr/etc (vendor) with /etc (local overrides)
+    # Files in /etc take precedence, allowing runtime customization
+
+    - name: Ensure /usr/etc directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /usr/etc
+        - /usr/etc/kernel
+        - /usr/etc/kernel/cmdline.d
+
+    # Hostname configuration
+    - name: Template hostname to /usr/etc
+      ansible.builtin.template:
+        src: usr/etc/hostname.j2
+        dest: /usr/etc/hostname
+        mode: "0644"
+        backup: true
+      vars:
+        distro: "{{ ansible_distribution | lower }}"
+        variant: "{{ osbuild_blueprint_name | default('workstation') }}"
+      when: osbuild_blueprint_name is defined
+
+    # OS Release information
+    - name: Template os-release to /usr/etc
+      ansible.builtin.template:
+        src: usr/etc/os-release.j2
+        dest: /usr/etc/os-release
+        mode: "0644"
+        backup: true
+      vars:
+        distro: "fedora-{{ ansible_distribution_version }}"
+        variant: "{{ osbuild_blueprint_name | default('workstation') }}"
+
+    # Filesystem table (optional, typically handled by bootc disk config)
+    - name: Template fstab to /usr/etc
+      ansible.builtin.template:
+        src: usr/etc/fstab.j2
+        dest: /usr/etc/fstab
+        mode: "0644"
+        backup: true
+      vars:
+        distro: "fedora-{{ ansible_distribution_version }}"
+        variant: "{{ osbuild_blueprint_name | default('workstation') }}"
+      when: osbuild_include_fstab | default(false)
+
+    # =========================================================================
+    # Kernel Command Line
+    # =========================================================================
+    # bootc supports kernel cmdline drop-ins in /usr/etc/kernel/cmdline.d/
+    # These are merged at boot time to form the final kernel command line
+
+    - name: Template kernel cmdline configuration
+      ansible.builtin.template:
+        src: usr/etc/kernel/cmdline.d/{{ item.name }}.conf.j2
+        dest: /usr/etc/kernel/cmdline.d/{{ item.name }}.conf
+        mode: "0644"
+        backup: true
+      loop: "{{ osbuild_kernel_cmdline_snippets | default([]) }}"
+      when: osbuild_kernel_cmdline_snippets is defined
+
+    # NVIDIA-specific kernel parameters (blacklist nouveau, enable nvidia-drm)
+    - name: Template NVIDIA kernel cmdline
+      ansible.builtin.copy:
+        dest: /usr/etc/kernel/cmdline.d/10-nvidia.conf
+        content: |
+          rd.driver.blacklist=nouveau modprobe.blacklist=nouveau nvidia-drm.modeset=1
+        mode: "0644"
+        backup: true
+      when: "'nvidia' in osbuild_components"
+
+    # =========================================================================
+    # Build Verification
+    # =========================================================================
+
+    - name: Verify build-time configuration
+      ansible.builtin.debug:
+        msg:
+          - "✅ Build-time Ansible compilation completed"
+          - "Systemd units: /usr/lib/systemd/system/"
+          - "Vendor configs: /usr/etc/"
+          - "Kernel cmdline: /usr/etc/kernel/cmdline.d/"
+          - ""
+          - "Runtime overrides can be placed in /etc (takes precedence over /usr/etc)"

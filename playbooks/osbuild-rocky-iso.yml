@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Build the Rocky Linux 10.2 workstation ISO installer on tinybot.
+#
+# Uses the static, pre-verified blueprint at
+# roles/osbuild/files/rocky/10/x86_64/workstation/rocky-10-2-workstation.toml
+# rather than the dynamic Jinja2 template — that blueprint's package list was
+# checked package-by-package against live Rocky 10 / EPEL 10 / RPM Fusion
+# EL 10 repodata and intentionally excludes sway (no EPEL 10 build).
+#
+# The build host may be any EL 10 distribution (AlmaLinux or Rocky);
+# image-builder resolves `rocky-10.2` from its own distro definitions, so the
+# host does not need to match the target distro.
+
+- name: Build Rocky Linux 10.2 workstation ISO installer
+  hosts: tinybot
+  become: true
+  gather_facts: false
+  vars:
+    # Must match a name `image-builder list` reports; major-only "rocky-10"
+    # is not a known distro (see the blueprint header).
+    osbuild_distro: "rocky-10.2"
+    osbuild_arch: "x86_64"
+
+    osbuild_blueprint_name: "rocky-10-2-workstation"
+    osbuild_blueprint_version: "1.0.0"
+    osbuild_blueprint_description: "Rocky Linux Workstation 10.2"
+
+    # Static blueprint, not the Jinja2 template — the file already has its
+    # full package list and customizations baked in.
+    osbuild_use_blueprint_template: false
+    osbuild_static_blueprint_path: "files/rocky/10/x86_64/workstation/rocky-10-2-workstation.toml"
+
+    # Build mode: traditional ISO, not bootc. The role default
+    # (osbuild_only_generate: true) writes the blueprint and
+    # build-<blueprint>.sh; pass -e osbuild_only_generate=false to build here.
+    # "minimal-installer" is Fedora-only; EL distributions expose
+    # image-installer.
+    osbuild_build_bootc: false
+    osbuild_image_type: image-installer
+
+    # Components only drive --extra-repo sources and gpgkey fetching here
+    # (the static blueprint already carries its own packages); anaconda is
+    # required for an installer ISO.
+    osbuild_components:
+      - base
+      - anaconda
+      - development
+      - container-tools
+
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+    # _git_commit is set in pre_tasks: short HEAD hash of this repo, with a
+    # "-dirty" suffix when the working tree has uncommitted changes.
+    osbuild_output_filename: "rocky-10-2-workstation-{{ _git_commit }}.iso"
+
+    osbuild_build_retries: 1
+    osbuild_extra_repo_urls: []
+
+  pre_tasks:
+    # Lookups run on the controller; set_fact evaluates this once, so every
+    # role task sees the same image name.
+    - name: Set image name commit
+      ansible.builtin.set_fact:
+        _git_commit: >-
+          {{ lookup('ansible.builtin.pipe',
+             'git -C ' ~ (playbook_dir | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*"') }}
+      tags: ["always"]
+
+    - name: Gather facts as unprivileged connection user
+      ansible.builtin.setup:
+      become: false
+      tags: ["always"]
+
+    - name: Verify build host is an EL 10 distribution
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution in ["AlmaLinux", "Rocky"]
+          - ansible_distribution_major_version == "10"
+        fail_msg: >-
+          This playbook builds the Rocky Linux 10.2 blueprint and must run on an
+          AlmaLinux or Rocky Linux 10 host. Detected: {{ ansible_distribution }}
+          {{ ansible_distribution_version }}.
+        success_msg: "Build host '{{ ansible_distribution }} {{ ansible_distribution_version }}' is supported."
+
+  roles:
+    - role: osbuild

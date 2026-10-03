@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Infrastructure provisioning for image-builder build host
+
+- name: Check minimum disk space requirement
+  ansible.builtin.shell: |
+    set -o pipefail
+    df -BG {{ osbuild_work_dir | dirname }} | awk 'NR==2 {print $4}' | sed 's/G//'
+  args:
+    executable: /bin/bash
+  register: available_space
+  changed_when: false
+  failed_when: available_space.stdout | int < osbuild_min_disk_space
+
+- name: Display available disk space
+  ansible.builtin.debug:
+    msg: "Available disk space: {{ available_space.stdout }}GB (minimum required: {{ osbuild_min_disk_space }}GB)"
+
+- name: Install image-builder and related packages
+  ansible.builtin.dnf:
+    name: "{{ osbuild_host_packages[ansible_distribution] }}"
+    state: present
+  become: true
+
+- name: Create output directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ osbuild_output_dir }}"
+    - "{{ osbuild_log_dir }}"
+
+- name: Enable firewalld (optional)
+  block:
+    - name: Ensure firewalld is running
+      ansible.builtin.systemd:
+        name: firewalld
+        state: started
+        enabled: true
+      become: true
+  rescue:
+    - name: Report firewalld unavailable
+      ansible.builtin.debug:
+        msg: "firewalld is not present or could not be started; skipping (optional dependency)."
+# image-builder-cli is stateless - no daemon configuration needed

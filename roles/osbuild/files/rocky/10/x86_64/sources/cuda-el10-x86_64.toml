@@ -1,0 +1,8 @@
+# CUDA rhel10 repo per developer.nvidia.com/cuda-downloads (verified 2026-10-01)
+id = "cuda-el10-x86_64"
+name = "cuda-el10-x86_64"
+type = "yum-baseurl"
+url = "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/CDF6BA43.pub"]

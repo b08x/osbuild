@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# nm-online stub: the network is always online.
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "nm-online $*"
+exit 0

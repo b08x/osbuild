@@ -1,0 +1,11 @@
+# Build provenance (osbuild_release_file_enabled). Injected into every
+# prepared blueprint by tasks/blueprint.yml.
+
+[[customizations.files]]
+path = "/etc/syncopated-release"
+mode = "0644"
+data = '''
+SYNCOPATED_BLUEPRINT={{ osbuild_blueprint_name }}
+SYNCOPATED_DISTRO={{ osbuild_distro }}
+SYNCOPATED_COMMIT={{ osbuild_release_commit }}
+'''
