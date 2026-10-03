@@ -67,7 +67,7 @@ Add the component name to the `osbuild_components` list in [`defaults/main.yml`]
 ### **Step 3: Validate the Schema**
 Run the schema validation test:
 ```bash
-cd /home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild
+cd /home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild
 python3 tests/validate_schema.py
 ```
 Sources: [`tests/validate_schema.py`](tests/validate_schema.py#L1-L124).
@@ -260,7 +260,7 @@ The role uses **BATS (Bash Automated Testing System)** and **Python** for testin
 
 3. **Run Tests**:
    ```bash
-   cd /home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild
+   cd /home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild
    python3 tests/validate_schema.py
    bats tests/kickstart/kickstart.bats
    ansible-playbook tests/validate_build_modes.yml

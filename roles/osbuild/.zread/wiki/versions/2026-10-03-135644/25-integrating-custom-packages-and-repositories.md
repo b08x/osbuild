@@ -7,14 +7,31 @@ This documentation is **architecture-focused** and assumes familiarity with:
 
 ---
 
-## 1. Core Concept: Component-Based Package Taxonomy
+## 1. Core Concept: Canonical Package Taxonomy and Component Architecture
 
-### **1.1. Component as the Unit of Customization**
-The OSBuild role uses a **component-driven architecture** to define packages, services, and repositories. Each component is a **self-contained unit** that declares its dependencies, conflicts, and build-time impacts.
+### **1.1. Decoupled Architecture: Taxonomy vs. Components**
+The OSBuild role uses a **two-tier architecture** that cleanly separates package cataloging from image assembly:
+
+1. **Canonical Package Taxonomy (`vars/packages/*.yml`)**:
+   Located in the standalone repository root at `vars/packages/` (`Fedora.yml`, `AlmaLinux.yml`, `Rocky.yml`), these serve as the canonical source of truth for all distribution package, group, and Flatpak definitions. Cross-distribution name differences are normalized in `vars/packages/00-distributions.yml`.
+   The role dynamically loads the target distribution's taxonomy in `tasks/main.yml`:
+   ```yaml
+   - name: Load package taxonomy
+     ansible.builtin.include_vars:
+       file: "{{ role_path }}/../../vars/packages/{{ osbuild_target_distribution }}.yml"
+   ```
+
+2. **Component Assembly (`defaults/main.yml`)**:
+   The role models features as **components** defined in `osbuild_component_defs`. Components compose their package payloads by referencing the canonical taxonomy dictionaries (e.g., `packages: "{{ system_packages.System.kernel + system_packages.System.base + system_packages.System.networking }}"`).
+
+3. **Taxonomy Management Utility (`scripts/package_tracker.py`)**:
+   The standalone tool `scripts/package_tracker.py` (built with `questionary`, `rich`, and `ruamel.yaml`) maintains the canonical taxonomy files, preserves existing comments and formatting during updates, and generates build manifests in `build-selections/`.
 
 **Key files**:
-- `defaults/main.yml` (lines 152-200): Defines the **primary interface** for component selection via `osbuild_components`.
-- `vars/Fedora.yml`, `vars/AlmaLinux.yml`, `vars/Rocky.yml`: Contain **distribution-specific repository definitions** and **component taxonomies**.
+- `defaults/main.yml`: Defines the **primary interface** for component selection via `osbuild_components` and `osbuild_component_defs`.
+- `vars/packages/`: Contains canonical per-distribution taxonomies (`Fedora.yml`, `AlmaLinux.yml`, `Rocky.yml`) and mappings (`00-distributions.yml`).
+- `vars/Fedora.yml`, `vars/AlmaLinux.yml`, `vars/Rocky.yml`: Contain **distribution-specific repository definitions** and source metadata.
+- `scripts/package_tracker.py`: Interactive TUI and CLI tool for taxonomy curation and build manifest creation.
 
 ---
 
@@ -207,8 +224,57 @@ Sources: [components.yml](tasks/components.yml), [blueprint-components.toml.j2](
 
 ## 5. Adding Custom Packages and Repositories
 
-### **5.1. Step-by-Step Workflow**
-To integrate **custom packages and repositories**, follow this workflow:
+### **5.1. Maintaining the Canonical Package Taxonomy (`vars/packages/*.yml`)**
+Package definitions are decoupled from playbooks and stored in `vars/packages/{Fedora,AlmaLinux,Rocky}.yml` categorized by XDG desktop entry conventions (`System`, `Settings`, `Graphics`, `AudioVideo`, `Development`, `Utility`).
+
+### **5.2. Using `scripts/package_tracker.py`**
+The `scripts/package_tracker.py` utility supports both interactive and scriptable workflows:
+
+1. **Interactive TUI Mode**:
+   ```bash
+   python3 scripts/package_tracker.py tui
+   ```
+   - **📦 Select Packages & Create Build Manifest**: Choose target distro, blueprint name, interactive checkboxes for component subcategories (with live package counts), add optional extra packages, and export manifest to `build-selections/build-<distro>-<blueprint>-<timestamp>.<ext>`.
+   - **🔍 Search Packages in Taxonomy**: Substring search across all distros and sections (`system_packages`, `system_groups`, `system_flatpaks`).
+   - **📋 List Taxonomy Categories & Counts**: Summary view of categories and package counts per distribution.
+   - **➕ Add Package to Taxonomy**: Add packages to a single distribution or `All`. When choosing `All`, automatically applies cross-distribution mappings defined in `vars/packages/00-distributions.yml`.
+   - **➖ Remove Package from Taxonomy**: Select and delete packages with confirmation prompts.
+
+2. **CLI Subcommands**:
+   - `list`:
+     ```bash
+     python3 scripts/package_tracker.py list --distro Fedora
+     ```
+   - `search`:
+     ```bash
+     python3 scripts/package_tracker.py search ripgrep
+     ```
+   - `add`:
+     ```bash
+     # Single distro
+     python3 scripts/package_tracker.py add --distro Fedora --category Utility --subcategory cli_modern --package "ripgrep"
+     # Across all distros (consults 00-distributions.yml)
+     python3 scripts/package_tracker.py add --distro All --category Development --subcategory compilers --package "clang,lldb"
+     ```
+   - `remove`:
+     ```bash
+     python3 scripts/package_tracker.py remove --distro Fedora --category Utility --subcategory cli_modern --package "ripgrep"
+     ```
+   - `build`:
+     ```bash
+     python3 scripts/package_tracker.py build --distro Fedora --blueprint workstation --subcategories "base,kernel,networking"
+     ```
+
+### **5.3. Build Selection Manifests and Ansible Integration**
+Build selection manifests generated in `build-selections/` can be passed directly to Ansible:
+```bash
+ansible-playbook osbuild.yml -e @build-selections/build-fedora-workstation-20261003_191024.yaml
+```
+
+---
+
+### **5.4. Component-Level Integration Workflow**
+To integrate **custom packages and repositories** via component definitions, follow this workflow:
 
 1. **Define the Repository**:
    - Add the repository to the `repo` dictionary in the appropriate distribution vars file (`vars/Fedora.yml`, `vars/AlmaLinux.yml`, or `vars/Rocky.yml`).

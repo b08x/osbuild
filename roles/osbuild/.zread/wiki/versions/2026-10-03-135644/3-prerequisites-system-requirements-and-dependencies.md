@@ -125,13 +125,16 @@ The role requires **Ansible 2.15 or later**. This is enforced in the role metada
 **Sources**: [`meta/main.yml`](meta/main.yml#L7)
 
 ### Collections and Roles
-The OSBuild role has **no external Ansible collection dependencies**. However, it relies on a **collection-level package taxonomy** defined in:
-- [`vars/packages/Fedora.yml`](vars/packages/Fedora.yml)
-- [`vars/packages/AlmaLinux.yml`](vars/packages/AlmaLinux.yml)
-- [`vars/packages/Rocky.yml`](vars/packages/Rocky.yml)
+The OSBuild role has **no external Ansible collection dependencies**. Originally part of an overarching collection, osbuild is now hosted as a dedicated standalone repository at `~/WorkspaceV3/Syncopated/osbuild`.
 
-This creates a **soft dependency** on the collection structure. The role cannot be used standalone without these files.
-**Sources**: [`tasks/main.yml`](tasks/main.yml#L51-L53), [`vars/packages.yml`](vars/packages.yml#L1-L11)
+The role relies on the canonical package taxonomy files maintained directly at the root of the standalone repository:
+- `vars/packages/00-distributions.yml` (Cross-distribution package & repository mappings)
+- `vars/packages/Fedora.yml` (Fedora package taxonomy)
+- `vars/packages/AlmaLinux.yml` (AlmaLinux package taxonomy)
+- `vars/packages/Rocky.yml` (Rocky Linux package taxonomy)
+
+During execution, `tasks/main.yml` dynamically loads the appropriate target distribution taxonomy using `{{ role_path }}/../../vars/packages/{{ osbuild_target_distribution }}.yml`. Because these taxonomy files are fully self-contained within the standalone repository, the role operates independently without any collection-level dependencies.
+**Sources**: [`tasks/main.yml`](tasks/main.yml#L60-L68)
 
 ---
 

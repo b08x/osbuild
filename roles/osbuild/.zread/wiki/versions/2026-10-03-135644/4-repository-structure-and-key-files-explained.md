@@ -6,59 +6,86 @@ Understanding the repository structure is foundational for all subsequent tasks,
 
 ## 1. High-Level Repository Architecture
 
-The `osbuild` role follows a **modular, component-driven architecture** centered around **Ansible’s role conventions**, extended with custom patterns for image building. The structure is optimized for:
+The `osbuild` project is organized as a **dedicated standalone repository** (`~/WorkspaceV3/Syncopated/osbuild`) that houses both the root build environment and the encapsulated `osbuild` role located in `roles/osbuild/`. The repository architecture follows a **modular, component-driven design** combining top-level playbooks, an interactive package taxonomy management tool, and Ansible role conventions for image composition.
 
-- **Separation of concerns**: Configuration, logic, templates, and tests are isolated.
-- **Extensibility**: New distributions, components, or build modes can be added without refactoring.
-- **Testability**: Unit and integration tests are co-located with the logic they verify.
+The structure is optimized for:
+- **Separation of concerns**: Playbooks orchestrate builds, `scripts/package_tracker.py` maintains taxonomy, `vars/packages/` holds canonical package mappings, and `roles/osbuild/` implements blueprint generation and build execution.
+- **Extensibility**: New distributions, package mappings, components, or build modes can be added without refactoring existing playbooks.
+- **Standalone autonomy**: The repository includes its own `ansible.cfg`, `inventory/hosts.yml` targeting builder nodes (`gir`, `tinybot`), and package taxonomy definitions independent of external collections.
 
-Below is a **Mermaid diagram** of the repository’s architectural flow:
+Below is a **Mermaid diagram** illustrating the end-to-end repository architecture and role execution flow:
 
 ```mermaid
 flowchart TD
-    A[Ansible Playbook] -->|Triggers| B(osbuild Role)
-    B --> C[defaults/main.yml]
-    B --> D[tasks/main.yml]
-    C -->|Defines| E[Variables: distro, components, build mode]
-    D -->|Orchestrates| F[Sub-tasks: blueprint, build, validate]
-    F --> G[templates/blueprint.toml.j2]
-    F --> H[files/kickstart/syncopated.ks]
-    F --> I[templates/Containerfile.bootc.j2]
-    G -->|Generates| J[Blueprint TOML]
-    H -->|Embeds| J
-    I -->|Generates| K[Containerfile for bootc]
-    J -->|Consumed by| L[image-builder-cli]
-    K -->|Consumed by| M[Podman build]
-    L -->|Produces| N[ISO Image]
-    M -->|Produces| O[bootc Container Image]
-    N --> P[tests/validate_schema.py]
-    O --> P
+    subgraph RepoRoot["Standalone Repository Layout (~/WorkspaceV3/Syncopated/osbuild)"]
+        Tracker["scripts/package_tracker.py<br/>(TUI & CLI Taxonomy Manager)"]
+        Taxonomy["vars/packages/<br/>00-distributions.yml, Fedora.yml,<br/>AlmaLinux.yml, Rocky.yml"]
+        Playbooks["Playbooks:<br/>osbuild.yml (root) & playbooks/*.yml"]
+        Inventory["inventory/hosts.yml<br/>(Builder hosts: gir, tinybot)"]
+        
+        Tracker -->|Curates & updates| Taxonomy
+        Playbooks -->|Targets builder nodes via| Inventory
+        Playbooks -->|Invokes role| RoleDir["roles/osbuild/"]
+        Taxonomy -->|Loaded via include_vars| RoleDir
+    end
+
+    subgraph RoleLayout["Role Layout (roles/osbuild/)"]
+        RoleDir --> Defaults["defaults/main.yml"]
+        RoleDir --> Tasks["tasks/main.yml"]
+        Defaults -->|Defines components & defaults| Tasks
+        Tasks -->|Renders| BlueprintTmpl["templates/blueprint.toml.j2"]
+        Tasks -->|Embeds| KickstartFile["files/kickstart/syncopated.ks"]
+        Tasks -->|Renders| BootcTmpl["templates/Containerfile.bootc.j2"]
+    end
+
+    BlueprintTmpl -->|Generates TOML| BuilderCLI["image-builder-cli"]
+    KickstartFile -->|Injected into| BuilderCLI
+    BootcTmpl -->|Generates Containerfile| PodmanBuild["Podman build"]
+
+    BuilderCLI -->|Composes| OutputISO["Installer ISO / Disk Image"]
+    PodmanBuild -->|Composes| OutputBootc["bootc Container Image"]
 ```
 
 **Key Insight**:
-The role supports **two build modes** — traditional ISO-based images and modern `bootc` container images — using a **unified variable interface**. The mode is selected via the `osbuild_build_bootc` variable, which triggers conditional logic in tasks and templates.
+The repository provides a complete build workflow: developers and automation can use `scripts/package_tracker.py` to inspect or update package taxonomy in `vars/packages/`, execute root `osbuild.yml` or specialized playbooks in `playbooks/`, and leverage `roles/osbuild/` to drive either traditional ISO image builds or modern `bootc` container images via a unified variable interface (`osbuild_build_bootc`).
 
-Sources: [tasks/main.yml](tasks/main.yml#L1-L50), [defaults/main.yml](defaults/main.yml#L20-L80), [docs/ARCHITECTURAL_REVIEW.md](docs/ARCHITECTURAL_REVIEW.md#L45-L60)
+Sources: [osbuild.yml](../../../osbuild.yml), [tasks/main.yml](tasks/main.yml#L1-L68), [defaults/main.yml](defaults/main.yml#L20-L80), [docs/ARCHITECTURAL_REVIEW.md](docs/ARCHITECTURAL_REVIEW.md#L45-L60)
 
 ---
 
 ## 2. Directory Structure Breakdown
 
-The following table provides a **functional mapping** of each directory, its purpose, and key files:
+The repository consists of two tiers: the **standalone repository root** and the encapsulated **role layout** within `roles/osbuild/`.
 
-| Directory | Purpose | Key Files | Relationship to Other Directories |
-|---------|--------|---------|----------------------------------|
-| **`defaults/`** | Default variable definitions. Acts as the **source of truth** for configuration. | `main.yml` | Consumed by `tasks/`, `templates/`, and `vars/`. Overridable via playbooks. |
-| **`tasks/`** | Ansible task files. Orchestrates the build process. | `main.yml`, `blueprint.yml`, `build.yml`, `bootc.yml`, `select_build_mode.yml` | Uses variables from `defaults/` and `vars/`. Renders templates from `templates/`. |
-| **`templates/`** | Jinja2 templates for dynamic file generation. | `blueprint.toml.j2`, `Containerfile.bootc.j2`, `kickstart.toml.j2`, `disk.toml.j2` | Rendered by `tasks/blueprint.yml` and `tasks/bootc.yml`. |
-| **`files/`** | Static assets embedded into images. | `kickstart/syncopated.ks`, `firstboot/syncopated-firstboot`, `almalinux/10/`, `fedora/43/` | Referenced in blueprints and kickstart templates. |
-| **`vars/`** | Distribution-specific variables. | `AlmaLinux.yml`, `Fedora.yml`, `Rocky.yml`, `packages.yml` | Loaded dynamically based on `osbuild_distro`. Extends `defaults/`. |
+### 2.1 Standalone Repository Layout (`~/WorkspaceV3/Syncopated/osbuild`)
+
+| Path / Directory | Purpose | Key Files | Description |
+|------------------|---------|-----------|-------------|
+| **`osbuild.yml`** | Root playbook | `osbuild.yml` | Primary entry point for composing custom workstation images on builder hosts. |
+| **`ansible.cfg`** | Configuration | `ansible.cfg` | Configures role paths (`./roles`), default inventory, and execution settings. |
+| **`inventory/`** | Host inventory | `hosts.yml` | Defines builder hosts (`gir`, `tinybot`) grouped under `builder` and `osbuild_targets`. |
+| **`playbooks/`** | Specialized playbooks | `osbuild-rocky-iso-nvidia.yml`, `osbuild-almalinux-iso.yml`, `osbuild-rocky-cuda-container.yml`, `osbuild.yml` | Pre-configured playbook variants for target distributions, container builds, and interactive builds. |
+| **`roles/osbuild/`** | Core Ansible role | `defaults/`, `tasks/`, `templates/`, `files/`, `vars/`, `meta/`, `tests/` | Encapsulated role implementing blueprint generation, repository configuration, and image building. |
+| **`scripts/`** | Management tooling | `package_tracker.py` | Python-based TUI and CLI tool for taxonomy maintenance, package lookup, and generating build manifests. |
+| **`vars/packages/`** | Package taxonomy | `00-distributions.yml`, `Fedora.yml`, `AlmaLinux.yml`, `Rocky.yml` | Canonical source of truth for distribution packages, categories, and cross-distribution mappings. |
+| **`build-selections/`**| Build manifests | Exported YAML / JSON / TOML files | Saved component selection manifests generated by `package_tracker.py`. |
+| **`.agents/`** | AI agent skills | `skills/syncopated/SKILL.md` | Syncopated appliance builder agent skill documentation and prompt context. |
+
+### 2.2 Role Layout (`roles/osbuild/`)
+
+| Directory | Purpose | Key Files | Relationship to Repository |
+|-----------|---------|-----------|---------------------------|
+| **`defaults/`** | Default variable definitions. Acts as role **source of truth** for defaults. | `main.yml` | Consumed by `tasks/`, `templates/`, and `vars/`. Overridden by playbooks in `playbooks/` or root `osbuild.yml`. |
+| **`tasks/`** | Ansible task files orchestrating the build lifecycle. | `main.yml`, `blueprint.yml`, `build.yml`, `bootc.yml`, `select_build_mode.yml` | Loads canonical taxonomy from `../../vars/packages/` and distribution variables from `vars/`. Renders templates. |
+| **`templates/`** | Jinja2 templates for blueprint and build script generation. | `blueprint.toml.j2`, `Containerfile.bootc.j2`, `kickstart.toml.j2`, `disk.toml.j2` | Rendered by `tasks/blueprint.yml` and `tasks/bootc.yml`. |
+| **`files/`** | Static assets embedded into images. | `kickstart/syncopated.ks`, `firstboot/syncopated-firstboot`, `almalinux/10/`, `fedora/43/` | Referenced by blueprints and kickstart templates during build composition. |
+| **`vars/`** | Role repository & GPG definitions for build hosts. | `AlmaLinux.yml`, `Fedora.yml`, `Rocky.yml` | Loaded dynamically based on host distribution to supply image-builder package sources. |
 | **`meta/`** | Role metadata for Ansible Galaxy. | `main.yml` | Defines role dependencies, platforms, and author info. |
-| **`handlers/`** | Event-driven tasks (e.g., restart services). | `main.yml` | Rarely used in this role; reserved for future extensibility. |
-| **`tests/`** | Validation and testing logic. | `validate_schema.py`, `kickstart.bats`, `firstboot.bats`, `validate_build_modes.yml` | Validates outputs from `tasks/` and `templates/`. |
-| **`docs/`** | Architectural and migration documentation. | `ARCHITECTURAL_REVIEW.md`, `MIGRATION_LOG.md` | Explains design decisions and upgrade paths. |
+| **`handlers/`** | Event-driven tasks. | `main.yml` | Service notification handlers. |
+| **`tests/`** | Validation and testing logic. | `validate_schema.py`, `kickstart.bats`, `firstboot.bats`, `validate_build_modes.yml` | Validates component schema and task resolution. |
+| **`docs/`** | Architectural and migration documentation. | `ARCHITECTURAL_REVIEW.md`, `MIGRATION_LOG.md` | Explains design decisions, migration history, and upgrade paths. |
 
-Sources: [Directory Structure](#), [meta/main.yml](meta/main.yml#L1-L33), [tests/validate_schema.py](tests/validate_schema.py#L1-L30)
+Sources: [Directory Structure](#), [meta/main.yml](meta/main.yml#L1-L33), [scripts/package_tracker.py](../../../scripts/package_tracker.py)
 
 ---
 

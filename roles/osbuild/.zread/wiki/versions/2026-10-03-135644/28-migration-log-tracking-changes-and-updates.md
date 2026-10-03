@@ -226,6 +226,101 @@ description = "Syncopated User"
 
 ---
 
+### 7. **Extraction to Dedicated Standalone Repository & Package Tracker TUI Tool (2026-10-03)**
+**Objective**: Decouple the OSBuild appliance building ecosystem from the monolithic `ansible` repository into a dedicated, standalone repository with canonical package taxonomies, interactive TUI package selection, and modular playbook organization.
+
+#### **Before vs. After**
+| **Aspect**                    | **Before (Monolithic Repo)**                  | **After (Standalone Dedicated Repo)**         |
+|-------------------------------|-----------------------------------------------|-----------------------------------------------|
+| **Repository Scope**          | Embedded role within monolithic `ansible` repo| Dedicated repository `syncopatedX/osbuild`     |
+| **Repository Location**       | `ansible/roles/osbuild/`                      | `~/WorkspaceV3/Syncopated/osbuild`            |
+| **Remote Origin**             | Monolithic Ansible Git remote                 | `git@gitlab.com:syncopatedX/osbuild.git`      |
+| **Package Taxonomy**          | Scattered vars and legacy CSV script          | Canonical YAML source of truth in `vars/packages/` |
+| **Taxonomy Maintenance**      | Manual edits & legacy CSV generator script    | `scripts/package_tracker.py` (TUI + CLI)      |
+| **Build Selection Workflow**  | Manual YAML copying and variable editing      | Interactive TUI component selection & export  |
+| **Playbook Structure**        | Distributed playbooks across monolithic dirs  | Root `osbuild.yml` + specialized `playbooks/` |
+| **Inventory & Builders**      | Monolithic shared inventory                   | Dedicated `inventory/hosts.yml` (builder nodes) |
+| **Agent Skill Integration**   | N/A                                           | Integrated skill at `.agents/skills/syncopated/` |
+
+#### **Key Changes**
+
+1. **Extraction to Dedicated Repository**:
+   - Extracted the complete `osbuild` role, specialized appliance playbooks, package taxonomies, and agent skills into `~/WorkspaceV3/Syncopated/osbuild`.
+   - Initialized Git repository, committed baseline milestone (`4bd399e`), and established upstream tracking at `git@gitlab.com:syncopatedX/osbuild.git`.
+   - Standardized root layout with dedicated `ansible.cfg` configuring local role paths (`roles_path = ./roles`) and default builder inventory (`inventory = ./inventory/hosts.yml`).
+
+2. **Migration of Canonical Package Taxonomy (`vars/packages/*.yml`)**:
+   - Established `vars/packages/` at the repository root as the single canonical YAML source of truth across distributions:
+     - `00-distributions.yml`: Cross-distribution package name translations and repository requirements.
+     - `Fedora.yml`: Comprehensive Fedora package taxonomy covering base system, desktop environments, development tools, and multimedia.
+     - `AlmaLinux.yml`: AlmaLinux 9 and 10 package taxonomies.
+     - `Rocky.yml`: Rocky Linux 9 and 10 package taxonomies.
+   - Deprecated and removed legacy CSV-based package list generation scripts in favor of structured YAML schemas.
+
+3. **Package Tracker TUI and CLI Tool (`scripts/package_tracker.py`)**:
+   - Developed a Python utility combining interactive terminal UI (using `questionary` and `rich`) with non-interactive CLI capabilities.
+   - **Interactive TUI Features**:
+     - *Select Packages & Create Build Manifest*: Interactively browse categories/subcategories (base, kernel, networking, desktop, audio, nvidia) and export structured build selection manifests (YAML, JSON, or TOML) to `build-selections/`.
+     - *Search Taxonomy*: Instant substring search across Fedora, AlmaLinux, and Rocky Linux taxonomies showing section, category, subcategory, and package name.
+     - *List Taxonomy*: Inspect category summaries and package counts per distribution.
+     - *Taxonomy Modification*: Interactively add or remove packages with round-trip comment and formatting preservation powered by `ruamel.yaml`.
+   - **CLI Capabilities**: Headless commands (`list`, `search`, `add`, `remove`, `build`) for automated build pipelines and continuous integration.
+
+4. **Playbook Organization & Syntax Verification**:
+   - Organized root playbook `osbuild.yml` for unified workstation builds with dynamic distribution resolution.
+   - Restructured specialized variant playbooks into `playbooks/`:
+     - `playbooks/osbuild-rocky-iso-nvidia.yml`: Verified Rocky Linux 10.2 Workstation ISO with pre-configured NVIDIA drivers and CUDA repositories.
+     - `playbooks/osbuild-rocky-cuda-container.yml`: Rocky Linux 10.2 CUDA application container appliance.
+     - `playbooks/osbuild-almalinux-iso.yml` & `playbooks/osbuild-almalinux-iso-nvidia.yml`: AlmaLinux appliance variants.
+     - `playbooks/osbuild-rocky-iso-nvidia-interactive.yml`: Interactive partitioning variant.
+   - Executed syntax verification (`ansible-playbook --syntax-check`) across all playbooks against the standalone role hierarchy.
+
+5. **Multi-Node Builder Inventory**:
+   - Configured `inventory/hosts.yml` defining `osbuild_targets` with builder nodes:
+     - `gir`: Local/SSH build host (Fedora 43 workstation builder).
+     - `tinybot`: Remote SSH build host.
+
+#### **Rationale**
+Maintaining `osbuild` within the monolithic `ansible` repository created unnecessary coupling between general infrastructure configuration and specialized appliance image creation. Extracting the role into an autonomous repository:
+- Eliminates dependency on monolithic inventory and vault variables.
+- Provides a clean separation of concerns for image generation tooling and release pipelines.
+- Modernizes package management from error-prone CSV spreadsheets to robust, round-trip YAML manipulated by a user-friendly TUI.
+- Enables versioned tagging and standalone CI/CD validation for OS blueprints.
+
+#### **Architecture Diagram**
+```mermaid
+flowchart TD
+    subgraph RepoRoot["Standalone Repository: syncopatedX/osbuild"]
+        CFG["ansible.cfg"]
+        INV["inventory/hosts.yml<br/>(gir, tinybot)"]
+        ROOT_PB["osbuild.yml<br/>(Root Playbook)"]
+        VARS_PKG["vars/packages/*.yml<br/>(Canonical Taxonomy YAML)"]
+        PT["scripts/package_tracker.py<br/>(TUI + CLI)"]
+        BUILDS["build-selections/<br/>(Exported Manifests)"]
+        PLYS["playbooks/<br/>(Appliance Variants)"]
+        ROLE["roles/osbuild/<br/>(Core Builder Role)"]
+    end
+
+    PT -->|Reads / Updates| VARS_PKG
+    PT -->|Exports Selections| BUILDS
+    ROOT_PB -->|Loads Role| ROLE
+    PLYS -->|Loads Role| ROLE
+    INV -->|Supplies Hosts| ROOT_PB
+    INV -->|Supplies Hosts| PLYS
+    VARS_PKG -->|Feeds Repos & Packages| ROLE
+    ROLE -->|Generates Blueprint & Script| OUT["/var/tmp/osbuild-images/<br/>(Blueprints & ISOs)"]
+```
+
+**Sources**:
+- [git@gitlab.com:syncopatedX/osbuild.git](https://gitlab.com/syncopatedX/osbuild) (commit `4bd399e`)
+- [osbuild.yml](osbuild.yml)
+- [scripts/package_tracker.py](scripts/package_tracker.py)
+- [vars/packages/](vars/packages/)
+- [inventory/hosts.yml](inventory/hosts.yml)
+- [playbooks/osbuild-rocky-iso-nvidia.yml](playbooks/osbuild-rocky-iso-nvidia.yml)
+
+---
+
 ## Migration Patterns and Best Practices
 
 ### 1. **Fail Fast Principle**
@@ -253,15 +348,17 @@ description = "Syncopated User"
 ### **Test Results Summary**
 | **Test**                     | **Status** | **Details**                                                                 |
 |------------------------------|------------|-----------------------------------------------------------------------------|
-| Syntax Check                 | ✅ PASS    | No syntax errors in modified files.                                        |
-| Package Vars Load            | ✅ PASS    | All 5 package lists load correctly.                                        |
-| Legacy References            | ✅ PASS    | No `composer-cli` commands remain.                                         |
-| NVIDIA Kernel Args           | ✅ PASS    | `DRACUT_NO_XATTR=1` present in kernel arguments.                           |
-| File Structure               | ✅ PASS    | `vars/packages.yml` and `tasks/validate_components.yml` created.           |
-| Code Reduction               | ✅ PASS    | ~278 lines removed (75% reduction).                                        |
-| Component Validation         | ⏳ PENDING | Requires build host for integration testing.                               |
-| Blueprint Generation         | ⏳ PENDING | Requires build host for integration testing.                               |
-| Repository Source Extraction | ⏳ PENDING | Requires build host for integration testing.                               |
+| Syntax Check                 | ✅ PASS    | No syntax errors across role and playbooks (`osbuild.yml`, `playbooks/*.yml`).|
+| Standalone Extraction        | ✅ PASS    | Standalone repo structure, `ansible.cfg`, and inventory verified.           |
+| Package Taxonomy Loading     | ✅ PASS    | All package taxonomy files in `vars/packages/*.yml` load cleanly.           |
+| Package Tracker CLI / TUI    | ✅ PASS    | Search, list, add, remove, and build manifest export verified.              |
+| Legacy References            | ✅ PASS    | No `composer-cli` commands or legacy CSV scripts remain.                    |
+| NVIDIA Kernel Args           | ✅ PASS    | `DRACUT_NO_XATTR=1` present in kernel arguments.                            |
+| File Structure               | ✅ PASS    | `vars/packages/`, `scripts/package_tracker.py`, `playbooks/` established.   |
+| Code Reduction               | ✅ PASS    | ~278 lines removed in role; modular playbooks separated from monolithic repo.|
+| Component Validation         | ⏳ PENDING | Requires build host for integration testing.                                |
+| Blueprint Generation         | ⏳ PENDING | Requires build host for integration testing.                                |
+| Repository Source Extraction | ⏳ PENDING | Requires build host for integration testing.                                |
 
 **Sources**:
 - [MIGRATION_LOG.md](docs/MIGRATION_LOG.md#L600-L751)
@@ -284,6 +381,8 @@ description = "Syncopated User"
 1. **Migration Path**: If using `osbuild-composer`, plan to migrate to `image-builder-cli` for stateless builds.
 2. **Immutable Infrastructure**: Adopt bootc images for environments requiring **atomic upgrades** and **immutability**.
 3. **Kickstart Customization**: Use `osbuild_kickstart_partitioning: interactive` for manual disk layout control.
+4. **Standalone Workflow**: Use `ansible-playbook osbuild.yml` or specialized `playbooks/` with `inventory/hosts.yml`.
+5. **Interactive Package Selection**: Utilize `python3 scripts/package_tracker.py` prior to build execution to curate component sets.
 
 ### **Suggested Reading**
 - [Build Modes: Selecting and Configuring for Your Use Case](8-build-modes-selecting-and-configuring-for-your-use-case)
@@ -299,10 +398,12 @@ This **Migration Log** documents the evolution of the OSBuild role toward **stat
 2. **Validation**: Enforcing correctness through early input validation.
 3. **Immutability**: Adopting build-time compilation for bootc images.
 4. **Enterprise Readiness**: Adding support for Rocky Linux and configurable disk layouts.
+5. **Decoupled Architecture**: Extraction to a dedicated standalone repository with canonical YAML taxonomy and interactive Package Tracker TUI tooling.
 
 For further details, refer to the **Architectural Review** or explore the **Testing Framework** for validation strategies.
 
 **Sources**:
+- [git@gitlab.com:syncopatedX/osbuild.git](https://gitlab.com/syncopatedX/osbuild) (commit `4bd399e`)
 - [MIGRATION_LOG.md](docs/MIGRATION_LOG.md)
 - [ARCHITECTURAL_REVIEW.md](docs/ARCHITECTURAL_REVIEW.md)
 - [eae14a0 (git commit)](https://github.com/your-repo/commit/eae14a0)

@@ -6,21 +6,24 @@ The role is designed around a **component-based, declarative configuration syste
 
 ## 1. Architectural Overview: How Distributions Are Modeled
 
-The OSBuild role uses a **three-layered configuration model** to define distribution support:
+The OSBuild role uses a **four-layered configuration model** to define distribution support:
 
-1. **Default Variables (`defaults/main.yml`)**
-   Global defaults and distribution-agnostic settings. These are overridden by distribution-specific variables.
+1. **Default Variables and Interfaces (`defaults/main.yml`)**
+   Global defaults, component selection interface (`osbuild_components`), and component definitions (`osbuild_component_defs`) that map high-level features to categorized package sets.
 
-2. **Distribution-Specific Variables (`vars/<Distribution>.yml`)**
-   Defines repositories, GPG keys, package lists, and compatibility logic for a specific distribution.
+2. **Canonical Package Taxonomy (`vars/packages/<Distribution>.yml` and `00-distributions.yml`)**
+   Defined in the repository root, these files serve as the single source of truth for distribution package names (`system_packages`, `system_groups`, `system_flatpaks`, `system_copr_repos`). Mappings for distribution-specific package and repository naming differences are maintained in `00-distributions.yml`. The Python utility [`scripts/package_tracker.py`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/scripts/package_tracker.py) maintains these files and generates build manifests.
 
-3. **Templates and Tasks**
-   Jinja2 templates for blueprints, repository configurations, and kickstart files, alongside Ansible tasks that resolve variables into build artifacts.
+3. **Distribution-Specific Repository Variables (`vars/<Distribution>.yml`)**
+   Located in the role's `vars/` directory, these define repository endpoints (`repo` dictionary with `baseurl`, `metalink`, `gpgkey_url`, `check_gpg`), GPG key locations, and distribution-specific component overrides.
 
-This model ensures **separation of concerns**: global logic remains distribution-agnostic, while distribution-specific details are encapsulated in dedicated files.
+4. **Templates and Tasks**
+   Jinja2 templates for blueprints, repository configurations (`templates/etc/osbuild-composer/repositories/<distribution>-<version>.json.j2`), and kickstart files, alongside Ansible tasks that resolve variables into build artifacts.
+
+This model ensures **separation of concerns**: repository definitions, package taxonomies, and build logic are cleanly decoupled.
 
 **Key Insight**:
-> *Supporting a new distribution does not require modifying core tasks or templates. Instead, you define a new variable file and repository template, then reference them in the global configuration.*
+> *Supporting a new distribution does not require modifying core tasks or templates. Instead, you define a repository variable file, establish a package taxonomy file (or mapping in `00-distributions.yml`), create a repository template, and reference the new distribution in the global defaults.*
 
 ---
 
@@ -75,9 +78,9 @@ repo:
 ```
 
 **Sources**:
-- [Fedora.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/Fedora.yml#L1-L100)
-- [AlmaLinux.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/AlmaLinux.yml#L1-L80)
-- [Rocky.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/Rocky.yml#L1-L120)
+- [Fedora.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/Fedora.yml#L1-L78)
+- [AlmaLinux.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/AlmaLinux.yml#L1-L67)
+- [Rocky.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/Rocky.yml#L1-L89)
 
 ---
 
@@ -134,9 +137,9 @@ repo:
 ```
 
 **Sources**:
-- [fedora-43.json.j2](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/templates/etc/osbuild-composer/repositories/fedora-43.json.j2#L1-L20)
-- [almalinux-10.json.j2](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/templates/etc/osbuild-composer/repositories/almalinux-10.json.j2#L1-L20)
-- [rocky-9.json.j2](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/templates/etc/osbuild-composer/repositories/rocky-9.json.j2#L1-L30)
+- [fedora-43.json.j2](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/templates/etc/osbuild-composer/repositories/fedora-43.json.j2#L1-L20)
+- [almalinux-10.json.j2](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/templates/etc/osbuild-composer/repositories/almalinux-10.json.j2#L1-L20)
+- [rocky-9.json.j2](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/templates/etc/osbuild-composer/repositories/rocky-9.json.j2#L1-L30)
 
 ---
 
@@ -196,33 +199,124 @@ osbuild_image_type: >-
 ```
 
 **Sources**:
-- [defaults/main.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/defaults/main.yml#L40-L60)
-- [defaults/main.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/defaults/main.yml#L200-L220)
+- [defaults/main.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/defaults/main.yml#L40-L60)
+- [defaults/main.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/defaults/main.yml#L200-L220)
 
 ---
 
-### Step 4: Define Package Taxonomy (Optional)
+### Step 4: Define Package Taxonomy in Repository Root
 
-If the new distribution uses a different package manager (e.g., `zypper` for OpenSUSE), you must define a **package taxonomy** in `vars/packages/<Distribution>.yml`.
+Package taxonomies for distributions are defined in `vars/packages/<Distribution>.yml` located in the **repository root** (e.g., [`vars/packages/Fedora.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/Fedora.yml)), outside the role directory. These files serve as the canonical source of truth for package definitions and are loaded dynamically by the role in [`tasks/main.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/tasks/main.yml#L60-L68):
+
+```yaml
+- name: Load package taxonomy
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/../../vars/packages/{{ osbuild_target_distribution }}.yml"
+```
+
+#### Taxonomy Structure
+
+Package taxonomies follow the **XDG Desktop Entry Specification** registered categories (`System`, `Settings`, `Graphics`, `AudioVideo`, `Development`, `Utility`):
+- `system_packages`: Native package definitions organized by category and subcategory.
+- `system_groups`: DNF/comps group lists.
+- `system_flatpaks`: Application IDs.
+- `system_copr_repos`: COPR repository declarations.
+- Package versions are never pinned in taxonomy files (all resolve to `*`). Versions are pinned separately using `osbuild_package_pins` in `defaults/main.yml` or host/group vars.
 
 #### Example: `vars/packages/OpenSUSE.yml`
 
 ```yaml
+---
+# Canonical Package Taxonomy for OpenSUSE
 system_packages:
   System:
-    kernel: ["kernel-default"]
-    base: ["glibc", "systemd", "NetworkManager"]
-    networking: ["iproute2", "iptables"]
+    kernel:
+      - kernel-default
+    base:
+      - bash
+      - coreutils
+      - systemd
+      - rsync
+    installer:
+      - kiwi
+    ansible:
+      - ansible-core
+    networking:
+      - NetworkManager
+      - firewalld
   Settings:
-    gnome: ["gnome-shell", "gdm"]
-    sway: ["sway", "waybar"]
+    gnome:
+      - gnome-shell
+      - gdm
+    sway_core:
+      - sway
+      - waybar
   Development:
-    compilers: ["gcc", "make"]
-    languages: ["python3", "nodejs"]
+    compilers:
+      - gcc
+      - make
+    languages:
+      - python3
+      - nodejs
+system_groups:
+  base:
+    - base
+system_flatpaks: {}
+system_copr_repos: {}
 ```
 
+#### Cross-Distribution Package Mappings (`00-distributions.yml`)
+
+When package names diverge across distributions (e.g., `ansible` in Fedora vs. `ansible-core` in EL/OpenSUSE), record the differences in [`vars/packages/00-distributions.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/00-distributions.yml):
+
+```yaml
+package_mappings:
+  ansible:
+    fedora: ansible
+    rhel: ansible-core
+    almalinux: ansible-core
+    rocky: ansible-core
+    opensuse: ansible-core
+```
+
+#### Maintaining Taxonomies with `scripts/package_tracker.py`
+
+Package taxonomies can be maintained manually or managed using the [`scripts/package_tracker.py`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/scripts/package_tracker.py) tool:
+
+1. **Interactive TUI Mode**:
+   Launch the terminal interface to inspect, search, add, or remove packages, as well as generate build manifests:
+   ```bash
+   python3 scripts/package_tracker.py tui
+   ```
+
+2. **CLI Subcommands**:
+   - **Add package**:
+     ```bash
+     python3 scripts/package_tracker.py add --distro OpenSUSE --category System --subcategory kernel --package "kernel-default"
+     ```
+   - **Add package across all distributions** (automatically resolves names using `00-distributions.yml` mappings):
+     ```bash
+     python3 scripts/package_tracker.py add --distro All --category Development --subcategory compilers --package "gcc"
+     ```
+   - **Search taxonomy**:
+     ```bash
+     python3 scripts/package_tracker.py search kernel
+     ```
+   - **List categories and counts**:
+     ```bash
+     python3 scripts/package_tracker.py list --distro OpenSUSE
+     ```
+   - **Generate build manifest**:
+     ```bash
+     python3 scripts/package_tracker.py build --distro OpenSUSE --blueprint workstation --subcategories "base,kernel,networking"
+     ```
+
 **Sources**:
-- [Fedora.yml (package taxonomy)](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/Fedora.yml#L100-L300) *(hypothetical, as the actual file is not fully visible in the codebase)*
+- [vars/packages/Fedora.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/Fedora.yml#L1-L627)
+- [vars/packages/AlmaLinux.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/AlmaLinux.yml#L1-L616)
+- [vars/packages/Rocky.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/Rocky.yml#L1-L622)
+- [vars/packages/00-distributions.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/00-distributions.yml#L1-L108)
+- [package_tracker.py](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/scripts/package_tracker.py#L1-L825)
 
 ---
 
@@ -247,7 +341,7 @@ nvidia:
 ```
 
 **Sources**:
-- [defaults/main.yml (component definitions)](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/defaults/main.yml#L300-L500)
+- [defaults/main.yml (component definitions)](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/defaults/main.yml#L213-L500)
 
 ---
 
@@ -280,8 +374,8 @@ cat /var/tmp/osbuild-images/repositories/opensuse-15.6.json
 Add test cases to the **BATS** and **Python** test suites in the `tests/` directory.
 
 **Sources**:
-- [validate_build_modes.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/tests/validate_build_modes.yml)
-- [kickstart.bats](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/tests/kickstart/kickstart.bats)
+- [validate_build_modes.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/tests/validate_build_modes.yml)
+- [kickstart.bats](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/tests/kickstart/kickstart.bats)
 
 ---
 
@@ -293,13 +387,15 @@ The following diagram illustrates how variables are resolved for a new distribut
 
 ```mermaid
 flowchart TD
-    A[defaults/main.yml] -->|osbuild_distro| B[vars/<Distribution>.yml]
-    B -->|repo| C[templates/etc/osbuild-composer/repositories/<distribution>.json.j2]
-    C -->|JSON| D[osbuild-composer --extra-repo]
-    A -->|osbuild_components| E[osbuild_component_defs]
-    E -->|packages| F[blueprint.toml.j2]
-    B -->|system_packages| F
-    F -->|TOML| G[image-builder build]
+    A["defaults/main.yml"] -->|osbuild_distro| B["roles/osbuild/vars/<Distribution>.yml"]
+    A -->|osbuild_target_distribution| P["vars/packages/<Distribution>.yml"]
+    B -->|repo| C["templates/etc/osbuild-composer/repositories/<distribution>.json.j2"]
+    C -->|JSON| D["osbuild-composer --extra-repo"]
+    A -->|osbuild_components| E["osbuild_component_defs"]
+    P -->|system_packages| E
+    E -->|packages, groups| F["blueprint.toml.j2"]
+    F -->|TOML| G["image-builder build"]
+    P -.->|maintained by| T["scripts/package_tracker.py"]
 ```
 
 ### 3.2. Task-Level Integration
@@ -314,10 +410,10 @@ The following tasks are **distribution-agnostic** and will automatically support
 | `tasks/blueprint.yml` | Renders blueprint.toml | `osbuild_components`, `osbuild_component_defs` |
 
 **Sources**:
-- [tasks/select_build_mode.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/tasks/select_build_mode.yml#L1-L20)
-- [tasks/sources.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/tasks/sources.yml#L1-L30)
-- [tasks/repo_keys.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/tasks/repo_keys.yml#L1-L50)
-- [tasks/blueprint.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/tasks/blueprint.yml#L1-L50)
+- [tasks/select_build_mode.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/tasks/select_build_mode.yml#L1-L20)
+- [tasks/sources.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/tasks/sources.yml#L1-L30)
+- [tasks/repo_keys.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/tasks/repo_keys.yml#L1-L50)
+- [tasks/blueprint.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/tasks/blueprint.yml#L1-L50)
 
 ---
 
@@ -335,13 +431,18 @@ The following tasks are **distribution-agnostic** and will automatically support
 
 ## 5. Next Steps
 
-1. **Review Existing Patterns**: Study the [Fedora](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/Fedora.yml), [AlmaLinux](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/AlmaLinux.yml), and [Rocky](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/Rocky.yml) variable files.
-2. **Test Incrementally**: Start with a minimal `vars/<Distribution>.yml` file and add complexity as needed.
+1. **Review Existing Patterns**: Study the distribution variable files ([`Fedora.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/Fedora.yml), [`AlmaLinux.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/AlmaLinux.yml), and [`Rocky.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/Rocky.yml)) as well as the canonical package taxonomies in [`vars/packages/Fedora.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/Fedora.yml), [`vars/packages/AlmaLinux.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/AlmaLinux.yml), [`vars/packages/Rocky.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/Rocky.yml), and [`vars/packages/00-distributions.yml`](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/00-distributions.yml).
+2. **Test Incrementally**: Start with a minimal `vars/<Distribution>.yml` file and a corresponding `vars/packages/<Distribution>.yml`, adding complexity as needed.
 3. **Validate with CI**: Add test cases to the [Testing Framework: BATS and Python Tests](20-testing-framework-bats-and-python-tests) page.
 4. **Document**: Update the [Overview of Supported Linux Distributions](17-overview-of-supported-linux-distributions-almalinux-fedora-rocky) page to include the new distribution.
 
 **Sources**:
-- [defaults/main.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/defaults/main.yml#L1-L800)
-- [vars/Fedora.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/Fedora.yml#L1-L100)
-- [vars/AlmaLinux.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/AlmaLinux.yml#L1-L80)
-- [vars/Rocky.yml](file:///home/b08x/WorkspaceV3/Syncopated/ansible/roles/osbuild/vars/Rocky.yml#L1-L120)
+- [defaults/main.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/defaults/main.yml#L1-L903)
+- [vars/Fedora.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/Fedora.yml#L1-L78)
+- [vars/AlmaLinux.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/AlmaLinux.yml#L1-L67)
+- [vars/Rocky.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/roles/osbuild/vars/Rocky.yml#L1-L89)
+- [vars/packages/Fedora.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/Fedora.yml#L1-L627)
+- [vars/packages/AlmaLinux.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/AlmaLinux.yml#L1-L616)
+- [vars/packages/Rocky.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/Rocky.yml#L1-L622)
+- [vars/packages/00-distributions.yml](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/vars/packages/00-distributions.yml#L1-L108)
+- [package_tracker.py](file:///home/b08x/WorkspaceV3/Syncopated/osbuild/scripts/package_tracker.py#L1-L825)

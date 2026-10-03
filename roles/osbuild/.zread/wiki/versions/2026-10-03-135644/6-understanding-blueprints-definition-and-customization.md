@@ -443,7 +443,7 @@ The generated blueprint is written to:
 
 **Example**:
 ```
-/home/user/WorkspaceV3/Syncopated/ansible/roles/osbuild/build/custom.toml
+/home/user/WorkspaceV3/Syncopated/osbuild/build/custom.toml
 ```
 **Sources**: [tasks/blueprint.yml](tasks/blueprint.yml#L12-L15), [defaults/main.yml](defaults/main.yml#L15-L20)
 

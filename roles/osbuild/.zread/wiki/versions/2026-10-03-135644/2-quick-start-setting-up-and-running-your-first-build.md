@@ -24,37 +24,78 @@ By default, the role generates a build script (`build-<blueprint>.sh`) in the ou
 
 ### Key Configuration Files
 
-The OSBuild role uses the following key files to define the build configuration:
+The OSBuild standalone repository and role use the following key files to define build configurations, package taxonomies, and playbooks:
 
-| File                     | Purpose                                                                                     | Location                     |
-|--------------------------|---------------------------------------------------------------------------------------------|------------------------------|
-| `defaults/main.yml`      | Default variables for the build, including distribution, architecture, and components.      | `defaults/main.yml`          |
-| `vars/<Distribution>.yml`| Distribution-specific repository and package configurations.                               | `vars/Fedora.yml`            |
-| `tasks/main.yml`         | Orchestrates the build process, including mode selection and task execution.                | `tasks/main.yml`             |
-| `templates/blueprint.toml.j2` | Jinja2 template for generating the blueprint file, which defines the image composition. | `templates/blueprint.toml.j2`|
+| File / Path                  | Purpose                                                                                     | Location                     |
+|------------------------------|---------------------------------------------------------------------------------------------|------------------------------|
+| `osbuild.yml`                | Primary root playbook for composing custom images across supported distributions.          | `osbuild.yml`                |
+| `playbooks/*.yml`            | Specialized appliance playbooks (e.g. `playbooks/osbuild-rocky-iso-nvidia.yml`).            | `playbooks/`                 |
+| `inventory/hosts.yml`        | Builder host inventory targeting nodes (`gir`, `tinybot`) under `osbuild_targets`.          | `inventory/hosts.yml`        |
+| `scripts/package_tracker.py` | Interactive TUI & CLI tool for inspecting taxonomy, managing packages, and build manifests.| `scripts/package_tracker.py` |
+| `vars/packages/*.yml`        | Canonical package taxonomy YAML files (`00-distributions.yml`, `Fedora.yml`, `Rocky.yml`). | `vars/packages/`             |
+| `roles/osbuild/defaults/main.yml` | Default role variables including distribution, architecture, and components.           | `roles/osbuild/defaults/main.yml` |
+| `roles/osbuild/templates/blueprint.toml.j2` | Jinja2 template for generating the image blueprint.                        | `roles/osbuild/templates/blueprint.toml.j2` |
 
 ---
 
 ### Step 1: Define Your Build Variables
 
-The `defaults/main.yml` file contains the primary variables for configuring your build. Below are the key variables you need to customize for your first build:
+The `roles/osbuild/defaults/main.yml` file and the root playbook `osbuild.yml` contain the primary variables for configuring your build. Below are the key variables you can customize:
 
 | Variable                     | Description                                                                                 | Default Value                     | Example Override                     |
 |------------------------------|---------------------------------------------------------------------------------------------|-----------------------------------|---------------------------------------|
-| `osbuild_distro`             | The target distribution and version for the build.                                         | `"fedora-43"`                     | `"almalinux-10.2"`                   |
+| `osbuild_distro`             | The target distribution and version for the build.                                         | Auto-detected (`fedora-43`, `rocky-10.2`) | `"rocky-10.2"`                       |
 | `osbuild_arch`               | The target architecture for the build.                                                      | `"x86_64"`                        | `"aarch64"`                           |
-| `osbuild_blueprint_name`     | The name of the blueprint (used for output files).                                          | `"custom"`                        | `"my-workstation"`                    |
-| `osbuild_components`         | The list of components to include in the build (e.g., `base`, `gnome`, `nvidia`).           | `["base", "anaconda", "gnome"]`   | `["base", "development", "docker"]`   |
-| `osbuild_only_generate`      | If `true`, generates a build script without executing the build.                            | `true`                            | `false`                               |
+| `osbuild_blueprint_name`     | The name of the blueprint (used for output files).                                          | `"workstation"`                   | `"my-workstation"`                    |
+| `osbuild_components`         | The list of components to include in the build (e.g., `base`, `gnome`, `nvidia`).           | `["base", "anaconda", "gnome"]`   | `["base", "development", "nvidia"]`   |
+| `osbuild_only_generate`      | If `true`, generates a build script without executing the build immediately.                | `true`                            | `false`                               |
 | `osbuild_build_bootc`        | If `true`, builds a bootc container image instead of a traditional ISO.                     | `false`                           | `true`                                |
-
-For your first build, we recommend using the default values for `osbuild_distro` and `osbuild_arch`, and customizing only the `osbuild_blueprint_name` and `osbuild_components`.
+| `osbuild_output_dir`         | Directory where blueprints, build scripts, and finished images are saved.                   | `"/var/tmp/osbuild-images"`       | `"/var/lib/osbuild"`                  |
 
 ---
 
-### Step 2: Customize the Components
+### Step 2: Inspect Packages and Select Components with Package Tracker
 
-Components define the packages, services, and repositories included in your image. The `osbuild_components` variable in `defaults/main.yml` determines which components are included. Below is a summary of the available components:
+Before running a build, use the interactive **Package Tracker** tool (`scripts/package_tracker.py`) to explore distribution taxonomies, search package names, and assemble component sets.
+
+#### Interactive TUI Mode
+
+Launch the interactive terminal UI:
+
+```bash
+python3 scripts/package_tracker.py
+# or explicitly
+python3 scripts/package_tracker.py tui
+```
+
+The TUI provides several essential workflows:
+- **📦 Select Packages & Create Build Manifest**: Interactively check off components and subcategories (`base`, `kernel`, `networking`, `desktop`, `audio`, `nvidia`, etc.) and export a build manifest (YAML, JSON, or TOML) into `build-selections/`.
+- **🔍 Search Packages in Taxonomy**: Perform instant package lookups across Fedora, AlmaLinux, and Rocky Linux taxonomies to verify package naming and availability.
+- **📋 List Taxonomy Categories & Counts**: Inspect available package categories and package counts for any target distribution.
+- **➕ / ➖ Add or Remove Packages**: Update distribution YAML definitions in `vars/packages/` while preserving existing comments and formatting using `ruamel.yaml`.
+
+#### CLI Non-Interactive Mode
+
+For scripted environments or quick terminal inspections:
+
+```bash
+# Search for packages across distributions
+python3 scripts/package_tracker.py search nvidia
+
+# List categories and package counts for Rocky Linux
+python3 scripts/package_tracker.py list --distro Rocky
+
+# Generate a build manifest non-interactively
+python3 scripts/package_tracker.py build \
+  --distro Rocky \
+  --blueprint workstation \
+  --subcategories base,kernel,networking,gnome,nvidia \
+  --format yaml
+```
+
+#### Component Definitions Summary
+
+Components define the packages, services, and repositories bundled into your image. The `osbuild_components` variable determines which components are active:
 
 | Component         | Description                                                                                 | Size Impact | Build Time Impact |
 |-------------------|---------------------------------------------------------------------------------------------|-------------|-------------------|
@@ -67,98 +108,159 @@ Components define the packages, services, and repositories included in your imag
 | `container-tools` | Container tools (Podman, Buildah, Skopeo).                                                  | Medium      | Medium            |
 | `docker`          | Docker CE (experimental).                                                                    | Medium      | Medium            |
 
-For your first build, start with the `base` and `anaconda` components. You can add more components as needed.
-
-**Example: Customizing Components**
+**Example: Customizing Components in Playbook Vars**
 ```yaml
 osbuild_components:
   - base
   - anaconda
   - development
+  - nvidia
 ```
 
-Sources: [defaults/main.yml](defaults/main.yml#L80-L120)
+Sources: [roles/osbuild/defaults/main.yml](roles/osbuild/defaults/main.yml#L80-L120), [scripts/package_tracker.py](scripts/package_tracker.py)
 
 ---
 
 ## 3. Running the Build
 
-### Step 1: Create a Playbook
+In the standalone `osbuild` repository, all playbooks and inventories are structured for immediate execution.
 
-Create an Ansible playbook to execute the OSBuild role. Below is a minimal example:
+### Step 1: Select Your Playbook and Target Hosts
 
-```yaml
----
-- name: Run OSBuild Role
-  hosts: localhost
-  become: true
-  roles:
-    - osbuild
-```
+The repository includes pre-configured playbooks at the repo root and in `playbooks/`:
+- `osbuild.yml`: Root playbook for custom workstation builds across Fedora, AlmaLinux, and Rocky Linux.
+- `playbooks/osbuild-rocky-iso-nvidia.yml`: Verified Rocky Linux 10.2 Workstation ISO with pre-configured NVIDIA drivers and CUDA repositories.
+- `playbooks/osbuild-rocky-cuda-container.yml`: Rocky Linux 10.2 CUDA application container appliance.
+- `playbooks/osbuild-almalinux-iso.yml`: AlmaLinux 10.2 Workstation ISO installer.
 
-Save this playbook as `osbuild.yml` in your working directory.
+Builder hosts are defined in `inventory/hosts.yml` under the `osbuild_targets` group (e.g. `gir` as local build host, `tinybot` via SSH). `ansible.cfg` automatically configures `inventory = ./inventory/hosts.yml` and `roles_path = ./roles`.
 
 ---
 
 ### Step 2: Execute the Playbook
 
-Run the playbook using the following command:
+Run the root playbook from the repository root:
 
 ```bash
 ansible-playbook osbuild.yml
 ```
 
-By default, this will generate a build script (`build-<blueprint>.sh`) in the output directory (`/var/lib/osbuild` by default). The script contains the commands required to execute the build using `image-builder`.
+Or execute a dedicated variant playbook:
+
+```bash
+ansible-playbook playbooks/osbuild-rocky-iso-nvidia.yml
+```
+
+#### Controlling Build Execution
+
+By default, `osbuild_only_generate: true` safely generates the blueprint TOML and the execution shell script (`build-<blueprint>.sh`) in the output directory (`/var/tmp/osbuild-images`) without triggering the time-consuming image compilation.
+
+To execute the entire build directly through Ansible in a single run, set `osbuild_only_generate` to `false`:
+
+```bash
+ansible-playbook osbuild.yml -e osbuild_only_generate=false
+```
+
+To target a specific builder host:
+
+```bash
+ansible-playbook playbooks/osbuild-rocky-iso-nvidia.yml --limit gir
+```
 
 ---
 
 ### Step 3: Run the Build Script (Optional)
 
-If you set `osbuild_only_generate: true` (the default), navigate to the output directory and run the build script:
+If you ran with `osbuild_only_generate: true` (the default), navigate to the output directory and inspect or execute the generated build script:
 
 ```bash
-cd /var/lib/osbuild
+cd /var/tmp/osbuild-images
 sudo bash build-<blueprint>.sh
 ```
 
-If you set `osbuild_only_generate: false`, the build will execute automatically during the playbook run.
+The script invokes `image-builder` directly with all resolved repositories, package lists, and blueprints.
 
 ---
 
 ### Step 4: Locate the Output
 
-After the build completes, the output files (e.g., ISO image or container image) will be available in the output directory. For traditional ISO builds, the output file will be named `<blueprint-name>-<distro>-<arch>.<image-type>`. For example:
+After the build finishes, image artifacts (bootable ISOs, container archives, or QCOW2 images) are located in the output directory (`osbuild_output_dir`). For example:
 
 ```
-/var/lib/osbuild/my-workstation-fedora-43.x86_64.iso
+/var/tmp/osbuild-images/rocky-10-2-workstation-nvidia-rocky-10.2.x86_64.iso
 ```
 
 ---
 
-## 4. Example: Minimal Build Configuration
+## 4. Example: Build Configurations and Playbook Variants
 
-Below is an example of a minimal build configuration for a Fedora 43 workstation with the GNOME desktop environment.
+### Root Workstation Playbook (`osbuild.yml`)
 
-### Playbook (`osbuild.yml`)
+The root `osbuild.yml` playbook demonstrates dynamic distribution detection and modular component selection:
+
 ```yaml
 ---
-- name: Run OSBuild Role
-  hosts: localhost
+- name: Build custom workstation image
+  hosts: osbuild_targets
   become: true
+  gather_facts: true
+
   vars:
-    osbuild_blueprint_name: "my-workstation"
+    osbuild_distro_default:
+      Fedora: "fedora-{{ ansible_distribution_major_version }}"
+      AlmaLinux: "almalinux-{{ '9.8' if ansible_distribution_major_version == '9' else '10.2' }}"
+      Rocky: "rocky-{{ '9.8' if ansible_distribution_major_version == '9' else '10.2' }}"
+    osbuild_distro: "{{ osbuild_distro_default[ansible_distribution] }}"
+    osbuild_arch: "x86_64"
+
+    osbuild_blueprint_name: "workstation"
+    osbuild_blueprint_version: "1.0.0"
+    osbuild_blueprint_description: "Custom Workstation"
+
+    osbuild_build_bootc: false
+    osbuild_only_generate: true
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+
     osbuild_components:
       - base
       - anaconda
       - gnome
+      - sway
+      - nvidia
+      - development
+      - container-tools
+
   roles:
-    - osbuild
+    - role: osbuild
+```
+
+### Pre-verified Variant Playbook (`playbooks/osbuild-rocky-iso-nvidia.yml`)
+
+For specialized appliances such as Rocky Linux 10.2 with NVIDIA drivers, dedicated playbooks pin verified blueprints and repositories:
+
+```yaml
+---
+- name: Build Rocky Linux 10.2 workstation ISO installer (NVIDIA)
+  hosts: builder
+  become: true
+  gather_facts: false
+  vars:
+    osbuild_distro: "rocky-10.2"
+    osbuild_arch: "x86_64"
+    osbuild_blueprint_name: "rocky-10-2-workstation-nvidia"
+    osbuild_use_blueprint_template: false
+    osbuild_static_blueprint_path: "files/rocky/10/x86_64/workstation/rocky-10-2-workstation-nvidia.toml"
+    osbuild_only_generate: true
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+
+  roles:
+    - role: osbuild
 ```
 
 ### Expected Output
-- A blueprint file: `/var/lib/osbuild/my-workstation.toml`
-- A build script: `/var/lib/osbuild/build-my-workstation.sh`
-- A bootable ISO image: `/var/lib/osbuild/my-workstation-fedora-43.x86_64.iso` (if `osbuild_only_generate: false`)
+- Blueprint file: `/var/tmp/osbuild-images/<blueprint-name>.toml`
+- Build script: `/var/tmp/osbuild-images/build-<blueprint-name>.sh`
+- Bootable ISO image: `/var/tmp/osbuild-images/<blueprint-name>-<distro>.<arch>.iso` (when executed)
 
 ---
 
