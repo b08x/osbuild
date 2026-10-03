@@ -5,12 +5,14 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 ## Repository Structure
 
 ```text
-├── osbuild.yml                  # Root image build playbook
+├── osbuild.yml                  # Root image build playbook (image-builder CLI)
+├── composer_cli.yml             # Alternative root build playbook (osbuild-composer daemon)
 ├── ansible.cfg                  # Ansible configuration
 ├── inventory/                   # Host inventories (builder nodes: gir, tinybot)
 │   └── hosts.yml
 ├── playbooks/                   # Appliance & ISO build playbooks
 │   ├── osbuild.yml
+│   ├── composer_cli.yml         # Alternative daemon-driven builder playbook
 │   ├── osbuild-almalinux-iso.yml
 │   ├── osbuild-almalinux-iso-nvidia.yml
 │   ├── osbuild-rocky-iso.yml
@@ -20,7 +22,8 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 │   ├── osbuild-rocky-iso-nvidia-interactive.yml
 │   └── osbuild-rocky-cuda-container.yml
 ├── roles/                       # Standalone Ansible roles
-│   └── osbuild/                 # Primary osbuild image composer role
+│   ├── osbuild/                 # Primary osbuild image composer role (image-builder CLI)
+│   └── composer_cli/            # Alternative composer-cli role (osbuild-composer daemon)
 ├── scripts/
 │   └── package_tracker.py       # TUI and CLI tool for taxonomy maintenance & build tracking
 ├── vars/
@@ -117,6 +120,29 @@ ansible-playbook playbooks/osbuild-almalinux-iso.yml
 | `osbuild_build_bootc` | `false` | Set `true` to build a bootc container image |
 | `osbuild_components` | `[base, ...]` | List of component definitions to bundle into the blueprint |
 | `osbuild_extra_packages` | `[]` | Additional package list injected into the build |
+
+---
+
+## Alternative Workflow: `composer_cli` (Daemon-Driven Builds)
+
+In addition to the primary `osbuild` role (which invokes Red Hat's unified `image-builder` CLI directly), the repository provides `roles/composer_cli` as an alternative daemon-driven workflow.
+
+`composer_cli` provisions the `osbuild-composer` systemd service, configures distribution repositories (RPMFusion, CRB, EPEL), deploys declarative blueprints to `/etc/osbuild-composer/blueprints/`, and uses `composer-cli` (Fedora) or `weldr-client` (EL 9/10) over the Weldr socket API.
+
+### Execution
+
+```bash
+# Provision osbuild-composer and push blueprint to builder hosts (gir, tinybot)
+ansible-playbook composer_cli.yml
+
+# Or execute with custom parameters and start compose immediately
+ansible-playbook composer_cli.yml \
+  -e composer_cli_blueprint_name="workstation" \
+  -e composer_cli_compose_type="qcow2" \
+  -e composer_cli_start_compose=true
+```
+
+For full options and architectural comparison, see [`roles/composer_cli/README.md`](roles/composer_cli/README.md).
 
 ---
 

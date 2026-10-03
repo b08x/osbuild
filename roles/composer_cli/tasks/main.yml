@@ -1,0 +1,95 @@
+---
+# tasks file for composer_cli
+
+- name: Starting composer_cli tasks
+  ansible.builtin.debug:
+    msg: "Starting composer_cli tasks on {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
+  tags: ["always"]
+
+- name: Load distribution-specific tasks
+  ansible.builtin.include_tasks: "{{ distro_tasks_file }}"
+  vars:
+    distro_tasks_file: "{{ lookup('ansible.builtin.first_found', distro_lookup) }}"
+    distro_lookup:
+      - "{{ role_path }}/tasks/distro/{{ ansible_distribution }}.yml"
+      - "{{ role_path }}/tasks/distro/default.yml"
+  tags: ["composer_cli"]
+
+- name: Install osbuild-composer packages
+  ansible.builtin.dnf:
+    name: "{{ composer_cli_os_packages[ansible_distribution] }}"
+    state: present
+  notify: Restart osbuild-composer
+  tags: ["composer_cli"]
+
+- name: Ensure blueprint directory exists
+  ansible.builtin.file:
+    path: "{{ composer_cli_blueprint_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: ["composer_cli"]
+
+- name: Deploy blueprint TOML
+  ansible.builtin.copy:
+    dest: "{{ composer_cli_blueprint_path }}"
+    content: "{{ composer_cli_blueprint_toml }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify: Restart osbuild-composer
+  tags: ["composer_cli"]
+
+- name: Enable and start osbuild-composer service
+  ansible.builtin.systemd:
+    name: "{{ composer_cli_service_name }}"
+    state: "{{ composer_cli_service_state }}"
+    enabled: "{{ composer_cli_service_enabled }}"
+  tags: ["composer_cli"]
+
+- name: Flush handlers before pushing blueprint
+  ansible.builtin.meta: flush_handlers
+  tags: ["composer_cli"]
+
+- name: Push blueprint to osbuild-composer
+  ansible.builtin.command:
+    cmd: composer-cli blueprints push {{ composer_cli_blueprint_path }}
+  changed_when: false
+  tags: ["composer_cli"]
+
+- name: List blueprints to verify registration
+  ansible.builtin.command:
+    cmd: composer-cli blueprints list
+  register: composer_cli_blueprint_list
+  changed_when: false
+  tags: ["composer_cli"]
+
+- name: Verify blueprint is registered
+  ansible.builtin.assert:
+    that:
+      - composer_cli_blueprint_name in composer_cli_blueprint_list.stdout
+    fail_msg: >-
+      Blueprint '{{ composer_cli_blueprint_name }}' was not found in
+      composer-cli blueprints list output
+    success_msg: >-
+      Blueprint '{{ composer_cli_blueprint_name }}' is registered
+  tags: ["composer_cli"]
+
+- name: Start compose
+  ansible.builtin.command:
+    cmd: >-
+      composer-cli compose start
+      {{ composer_cli_blueprint_name }}
+      {{ composer_cli_compose_type }}
+  register: composer_cli_compose_result
+  changed_when: true
+  when: composer_cli_start_compose
+  tags: ["composer_cli"]
+
+- name: Display compose UUID
+  ansible.builtin.debug:
+    msg: "Compose started: {{ composer_cli_compose_result.stdout }}"
+  when: composer_cli_start_compose
+  tags: ["composer_cli"]

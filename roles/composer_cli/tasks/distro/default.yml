@@ -1,0 +1,8 @@
+---
+# Default distribution tasks — no distro-specific repository setup
+# Falls through cleanly for distributions without custom repo requirements.
+
+- name: Default distribution setup
+  ansible.builtin.debug:
+    msg: "No distro-specific repository setup required for {{ ansible_distribution }}"
+  tags: ["repos"]

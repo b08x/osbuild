@@ -1,0 +1,7 @@
+---
+# handlers file for b08x.rhel_builder.composer_cli
+
+- name: Restart osbuild-composer
+  ansible.builtin.systemd:
+    name: "{{ composer_cli_service_name }}"
+    state: restarted

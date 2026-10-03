@@ -1,0 +1,33 @@
+---
+galaxy_info:
+  author: b08x
+  description: Provision a composer-cli workstation blueprint and manage composes via osbuild-composer
+  company: b08x
+  license: GPL-3.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Fedora
+      versions:
+        - all
+    - name: AlmaLinux
+      versions:
+        - "8"
+        - "9"
+        - "10"
+    - name: Rocky
+      versions:
+        - "9"
+        - "10"
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+        - "10"
+  galaxy_tags:
+    - osbuild
+    - composer
+    - composercli
+    - image
+    - weldr
+
+dependencies: []

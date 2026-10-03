@@ -1,0 +1,16 @@
+---
+# AlmaLinux-specific tasks
+
+- name: Enable CRB repository
+  ansible.builtin.dnf:
+    name: almalinux-release-crb
+    state: present
+  tags:
+    - repos
+
+- name: Enable Extra Packages for Enterprise Linux (EPEL)
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  tags:
+    - repos

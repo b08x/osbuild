@@ -1,0 +1,17 @@
+---
+# vars file for composer_cli
+# Internal role constants — not intended for user override.
+
+composer_cli_os_packages:
+  Fedora:
+    - osbuild-composer
+    - composer-cli
+  # EL 9/EL 10 renamed the composer-cli utility package to weldr-client,
+  # which ships /usr/bin/composer-cli (verified inside rockylinux:9,
+  # rockylinux:10 and almalinux:10 containers, 2026-10-01).
+  AlmaLinux:
+    - osbuild-composer
+    - weldr-client
+  Rocky:
+    - osbuild-composer
+    - weldr-client

@@ -1,0 +1,19 @@
+---
+# Rocky-specific tasks
+# Rocky has no rocky-release-crb package; CRB is a pre-defined but disabled
+# repository, enabled through dnf config-manager (verified inside a
+# rockylinux:9 and rockylinux:10 container, 2026-10-01).
+
+- name: Enable CRB repository
+  ansible.builtin.command:
+    cmd: dnf config-manager --set-enabled crb
+  changed_when: false
+  tags:
+    - repos
+
+- name: Enable Extra Packages for Enterprise Linux (EPEL)
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  tags:
+    - repos

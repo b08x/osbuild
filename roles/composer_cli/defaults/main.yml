@@ -1,0 +1,60 @@
+---
+# defaults file for composer_cli
+# Overridable settings — role runs successfully with zero user variables.
+
+composer_cli_blueprint_name: "workstation"
+composer_cli_blueprint_description: >-
+  Composer-cli workstation blueprint with desktop, GPU compute,
+  and container tooling
+composer_cli_blueprint_version: "1.0.0"
+composer_cli_blueprint_dir: "/etc/osbuild-composer/blueprints"
+composer_cli_blueprint_path: "{{ composer_cli_blueprint_dir }}/{{ composer_cli_blueprint_name }}.toml"
+
+composer_cli_compose_type: "qcow2"
+composer_cli_compose_output_dir: "/var/lib/osbuild-composer/outputs"
+composer_cli_start_compose: false
+
+composer_cli_service_name: "osbuild-composer"
+composer_cli_service_state: "started"
+composer_cli_service_enabled: true
+
+# Default blueprint TOML definition if no custom template/file is provided
+composer_cli_blueprint_toml: |
+  name = "{{ composer_cli_blueprint_name }}"
+  description = "{{ composer_cli_blueprint_description }}"
+  version = "{{ composer_cli_blueprint_version }}"
+
+  [[packages]]
+  name = "gnome-desktop"
+  version = "*"
+
+  [[packages]]
+  name = "sway"
+  version = "*"
+
+  [[packages]]
+  name = "akmod-nvidia"
+  version = "*"
+
+  [[packages]]
+  name = "xorg-x11-drv-nvidia-cuda"
+  version = "*"
+
+  [[packages]]
+  name = "intel-oneapi-base-toolkit"
+  version = "*"
+
+  [[packages]]
+  name = "podman"
+  version = "*"
+
+  [[packages]]
+  name = "buildah"
+  version = "*"
+
+  [customizations]
+  hostname = "composer-cli-workstation"
+
+  [[customizations.filesystem]]
+  mountpoint = "/"
+  minsize = "10 GiB"
