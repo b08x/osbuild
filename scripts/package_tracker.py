@@ -4,7 +4,9 @@
 Interactive and CLI tool to:
 1. Maintain per-distribution package taxonomies (add/remove packages, groups, flatpaks)
    in vars/packages/{Fedora,AlmaLinux,Rocky}.yml using ruamel.yaml to preserve formatting.
-2. Interactively select packages, components, and groups for image builds and export
+2. Verify that package names exist in the repos each distro's builds use
+   (`add` checks by default, `verify` audits the taxonomy, `build --verify`).
+3. Interactively select packages, components, and groups for image builds and export
    build selection manifests (YAML, JSON, TOML) for osbuild image generation.
 """
 
@@ -14,6 +16,8 @@ import argparse
 import datetime
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -50,6 +54,132 @@ def get_yaml() -> YAML:
     return yaml
 
 
+# =============================================================================
+# Repository availability verification
+# =============================================================================
+
+# Repositories each taxonomy is checked against: the distro's base repos plus
+# the third-party repos the builds depsolve against (EPEL, RPM Fusion, VS Code,
+# Google Chrome, Docker CE, NVIDIA CUDA and Container Toolkit). Mirrors roles/osbuild/vars/<distro>.yml and the
+# --extra-repo lists in playbooks/. Entries are (repo id, base URL).
+REPO_PROFILES: Dict[str, List[Tuple[str, str]]] = {
+    "Rocky": [
+        ("rocky-baseos", "https://dl.rockylinux.org/pub/rocky/10/BaseOS/x86_64/os/"),
+        ("rocky-appstream", "https://dl.rockylinux.org/pub/rocky/10/AppStream/x86_64/os/"),
+        ("rocky-crb", "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"),
+        ("rocky-plus", "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"),
+        ("rocky-rt", "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"),
+        ("epel", "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64/"),
+        ("rpmfusion-free-updates", "http://download1.rpmfusion.org/free/el/updates/10/x86_64/"),
+        ("rpmfusion-nonfree-updates", "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64/"),
+        ("vscode", "https://packages.microsoft.com/yumrepos/vscode"),
+        ("google-chrome", "http://dl.google.com/linux/chrome/rpm/stable/x86_64"),
+        ("docker-ce-stable", "https://download.docker.com/linux/centos/10/x86_64/stable"),
+        ("cuda", "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"),
+        ("nvidia-container-toolkit", "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"),
+    ],
+    "AlmaLinux": [
+        ("almalinux-baseos", "https://repo.almalinux.org/almalinux/10/BaseOS/x86_64/os/"),
+        ("almalinux-appstream", "https://repo.almalinux.org/almalinux/10/AppStream/x86_64/os/"),
+        ("almalinux-crb", "https://repo.almalinux.org/almalinux/10/CRB/x86_64/os/"),
+        ("epel", "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64/"),
+        ("rpmfusion-free-updates", "http://download1.rpmfusion.org/free/el/updates/10/x86_64/"),
+        ("rpmfusion-nonfree-updates", "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64/"),
+        ("vscode", "https://packages.microsoft.com/yumrepos/vscode"),
+        ("google-chrome", "http://dl.google.com/linux/chrome/rpm/stable/x86_64"),
+        ("docker-ce-stable", "https://download.docker.com/linux/centos/10/x86_64/stable"),
+        ("cuda", "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"),
+        ("nvidia-container-toolkit", "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"),
+    ],
+    "Fedora": [
+        ("fedora", "https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/"),
+        ("fedora-updates", "https://dl.fedoraproject.org/pub/fedora/linux/updates/43/Everything/x86_64/"),
+        ("rpmfusion-free", "http://download1.rpmfusion.org/free/fedora/releases/43/Everything/x86_64/os/"),
+        ("rpmfusion-free-updates", "http://download1.rpmfusion.org/free/fedora/updates/43/x86_64/"),
+        ("rpmfusion-nonfree", "http://download1.rpmfusion.org/nonfree/fedora/releases/43/Everything/x86_64/os/"),
+        ("rpmfusion-nonfree-updates", "http://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/"),
+        ("vscode", "https://packages.microsoft.com/yumrepos/vscode"),
+        ("google-chrome", "http://dl.google.com/linux/chrome/rpm/stable/x86_64"),
+        ("docker-ce-stable", "https://download.docker.com/linux/fedora/43/x86_64/stable"),
+        ("cuda", "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64"),
+        ("nvidia-container-toolkit", "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"),
+    ],
+}
+
+REPO_ID_PREFIX = "ptv-"
+
+# Value reported for names the verifier does not look up.
+SKIPPED_GROUP = "skipped: comps group"
+
+
+class RepoVerifier:
+    """Check that package names exist in the repos a distro's builds use.
+
+    One ``dnf repoquery`` call (argument list, no shell) resolves every
+    requested name; results are cached per name. Names that look like options
+    are rejected up front because dnf5 does not accept a ``--`` separator.
+    """
+
+    def __init__(self, distro: str, arch: str = "x86_64", dnf: str = "dnf"):
+        if distro not in REPO_PROFILES:
+            raise ValueError(f"No repository profile for distro '{distro}'")
+        self.distro = distro
+        self.arch = arch
+        self.dnf = dnf
+        self.cache: Dict[str, Optional[str]] = {}
+
+    @staticmethod
+    def dnf_available(dnf: str = "dnf") -> bool:
+        return shutil.which(dnf) is not None
+
+    def _command(self, names: List[str]) -> List[str]:
+        cmd = [self.dnf, "repoquery", "--quiet", f"--forcearch={self.arch}"]
+        for repo_id, url in REPO_PROFILES[self.distro]:
+            # The prefix keeps ids from colliding with repos configured on the
+            # host (e.g. "fedora"); --repo then limits the query to these.
+            cmd += [f"--repofrompath={REPO_ID_PREFIX}{repo_id},{url}", f"--repo={REPO_ID_PREFIX}{repo_id}"]
+        cmd += ["--latest-limit=1", "--qf", "%{name} %{repoid}\n", *names]
+        return cmd
+
+    def check(self, packages: List[str]) -> Dict[str, Optional[str]]:
+        """Return {package: repo id providing it, or None when unavailable}.
+
+        Comps groups (``@name``) are reported as SKIPPED_GROUP. Raises
+        RuntimeError when dnf fails, so a network error is not mistaken for
+        a missing package.
+        """
+        result: Dict[str, Optional[str]] = {}
+        todo: List[str] = []
+        for pkg in packages:
+            if pkg in self.cache:
+                result[pkg] = self.cache[pkg]
+            elif pkg.startswith("@"):
+                result[pkg] = SKIPPED_GROUP
+            elif not pkg or pkg.startswith("-") or any(c.isspace() for c in pkg):
+                raise ValueError(f"Invalid package name: {pkg!r}")
+            else:
+                todo.append(pkg)
+
+        if todo:
+            proc = subprocess.run(
+                self._command(todo), capture_output=True, text=True, check=False
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"dnf repoquery failed for {self.distro} (rc={proc.returncode}): "
+                    f"{proc.stderr.strip()[-300:]}"
+                )
+            found: Dict[str, str] = {}
+            for line in proc.stdout.splitlines():
+                parts = line.split()
+                if len(parts) == 2:
+                    found.setdefault(parts[0], parts[1].removeprefix(REPO_ID_PREFIX))
+            for pkg in todo:
+                self.cache[pkg] = found.get(pkg)
+                result[pkg] = self.cache[pkg]
+        return result
+
+
 class TaxonomyManager:
     """Manages loading, updating, and exporting package taxonomies."""
 
@@ -65,7 +195,34 @@ class TaxonomyManager:
         self.yaml = get_yaml()
         self.distro_data: Dict[str, CommentedMap] = {}
         self.distributions_map: Dict[str, Any] = {}
+        self.verifiers: Dict[str, RepoVerifier] = {}
         self.load_all()
+
+    def get_verifier(self, distro: str) -> RepoVerifier:
+        """Return the (cached) availability verifier for a distribution."""
+        if distro not in self.verifiers:
+            self.verifiers[distro] = RepoVerifier(distro)
+        return self.verifiers[distro]
+
+    def resolve_name(self, requested_distro: str, distro: str, package: str) -> str:
+        """Translate a package name for `distro` when adding across all distros."""
+        if requested_distro == "All":
+            mappings = self.distributions_map.get("package_mappings", {})
+            if package in mappings and distro.lower() in mappings[package]:
+                return mappings[package][distro.lower()]
+        return package
+
+    def all_taxonomy_packages(
+        self, distro: str, section: str = "system_packages"
+    ) -> List[Tuple[str, str, str]]:
+        """Return (category, subcategory, package) for every entry in a section."""
+        entries: List[Tuple[str, str, str]] = []
+        for cat, subcats in (self.distro_data.get(distro, {}).get(section) or {}).items():
+            for subcat, pkgs in (subcats or {}).items():
+                for pkg in pkgs or []:
+                    if isinstance(pkg, str):
+                        entries.append((cat, subcat, pkg))
+        return entries
 
     def load_all(self):
         """Load all distribution files and cross-distribution mappings."""
@@ -177,12 +334,7 @@ class TaxonomyManager:
             pkg_list = data[section][category][subcategory]
 
             # Check mapping if adding across distros
-            target_pkg = package
-            if distro == "All":
-                map_key = d.lower()
-                mappings = self.distributions_map.get("package_mappings", {})
-                if package in mappings and map_key in mappings[package]:
-                    target_pkg = mappings[package][map_key]
+            target_pkg = self.resolve_name(distro, d, package)
 
             if target_pkg not in pkg_list:
                 pkg_list.append(target_pkg)
@@ -383,6 +535,16 @@ def cli_search(manager: TaxonomyManager, query: str):
             print(f"[{r['distro']}] {r['category']}/{r['subcategory']} -> {r['package']}")
 
 
+def _say(kind: str, msg: str):
+    """Print a status line: kind is ok, warn or err."""
+    styles = {"ok": ("✓", "bold green"), "warn": ("!", "yellow"), "err": ("✗", "bold red")}
+    mark, style = styles[kind]
+    if console:
+        console.print(f"[{style}]{mark}[/{style}] {msg}")
+    else:
+        print(f"{mark} {msg}")
+
+
 def cli_add_package(
     manager: TaxonomyManager,
     distro: str,
@@ -390,23 +552,89 @@ def cli_add_package(
     subcategory: str,
     package: str,
     section: str = "system_packages",
+    verify: bool = True,
 ):
-    """Add a package via CLI."""
+    """Add a package via CLI.
+
+    With `verify`, each name is looked up in the target distro's repos and is
+    only added where a repo provides it. When dnf is missing the names are
+    added unverified, with a warning.
+    """
     packages = [p.strip() for p in package.split(",") if p.strip()]
-    for p in packages:
-        success = manager.add_package(distro, category, subcategory, p, section)
-        if success:
-            msg = f"Added '{p}' to {distro} -> {category}/{subcategory} ({section})"
-            if console:
-                console.print(f"[bold green]✓[/bold green] {msg}")
+    targets = DISTROS if distro == "All" else [distro]
+
+    if verify and not RepoVerifier.dnf_available():
+        _say("warn", "dnf not found; adding without verifying availability")
+        verify = False
+
+    for d in targets:
+        names = [manager.resolve_name(distro, d, p) for p in packages]
+        availability: Dict[str, Optional[str]] = {}
+        if verify:
+            try:
+                availability = manager.get_verifier(d).check(names)
+            except RuntimeError as exc:
+                _say("err", f"{d}: {exc}; nothing added for this distro")
+                continue
+
+        for name in names:
+            repo = availability.get(name, SKIPPED_GROUP) if verify else None
+            if verify and repo is None:
+                _say(
+                    "warn",
+                    f"'{name}' is not in any {d} repo; not added "
+                    f"(use --no-verify to add it anyway)",
+                )
+                continue
+            if manager.add_package(d, category, subcategory, name, section):
+                where = f" [{repo}]" if repo and repo != SKIPPED_GROUP else ""
+                _say("ok", f"Added '{name}' to {d} -> {category}/{subcategory} ({section}){where}")
             else:
-                print(f"✓ {msg}")
+                _say("warn", f"Package '{name}' already exists in {d} -> {category}/{subcategory}")
+
+
+def cli_verify(
+    manager: TaxonomyManager,
+    distro: str,
+    packages: Optional[str] = None,
+    section: str = "system_packages",
+) -> int:
+    """Check taxonomy entries (or the given names) against the distro repos.
+
+    Returns 0 when every name is available, 1 when some are missing, 2 when
+    verification could not run.
+    """
+    if not RepoVerifier.dnf_available():
+        _say("err", "dnf not found; cannot verify availability")
+        return 2
+
+    targets = DISTROS if distro == "All" else [distro]
+    missing_total = 0
+    for d in targets:
+        if packages:
+            names = [manager.resolve_name(distro, d, p.strip()) for p in packages.split(",") if p.strip()]
+            locations: Dict[str, List[str]] = {n: [] for n in names}
         else:
-            msg = f"Package '{p}' already exists in {distro} -> {category}/{subcategory}"
-            if console:
-                console.print(f"[yellow]![/yellow] {msg}")
-            else:
-                print(f"! {msg}")
+            locations = {}
+            for cat, subcat, pkg in manager.all_taxonomy_packages(d, section):
+                locations.setdefault(pkg, []).append(f"{cat}/{subcat}")
+            names = list(locations)
+
+        try:
+            availability = manager.get_verifier(d).check(names)
+        except RuntimeError as exc:
+            _say("err", str(exc))
+            return 2
+
+        missing = sorted(n for n, repo in availability.items() if repo is None)
+        checked = sum(1 for r in availability.values() if r != SKIPPED_GROUP)
+        _say("ok" if not missing else "warn", f"{d}: {checked - len(missing)}/{checked} available")
+        for name in missing:
+            where = ", ".join(locations.get(name, []))
+            print(f"    missing: {name}" + (f"  ({where})" if where else ""))
+        missing_total += len(missing)
+
+    return 1 if missing_total else 0
 
 
 def cli_remove_package(
@@ -442,6 +670,7 @@ def cli_build_manifest(
     subcategories: List[str],
     output: Optional[str] = None,
     export_format: str = "yaml",
+    verify: bool = False,
 ):
     """Generate and export a build manifest via CLI."""
     # Resolve (cat, subcat) pairs
@@ -462,6 +691,20 @@ def cli_build_manifest(
                 print(f"Warning: subcategory '{req}' not found in {distro} taxonomy.")
 
     manifest = manager.generate_build_manifest(distro, blueprint, selected_pairs)
+    if verify:
+        if RepoVerifier.dnf_available():
+            try:
+                found = manager.get_verifier(distro).check(
+                    manifest["build_specification"]["packages"]
+                )
+                unavailable = sorted(n for n, repo in found.items() if repo is None)
+                manifest["metadata"]["unavailable_packages"] = unavailable
+                for name in unavailable:
+                    _say("warn", f"'{name}' is not in any {distro} repo")
+            except RuntimeError as exc:
+                _say("err", str(exc))
+        else:
+            _say("warn", "dnf not found; skipping availability check")
     out_path = manager.export_manifest(
         manifest, Path(output) if output else None, export_format=export_format
     )
@@ -772,6 +1015,19 @@ def main():
     add_p.add_argument("--subcategory", required=True, help="Subcategory name (e.g. base)")
     add_p.add_argument("--package", required=True, help="Package name or comma-separated list")
     add_p.add_argument("--section", default="system_packages", help="YAML section (default: system_packages)")
+    add_p.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Add without checking the package exists in the distro's repos",
+    )
+
+    # verify
+    verify_p = subparsers.add_parser(
+        "verify", help="Check package availability in each distro's repos"
+    )
+    verify_p.add_argument("--distro", choices=["All", *DISTROS], default="All")
+    verify_p.add_argument("--package", help="Package name or comma-separated list (default: whole taxonomy)")
+    verify_p.add_argument("--section", default="system_packages", help="YAML section (default: system_packages)")
 
     # remove
     rm_p = subparsers.add_parser("remove", help="Remove package(s) from taxonomy")
@@ -792,6 +1048,11 @@ def main():
     )
     build_p.add_argument("--output", help="Path to write the manifest")
     build_p.add_argument("--format", choices=["yaml", "json", "toml"], default="yaml")
+    build_p.add_argument(
+        "--verify",
+        action="store_true",
+        help="Warn about packages that no repo of the distro provides",
+    )
 
     # interactive
     subparsers.add_parser("tui", help="Launch interactive TUI mode")
@@ -806,12 +1067,19 @@ def main():
     elif args.command == "search":
         cli_search(manager, args.query)
     elif args.command == "add":
-        cli_add_package(manager, args.distro, args.category, args.subcategory, args.package, args.section)
+        cli_add_package(
+            manager, args.distro, args.category, args.subcategory, args.package,
+            args.section, verify=not args.no_verify,
+        )
+    elif args.command == "verify":
+        sys.exit(cli_verify(manager, args.distro, args.package, args.section))
     elif args.command == "remove":
         cli_remove_package(manager, args.distro, args.category, args.subcategory, args.package, args.section)
     elif args.command == "build":
         subcats = [s.strip() for s in args.subcategories.split(",") if s.strip()]
-        cli_build_manifest(manager, args.distro, args.blueprint, subcats, args.output, args.format)
+        cli_build_manifest(
+            manager, args.distro, args.blueprint, subcats, args.output, args.format, args.verify
+        )
     elif args.command == "tui" or args.command is None:
         if sys.stdin.isatty():
             tui_main_loop(manager)

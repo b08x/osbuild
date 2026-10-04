@@ -199,6 +199,11 @@ Procedure:
 
    No output means the repo does not provide that name. EL and Fedora names
    differ; check `vars/packages/00-distributions.yml` (`package_mappings`).
+   `python3 scripts/package_tracker.py verify --distro Rocky --package a,b`
+   runs the same lookup against the Rocky, AlmaLinux or Fedora repo profile
+   (`REPO_PROFILES`); `verify` without `--package` audits the whole taxonomy
+   (exit 1 when names are missing). `add` runs it by default and skips names
+   a distro's repos do not provide (`--no-verify` overrides).
    Leave the name out of a distro that has no build of it, and say so in a
    comment (the files already do this for sway on EPEL 10).
 3. **Add the repo when the package needs one the build does not use yet.**
