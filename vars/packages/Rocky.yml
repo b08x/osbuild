@@ -50,6 +50,8 @@ system_packages:
       - erofs-utils
       - nbd
       - cifs-utils
+      - perl-IPC-Cmd
+      - perl-FindBin
     installer:
       - anaconda
       - anaconda-gui
