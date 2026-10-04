@@ -118,6 +118,19 @@ system_packages:
       - cockpit-machines
       - cockpit-podman
       - cockpit-storaged
+    gui_toolkit:
+      - qt6-qtbase
+      - qt6-qttools
+      - qt6-qtmultimedia
+      - qt6-qtdeclarative
+      - qt5-qtbase
+      - qt5-qttools
+      - qt5-qtquickcontrols2
+      - qt5-qtgraphicaleffects
+      - qscintilla-qt5
+      - qt6ct
+      - gtk4
+      - gtksourceview4
   Settings:
     gnome:
       - gnome-shell
@@ -224,6 +237,10 @@ system_packages:
       - gcc-c++
       - cmake
       - make
+      - gtk3-devel
+      - sassc
+      - meson
+      - ninja-build
     languages:
       - python3-devel
       - python3-pip

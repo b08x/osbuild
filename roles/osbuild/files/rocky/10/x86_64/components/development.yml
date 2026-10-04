@@ -9,6 +9,8 @@ label: "Compilers, language toolchains and -devel packages"
 # rbenv, ruby-build-rbenv and ruby-build-ruby are EPEL 10 packages
 # (verified 2026-10-03). ruby-build-core ships no definitions; CRuby
 # definitions (e.g. 4.0.4) come only from ruby-build-ruby.
+# meson and ninja-build are CRB; sassc is EPEL 10; gtk3-devel is AppStream
+# (all verified 2026-10-04).
 # nodejs and nodejs-npm are AppStream. Rocky 10 has no package named "npm".
 repo_urls:
   - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
@@ -23,8 +25,11 @@ packages:
   - "chromium-headless"
   - "gcc"
   - "gcc-c++"
+  - "gtk3-devel"
   - "golang"
   - "lm_sensors-devel"
+  - "meson"
+  - "ninja-build"
   - "nodejs"
   - "nodejs-npm"
   - "postgresql-server"
@@ -34,3 +39,4 @@ packages:
   - "ruby-build-rbenv"
   - "ruby-build-ruby"
   - "ruby-devel"
+  - "sassc"

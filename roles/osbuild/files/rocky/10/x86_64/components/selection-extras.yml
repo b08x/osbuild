@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "selection-extras" for Rocky Linux 10 (x86_64).
+# Packages from build-selections/build-rocky-syncopated-dx-20261004_022220.toml
+# that no other component carries. Sources (verified 2026-10-04 with dnf
+# repoquery against Rocky 10 BaseOS/AppStream/CRB/RT and EPEL 10):
+# AppStream: alsa-plugins-pulseaudio, cmake, gnome-system-monitor,
+# libvirt-daemon-kvm, ncurses-devel, python3-devel, python3-pip, xdg-utils.
+# CRB: virt-manager. RT: tuned-profiles-realtime.
+# EPEL 10: a2jmidid, ansible-collection-community-general, bridge-utils,
+# distribution-gpg-keys, fedora-packager, mock, rpmlint.
+# Not in these repos, so not listed: NetworkManager-config-connectivity-fedora,
+# alsa-tools, ansible-collection-community-{docker,libvirt,postgresql,
+# library_inventory_filtering_v1}, docker-ce, docker-ce-cli,
+# docker-buildx-plugin, docker-compose-plugin, ebtables, gnome-terminal,
+# libguestfs-tools, pulseaudio-module-bluetooth, rt-tests, zlib-devel
+# (EL 10 ships zlib-ng-compat-devel).
+# Versions are never pinned here; use osbuild_package_pins.
+label: "Extra packages from the syncopated-dx selection"
+repo_urls:
+  - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+  - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
+  - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
+services: []
+kernel_args: []
+packages:
+  - "a2jmidid"
+  - "alsa-plugins-pulseaudio"
+  - "ansible-collection-community-general"
+  - "bridge-utils"
+  - "cmake"
+  - "distribution-gpg-keys"
+  - "fedora-packager"
+  - "gnome-system-monitor"
+  - "libvirt-daemon-kvm"
+  - "mock"
+  - "ncurses-devel"
+  - "python3-devel"
+  - "python3-pip"
+  - "rpmlint"
+  - "tuned-profiles-realtime"
+  - "virt-manager"
+  - "xdg-utils"
