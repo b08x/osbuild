@@ -34,9 +34,12 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 │       └── Rocky.yml            # Rocky Linux package taxonomy
 ├── build-selections/            # Exported build selection manifests
 ├── requirements.txt             # Python dependencies
-└── .agents/
+├── .agents/
+│   └── skills/
+│       └── syncopated/          # Syncopated appliance builder agent skill
+└── .claude/
     └── skills/
-        └── syncopated/          # Syncopated appliance builder agent skill
+        └── syncopated/          # Same SKILL.md, for Claude Code
 ```
 
 ---
@@ -59,7 +62,7 @@ Features:
 - **Select Packages & Create Build Manifest**: Interactively check off components/subcategories (base, kernel, networking, desktop, audio, nvidia) and export a build manifest (YAML, JSON, or TOML) to `build-selections/`.
 - **Search Packages**: Fast lookup across Fedora, AlmaLinux, and Rocky taxonomies showing category, subcategory, and cross-distribution mappings.
 - **List Taxonomy**: View categorized package lists and counts for any target distribution.
-- **Add Packages**: Interactively add packages to single or all distributions, leveraging `00-distributions.yml` mappings with `ruamel.yaml` round-trip formatting preservation.
+- **Add Packages**: Interactively add packages to single or all distributions, translating names per distribution through `00-distributions.yml` mappings.
 - **Remove Packages**: Interactively select and remove packages with confirmation.
 
 ### CLI Non-Interactive Mode
@@ -86,6 +89,29 @@ python3 scripts/package_tracker.py build \
   --subcategories base,kernel,networking,gnome \
   --format yaml
 ```
+
+Notes:
+- `add` and `remove` rewrite the whole taxonomy file. Each save drops the leading `---` and reformats empty lists (`audio:\n    []` in `Rocky.yml` and `AlmaLinux.yml`). Review `git diff vars/packages` and revert those lines.
+- `add` appends to the end of the subcategory list. `remove` matches the exact name only, also with `--distro All`.
+- Build manifests in `build-selections/` are a record of a selection. The `osbuild` role does not read them.
+
+### Where Package Lists Live
+
+A package name can appear in three places. Each feeds a different set of builds:
+
+| Layer | File | Used by |
+|---|---|---|
+| Taxonomy | `vars/packages/<Distro>.yml` (`system_packages.<Category>.<subcategory>`) | Jinja-template blueprints (`osbuild.yml`), through `osbuild_component_defs` |
+| Components | `roles/osbuild/files/rocky/10/x86_64/components/<name>.yml` (`packages:`) | `osbuild-rocky-iso-nvidia-components.yml` |
+| Static blueprints | `roles/osbuild/files/<distro>/<major>/<arch>/<kind>/*.toml` (`packages = [ … ]`) | The other `playbooks/osbuild-*.yml` playbooks |
+
+To add a package to every workstation build, edit all three layers for each distribution that provides the name, and each static blueprint variant (`-workstation.toml` and `-workstation-nvidia.toml` are separate lists). Commit `3729a07` (`ruby-build-ruby`) is an example. Before adding a name, confirm the target repository provides it:
+
+```bash
+dnf repoquery -q --repofrompath=r,<repo URL> --repo r --qf '%{name} %{repoid}\n' <package>
+```
+
+The full procedure (new repositories, removals, verification) is in `.claude/skills/syncopated/SKILL.md`, section 4.
 
 ---
 
@@ -118,8 +144,9 @@ ansible-playbook playbooks/osbuild-almalinux-iso.yml
 | `osbuild_image_type` | Auto-detected | `image-installer`, `minimal-installer`, `qcow2`, `container` |
 | `osbuild_only_generate` | `true` | Generates blueprint and build script without running image-builder |
 | `osbuild_build_bootc` | `false` | Set `true` to build a bootc container image |
-| `osbuild_components` | `[base, ...]` | List of component definitions to bundle into the blueprint |
-| `osbuild_extra_packages` | `[]` | Additional package list injected into the build |
+| `osbuild_components` | `[base, ...]` | Component definitions (`osbuild_component_defs`) for template blueprints; their `sources` select `--extra-repo` repositories |
+| `osbuild_blueprint_components` | `[]` | Non-empty: compose the blueprint from `files/<distro>/<major>/<arch>/components/*.yml` (Rocky 10 only) |
+| `osbuild_extra_packages` | `[]` | Additional packages for template and component blueprints; static blueprints ignore it |
 
 ---
 
@@ -148,4 +175,4 @@ For full options and architectural comparison, see [`roles/composer_cli/README.m
 
 ## Agent Skill
 
-This repository includes the **Syncopated Appliance Builder Skill** at `.agents/skills/syncopated/SKILL.md`. AI agents can reference this skill to assist with generating tailored blueprints and verifying build scripts.
+This repository includes the **Syncopated Appliance Builder Skill** at `.agents/skills/syncopated/SKILL.md`, with an identical copy at `.claude/skills/syncopated/SKILL.md` for Claude Code. The skill generates a playbook for a requested image, writes or composes its blueprint, and verifies the result (`ansible-playbook`, `shellcheck`, `image-builder manifest` depsolve, `ansible-lint`) without building the image. It also covers adding and removing packages. Edit both copies together.
