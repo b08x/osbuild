@@ -1,0 +1,15 @@
+# Appended verbatim by the osbuild role for the intel-oneapi component.
+# Array-of-tables only: [customizations.kernel] and [customizations.services]
+# are merged and rendered by the role from the component's kernel_args/services.
+
+# Writes the .repo file into the installed system so dnf can update the oneAPI
+# packages. Depsolve uses the component's repo_urls, not this entry.
+[[customizations.repositories]]
+id = "Intel-OneAPI"
+name = "Intel oneAPI"
+baseurls = ["https://yum.repos.intel.com/oneapi"]
+gpgcheck = true
+gpgkeys = [
+    "https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB",
+]
+enabled = true

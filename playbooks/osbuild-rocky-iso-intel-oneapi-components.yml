@@ -1,0 +1,139 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Rocky Linux 10.2 Intel oneAPI workstation ISO, composed from package
+# components, with interactive partitioning.
+#
+# Generate-only: writes <osbuild_blueprint_name>.toml and
+# build-<osbuild_blueprint_name>.sh to osbuild_output_dir and stops. Build with
+#   ansible-playbook playbooks/osbuild-rocky-iso-intel-oneapi-components.yml
+#   bash /var/tmp/osbuild-images/build-rocky-10-2-workstation-intel-oneapi-components.sh
+#
+# Components: the NVIDIA workstation set with `nvidia` replaced by
+# `intel-oneapi` (EPEL GPU compute runtime: OpenCL, Level Zero, ocloc, VPL;
+# Intel oneAPI repo: DPC++ compiler, oneMKL). `intel-graphics` stays for the
+# media driver and Intel firmware. See
+# roles/osbuild/files/rocky/10/x86_64/components/intel-oneapi.yml. The full
+# intel-basekit/intel-hpckit meta packages are not included (about 15GB).
+#
+# osbuild_kickstart_partitioning: interactive embeds
+# files/kickstart/syncopated-interactive.ks, which has no %pre disk selection
+# and no storage commands. Anaconda's Installation Destination screen then has
+# to be completed by the user, next to Root Password and User Creation.
+#
+# gir is Fedora 43, not EL 10: osbuild_sources is emptied so no host-derived
+# (Fedora) repos reach the Rocky compose, and osbuild_target_distribution makes
+# the role resolve component paths from osbuild_distro, not the host.
+#
+# Secure Boot is compatible: no out-of-tree kernel modules are installed.
+
+- name: Generate Rocky Linux 10.2 Intel oneAPI workstation ISO blueprint from components
+  hosts: builder
+  become: true
+  gather_facts: false
+  vars:
+    # Must match a name `image-builder list` reports; major-only "rocky-10"
+    # is not a known distro. image-builder 84 on gir ships rocky-10.0/10.1/10.2
+    # image-installer for x86_64.
+    osbuild_distro: "rocky-10.2"
+    osbuild_arch: "x86_64"
+
+    osbuild_blueprint_name: "rocky-10-2-workstation-intel-oneapi-components"
+    osbuild_blueprint_version: "1.0.0"
+    osbuild_hostname: "syncopated-dx-intel"
+    osbuild_blueprint_description: "Rocky Linux Workstation 10.2 (Intel oneAPI, components, interactive partitioning)"
+
+    # Leave disk selection and layout to Anaconda's Installation Destination
+    # screen instead of the %pre script.
+    osbuild_kickstart_partitioning: interactive
+
+    # Composed from component files; see header.
+    osbuild_use_blueprint_template: false
+    osbuild_blueprint_components:
+      - base
+      - anaconda
+      - gnome-desktop
+      - fonts
+      - audio
+      - multimedia
+      - google-chrome
+      - intel-graphics
+      - development
+      - containers-virt
+      - cockpit
+      - intel-oneapi
+
+    # Build mode: traditional ISO, not bootc. Generate files only; do not
+    # invoke image-builder. "minimal-installer" is Fedora-only; EL
+    # distributions expose image-installer.
+    osbuild_only_generate: true
+    osbuild_build_bootc: false
+    osbuild_image_type: image-installer
+
+    # Legacy component definitions (osbuild_component_defs), still validated by
+    # the role. base and anaconda contribute no sources and no packages here;
+    # package selection is osbuild_blueprint_components above.
+    osbuild_components:
+      - base
+      - anaconda
+
+    # Suppress the host-derived (Fedora) common source list. See header.
+    osbuild_sources: []
+
+    # --extra-repo URLs come from the components' repo_urls.
+
+    osbuild_output_dir: "/var/tmp/osbuild-images"
+    # _git_commit is set in pre_tasks: short HEAD hash of this repo, with a
+    # "-dirty" suffix when the working tree has uncommitted changes.
+    osbuild_output_filename: "rocky-10-2-workstation-intel-oneapi-components-{{ _git_commit }}.iso"
+
+    osbuild_build_retries: 1
+
+  pre_tasks:
+    - name: Gather facts as unprivileged connection user
+      ansible.builtin.setup:
+      become: false
+      tags: ["always"]
+
+    - name: Verify build host is Fedora or an EL 10 distribution
+      ansible.builtin.assert:
+        that:
+          - >-
+            ansible_distribution == "Fedora" or
+            (ansible_distribution in ["AlmaLinux", "Rocky"] and
+             ansible_distribution_major_version == "10")
+        fail_msg: >-
+          This playbook builds the Rocky Linux 10.2 Intel oneAPI blueprint and must
+          run on a Fedora or EL 10 host. Detected: {{ ansible_distribution }}
+          {{ ansible_distribution_version }}.
+        success_msg: "Build host '{{ ansible_distribution }} {{ ansible_distribution_version }}' is supported."
+      tags: ["always"]
+
+    # Lookups run on the controller; set_fact evaluates this once, so every
+    # role task sees the same image name.
+    - name: Set image name commit
+      ansible.builtin.set_fact:
+        _git_commit: >-
+          {{ lookup('ansible.builtin.pipe',
+             'git -C ' ~ (playbook_dir | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*"') }}
+      tags: ["always"]
+
+    - name: List image types known to the installed image-builder
+      ansible.builtin.command: image-builder list
+      register: _image_builder_list
+      changed_when: false
+      tags: ["always"]
+
+    - name: Verify image-builder can build the requested distro and image type
+      ansible.builtin.assert:
+        that:
+          - _wanted in _image_builder_list.stdout_lines
+        fail_msg: >-
+          '{{ _wanted }}' is not in `image-builder list` on {{ inventory_hostname }}.
+          Upgrade image-builder or change osbuild_distro.
+        success_msg: "image-builder supports '{{ _wanted }}'."
+      vars:
+        _wanted: "{{ osbuild_distro }} type:{{ osbuild_image_type }} arch:{{ osbuild_arch }}"
+      tags: ["always"]
+
+  roles:
+    - role: osbuild

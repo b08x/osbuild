@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "intel-oneapi" for Rocky Linux 10 (x86_64).
+# GPU compute runtime (OpenCL, Level Zero, ocloc, VPL) comes from EPEL 10,
+# which the "base" component already adds to the depsolve repos. The DPC++
+# compiler and oneMKL come from Intel's oneAPI repository. Every name was
+# verified against live repodata (2026-10-04). Versions are never pinned here;
+# use osbuild_package_pins. Combine with "intel-graphics" for the media driver
+# and Intel firmware (RPM Fusion Nonfree).
+label: "Intel GPU compute runtime and oneAPI DPC++/MKL"
+repo_urls:
+  - "https://yum.repos.intel.com/oneapi"
+services: []
+kernel_args: []
+fragment: intel-oneapi.toml
+packages:
+  - "intel-compute-runtime"
+  - "intel-igc"
+  - "intel-level-zero"
+  - "intel-ocloc"
+  - "intel-opencl"
+  - "oneapi-level-zero"
+  - "libvpl"
+  - "intel-oneapi-compiler-dpcpp-cpp"
+  - "intel-oneapi-mkl-devel"
