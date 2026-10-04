@@ -17,11 +17,11 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 │   ├── osbuild-almalinux-iso-nvidia.yml
 │   ├── osbuild-rocky-iso.yml
 │   ├── osbuild-rocky-iso-nvidia.yml
+│   ├── osbuild-rocky-iso-nvidia-generate.yml
+│   ├── osbuild-rocky-iso-nvidia-interactive.yml
 │   ├── osbuild-rocky-iso-components.yml
 │   ├── osbuild-rocky-iso-nvidia-components.yml
 │   ├── osbuild-rocky-iso-intel-oneapi-components.yml
-│   ├── osbuild-rocky-iso-nvidia-generate.yml
-│   ├── osbuild-rocky-iso-nvidia-interactive.yml
 │   └── osbuild-rocky-cuda-container.yml
 ├── roles/                       # Standalone Ansible roles
 │   ├── osbuild/                 # Primary osbuild image composer role (image-builder CLI)
@@ -29,7 +29,7 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 ├── scripts/
 │   └── package_tracker.py       # TUI and CLI tool for taxonomy maintenance & build tracking
 ├── vars/
-│   └── packages/                # Canonical package taxonomy (source of truth)
+│   └── packages/                # Canonical package taxonomy (authoritative package lists)
 │       ├── 00-distributions.yml # Cross-distribution package & repository mappings
 │       ├── Fedora.yml           # Fedora package taxonomy
 │       ├── AlmaLinux.yml        # AlmaLinux package taxonomy
@@ -48,7 +48,7 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 
 ## Package Tracker TUI (`scripts/package_tracker.py`)
 
-The repository includes a modern Python-based TUI and CLI tool for managing the package taxonomy and selecting components for image builds.
+The repository includes a Python TUI and CLI tool for managing the package taxonomy and selecting components for image builds.
 
 ### Interactive Mode (TUI)
 
@@ -69,7 +69,7 @@ Features:
 
 ### CLI Non-Interactive Mode
 
-The script can also be executed in scripts, automated pipelines, or CI:
+The script can also be run from scripts or CI pipelines:
 
 ```bash
 # List categories and package counts
@@ -97,7 +97,7 @@ Notes:
 - `add` appends to the end of the subcategory list. `remove` matches the exact name only, also with `--distro All`.
 - Build manifests in `build-selections/` are a record of a selection. The `osbuild` role does not read them.
 
-### Where Package Lists Live
+### Where Package Lists Are Defined
 
 A package name can appear in three places. Each feeds a different set of builds:
 
@@ -107,25 +107,27 @@ A package name can appear in three places. Each feeds a different set of builds:
 | Components | `roles/osbuild/files/rocky/10/x86_64/components/<name>.yml` (`packages:`) | The `osbuild-rocky-iso-*components.yml` playbooks |
 | Static blueprints | `roles/osbuild/files/<distro>/<major>/<arch>/<kind>/*.toml` (`packages = [ … ]`) | The other `playbooks/osbuild-*.yml` playbooks |
 
-To add a package to every workstation build, edit all three layers for each distribution that provides the name, and each static blueprint variant (`-workstation.toml` and `-workstation-nvidia.toml` are separate lists). Commit `3729a07` (`ruby-build-ruby`) is an example. Before adding a name, confirm the target repository provides it:
+To add a package to every workstation build, edit all three layers for each distribution that provides the name. In the static layer, edit every blueprint variant (`-workstation.toml` and `-workstation-nvidia.toml` are separate lists). Commit `3729a07` (`ruby-build-ruby`) is an example. Before adding a name, confirm the target repository provides it:
 
 ```bash
 dnf repoquery -q --repofrompath=r,<repo URL> --repo r --qf '%{name} %{repoid}\n' <package>
 ```
 
-The full procedure (new repositories, removals, verification) is in `.claude/skills/syncopated/SKILL.md`, section 4.
+The full procedure (new repositories, removals, verification) is in [SKILL.md, section 4](.claude/skills/syncopated/SKILL.md).
 
 ---
 
 ## Building Images with Ansible
 
-Run the main playbook to compose a custom workstation image:
+Run the main playbook to generate a blueprint and a build script. Run the script to build the image:
 
 ```bash
 ansible-playbook osbuild.yml
 ```
 
 ### Common Variants
+
+Each command writes `<name>.toml` and `build-<name>.sh` to `/var/tmp/osbuild-images`. Run the script to build.
 
 ```bash
 # Rocky Linux 10.2 Workstation ISO with NVIDIA drivers
@@ -150,13 +152,13 @@ ansible-playbook playbooks/osbuild-almalinux-iso.yml
 | `osbuild_image_type` | Auto-detected | `image-installer`, `minimal-installer`, `qcow2`, `container` |
 | `osbuild_only_generate` | `true` | Generates blueprint and build script without running image-builder |
 | `osbuild_build_bootc` | `false` | Set `true` to build a bootc container image |
-| `osbuild_components` | `[base, ...]` | Component definitions (`osbuild_component_defs`) for template blueprints; their `sources` select `--extra-repo` repositories |
+| `osbuild_components` | `[base, ...]` | Component definitions (`osbuild_component_defs`) for template blueprints; their `sources` select `--extra-repo` repositories. Not the `components/*.yml` files; see `osbuild_blueprint_components` |
 | `osbuild_blueprint_components` | `[]` | Non-empty: compose the blueprint from `files/<distro>/<major>/<arch>/components/*.yml` (Rocky 10 only) |
 | `osbuild_extra_packages` | `[]` | Additional packages for template and component blueprints; static blueprints ignore it |
 
 ---
 
-## Alternative Workflow: `composer_cli` (Daemon-Driven Builds)
+## Alternative Workflow: `composer_cli` (Builds Through the osbuild-composer Daemon)
 
 In addition to the primary `osbuild` role (which invokes Red Hat's unified `image-builder` CLI directly), the repository provides `roles/composer_cli` as an alternative daemon-driven workflow.
 
