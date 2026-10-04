@@ -183,4 +183,107 @@ For full options and architectural comparison, see [`roles/composer_cli/README.m
 
 ## Agent Skill
 
-This repository includes the **Syncopated Appliance Builder Skill** at `.agents/skills/syncopated/SKILL.md`, with an identical copy at `.claude/skills/syncopated/SKILL.md` for Claude Code. The skill generates a playbook for a requested image, writes or composes its blueprint, and verifies the result (`ansible-playbook`, `shellcheck`, `image-builder manifest` depsolve, `ansible-lint`) without building the image. It also covers adding and removing packages. Edit both copies together.
+This repository includes the **Syncopated Appliance Builder Skill** at `.agents/skills/syncopated/SKILL.md`, with an identical copy at `.claude/skills/syncopated/SKILL.md` for Claude Code. Edit both copies together.
+
+The skill turns a plain-language request into a playbook for the `osbuild` role, writes or composes the blueprint, and verifies both. It never builds the image; the final step is running the generated `build-<name>.sh`. Invoke it from Claude Code:
+
+```text
+/syncopated <request>
+```
+
+### How a Request Is Handled
+
+1. **Clarify.** Up to three questions, asked only when the request leaves something open: image kind (installer ISO, application container, bootc image, qcow2), distro and version as `image-builder list` names it, hardware stack, and disk layout for ISOs.
+2. **Pick a template.** The closest playbook in `playbooks/` becomes the starting point, and the blueprint source is chosen from components, a static `.toml`, or the Jinja template.
+3. **Verify.** `ansible-playbook`, `shellcheck` on the build script, an `image-builder manifest` depsolve, and `ansible-lint`. The manifest RPM list is inspected, not just its exit code.
+4. **Report.** The build command, what was verified, and what was not (no image built, no VM install test).
+
+### Examples
+
+Each prompt below is a starting point; the skill asks about anything the prompt leaves out.
+
+**A new image from a description**
+
+```text
+/syncopated Rocky Linux 10.2 workstation installer ISO with NVIDIA drivers, auto disk layout
+```
+
+The closest match is `playbooks/osbuild-rocky-iso-nvidia.yml`. The result is a playbook that writes `<name>.toml` and `build-<name>.sh` to `/var/tmp/osbuild-images`, followed by the verification run.
+
+**A variant of an existing build**
+
+```text
+/syncopated same as the Rocky NVIDIA ISO, but with the Anaconda Installation Destination screen instead of the automatic layout
+```
+
+This maps to `osbuild_kickstart_partitioning: interactive` (see `playbooks/osbuild-rocky-iso-nvidia-interactive.yml`). A variant gets its own `osbuild_blueprint_name` and `osbuild_output_filename`, so the original build's files stay untouched.
+
+**A blueprint composed from components**
+
+```text
+/syncopated Rocky 10.2 ISO with Intel GPU compute runtime and oneAPI (DPC++, MKL), interactive disk layout
+```
+
+Rocky 10 builds can be assembled from `roles/osbuild/files/rocky/10/x86_64/components/*.yml` through `osbuild_blueprint_components`. This request lands on `playbooks/osbuild-rocky-iso-intel-oneapi-components.yml`. Adding or dropping a component changes the package mix without copying a monolithic blueprint.
+
+**An application container**
+
+```text
+/syncopated CUDA application container on Rocky 10.2 for running PyTorch jobs
+```
+
+"Container" is ambiguous, so the skill asks whether an OCI application image or a bootc OS image is wanted. For an application container it installs `cuda-toolkit` rather than the `cuda` meta package (which would pull in the kernel module), disables the kickstart, firstboot and Flathub injection, and tags the output so the build script can `podman load` it. The host supplies the GPU driver:
+
+```bash
+podman run --device nvidia.com/gpu=all <image>
+```
+
+**Adding a package to the workstation builds**
+
+```text
+/syncopated add perl-IPC-Cmd and perl-FindBin to the default workstation packages
+```
+
+The skill searches `vars/packages` and `roles/osbuild/files` for each name, confirms the target repositories provide it, and edits the taxonomy, the components, and every static blueprint variant. Names that exist only on some distributions are left out of the others, with a comment saying so. The commit convention is `➕ chore(packages): …`.
+
+**Removing a package**
+
+```text
+/syncopated drop htop from the Rocky workstation builds
+```
+
+Removal also covers what exists only for that package: component `services:` units, `kernel_args`, fragments, and `repo_urls`. An explicit removal does not exclude a package that another package requires, so the manifest RPM list is checked afterwards.
+
+**Applying a build selection**
+
+```text
+/syncopated I added packages to the taxonomy and exported build-selections/build-rocky-workstation-gx-<timestamp>.yaml; adjust the playbook to match and verify the names (no duplicates)
+```
+
+Manifests in `build-selections/` are a record; the `osbuild` role does not read them. The skill reads the selection and carries it into the playbook and the layers above.
+
+**Keeping the skill current**
+
+```text
+update the skill instructions to reflect the latest codebase @.claude/skills/syncopated/ @.agents/skills/syncopated/
+```
+
+Both copies change together, and the README table in [Where Package Lists Are Defined](#where-package-lists-are-defined) should be checked against the result.
+
+### Verification Commands
+
+The skill runs these before reporting; the same commands work by hand against any generated build.
+
+```bash
+ansible-playbook playbooks/<new>.yml
+shellcheck /var/tmp/osbuild-images/build-<name>.sh
+ansible-lint playbooks/<new>.yml roles/osbuild
+
+# Depsolve without building; run in bash (zsh does not word-split the repo flags)
+bash -c 'image-builder manifest image-installer --distro rocky-10.2 --arch x86_64 \
+  --blueprint <name>.toml --extra-repo <URL> > m.json'
+```
+
+After editing role files, the matching test suites in `roles/osbuild/tests/` apply; the table in [SKILL.md, section 5](.claude/skills/syncopated/SKILL.md) lists which suite covers which file.
+
+> **Note:** `image-builder build` prints scriptlet errors from `grub2-probe` and `dracut` (no `/dev/log`, no block devices in the sandbox). These are expected; a failed osbuild stage or a non-zero exit code is the real signal.
