@@ -47,6 +47,7 @@
       - fonts
       - audio
       - multimedia
+      - google-chrome
       - intel-graphics
       - development
       - containers-virt

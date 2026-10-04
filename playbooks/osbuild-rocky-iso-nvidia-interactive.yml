@@ -68,6 +68,7 @@
       - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
       - "http://download1.rpmfusion.org/free/el/updates/10/x86_64"
       - "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64"
+      - "http://dl.google.com/linux/chrome/rpm/stable/x86_64"
       # Rocky CRB, Plus and RT (BaseOS/AppStream are image-builder's base repos).
       - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
       - "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"

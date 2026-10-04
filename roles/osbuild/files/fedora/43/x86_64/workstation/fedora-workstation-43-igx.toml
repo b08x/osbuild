@@ -373,6 +373,7 @@ packages = [
     { name = "nvidia-persistenced", version = "*" },
     { name = "nvidia-settings", version = "*" },
     { name = "nvtop", version = "*" },
+    { name = "google-chrome-stable", version = "*" },
 ]
 
 [customizations]

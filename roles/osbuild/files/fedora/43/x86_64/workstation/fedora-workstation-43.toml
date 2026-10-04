@@ -283,6 +283,7 @@ packages = [
     { name = "intel-vpl-gpu-rt", version = "*" },
     { name = "intel-vsc-firmware", version = "*" },
     { name = "libva-intel-media-driver", version = "*" },
+    { name = "google-chrome-stable", version = "*" },
 ]
 
 [customizations]

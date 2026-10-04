@@ -264,6 +264,7 @@ packages = [
     { name = "yad", version = "*" },
     { name = "yq", version = "*" },
     { name = "zsh", version = "*" },
+    { name = "google-chrome-stable", version = "*" },
 ]
 
 [customizations]

@@ -249,6 +249,7 @@ packages = [
     { name = "intel-gpu-firmware", version = "*" },
     { name = "intel-vpl-gpu-rt", version = "*" },
     { name = "intel-vsc-firmware", version = "*" },
+    { name = "google-chrome-stable", version = "*" },
 ]
 
 [customizations]
