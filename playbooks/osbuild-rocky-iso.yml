@@ -54,7 +54,11 @@
     osbuild_output_filename: "rocky-10-2-workstation-{{ _git_commit }}.iso"
 
     osbuild_build_retries: 1
-    osbuild_extra_repo_urls: []
+    osbuild_extra_repo_urls:
+      # Rocky CRB, Plus and RT (BaseOS/AppStream are image-builder's base repos).
+      - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
+      - "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"
+      - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
 
   pre_tasks:
     # Lookups run on the controller; set_fact evaluates this once, so every

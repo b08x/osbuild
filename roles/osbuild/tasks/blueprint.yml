@@ -80,6 +80,32 @@
         block: "{{ lookup('ansible.builtin.template', 'flathub-remote.toml.j2') }}"
         insertafter: EOF
 
+# Rocky ships CRB, Plus and RT in rocky.repo, rocky-extras.repo and
+# rocky-addons.repo with enabled=0. The prepared copies under
+# files/rocky/<major>/<arch>/yum.repos.d/ enable them and replace the
+# packaged files in the image (rocky-repos marks them %config(noreplace), so
+# updates write .rpmnew instead of reverting them).
+- name: Inject Rocky repository files
+  when:
+    - osbuild_rocky_repo_files_enabled | bool
+    - osbuild_target_distribution == 'Rocky'
+  vars:
+    _osbuild_rocky_repo_dir: "rocky/{{ _distro_major_version }}/{{ osbuild_arch }}/yum.repos.d"
+  block:
+    - name: Assert Rocky repository files fit in TOML literal strings
+      ansible.builtin.assert:
+        that: "\"'''\" not in lookup('ansible.builtin.file', _osbuild_rocky_repo_dir ~ '/' ~ item, rstrip=false)"
+        fail_msg: "files/{{ _osbuild_rocky_repo_dir }}/{{ item }} contains ''' and cannot be embedded in a TOML literal string"
+        quiet: true
+      loop: "{{ osbuild_rocky_repo_files }}"
+
+    - name: Append Rocky repository files to blueprint
+      ansible.builtin.blockinfile:
+        path: "{{ blueprint_file_path }}"
+        marker: "# {mark} syncopated-rocky-repos"
+        block: "{{ lookup('ansible.builtin.template', 'rocky-repos.toml.j2') }}"
+        insertafter: EOF
+
 - name: Append release file to blueprint
   ansible.builtin.blockinfile:
     path: "{{ blueprint_file_path }}"

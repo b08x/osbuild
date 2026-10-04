@@ -599,6 +599,11 @@ osbuild_distro_sources_fedora:
 # Google Chrome — so one list serves both; per-distro URLs and GPG keys
 # live in vars/AlmaLinux.yml and vars/Rocky.yml.
 osbuild_distro_sources_el:
+  # Rocky CRB, Plus and RT. Names absent from the host's `repo` dictionary
+  # (e.g. on an AlmaLinux host) are skipped by tasks/sources.yml.
+  - rocky-crb
+  - rocky-plus
+  - rocky-rt
   - epel
   - rpmfusion-free-updates
   - rpmfusion-nonfree-updates
@@ -750,6 +755,16 @@ osbuild_firstboot_enabled: true
 # Refresh the file from https://dl.flathub.org/repo/flathub.flatpakrepo when
 # Flathub rotates its signing key (current key expires 2027-06-14).
 osbuild_flathub_enabled: true
+
+# Rocky targets only: append the rocky-repos files from
+# files/rocky/<major>/<arch>/yum.repos.d/ to every prepared blueprint, so the
+# installed system has CRB (rocky.repo), Plus (rocky-extras.repo) and RT
+# (rocky-addons.repo) enabled under their own repo IDs (crb, plus, rt).
+osbuild_rocky_repo_files_enabled: true
+osbuild_rocky_repo_files:
+  - rocky.repo
+  - rocky-extras.repo
+  - rocky-addons.repo
 
 # Append /etc/syncopated-release to every prepared blueprint: the blueprint
 # name, target distro and the commit of this repository that produced it, so

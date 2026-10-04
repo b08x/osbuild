@@ -1,0 +1,9 @@
+# Plus follows the documented dl.rockylinux.org pub tree layout, like CRB;
+# upstream osbuild/images ships BaseOS/AppStream only (verified 2026-10-03)
+id = "rocky-plus"
+name = "Rocky Linux 9 - Plus"
+type = "yum-baseurl"
+url = "https://dl.rockylinux.org/pub/rocky/9/plus/x86_64/os/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-9"]

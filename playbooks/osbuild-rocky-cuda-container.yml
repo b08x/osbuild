@@ -56,6 +56,10 @@
     osbuild_sources: []
     osbuild_extra_repo_urls:
       - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
+      # Rocky CRB, Plus and RT (BaseOS/AppStream are image-builder's base repos).
+      - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
+      - "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"
+      - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
 
     osbuild_output_dir: "/var/tmp/osbuild-images"
     osbuild_output_filename: "rocky-10-2-cuda-container-{{ _git_commit }}.tar"

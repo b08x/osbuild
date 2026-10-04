@@ -6,9 +6,13 @@
 # with @ are comps groups. Versions are never pinned here; use
 # osbuild_package_pins.
 label: "Base system: kernel, networking, CLI tools, ansible runtime"
-# fastfetch, fd-find, ... come from EPEL 10
+# fastfetch, fd-find, ... come from EPEL 10. Rocky CRB, Plus and RT are
+# depsolve sources too (BaseOS/AppStream are image-builder's base repos).
 repo_urls:
   - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+  - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
+  - "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"
+  - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
 services:
   - "sshd"
   - "NetworkManager"
