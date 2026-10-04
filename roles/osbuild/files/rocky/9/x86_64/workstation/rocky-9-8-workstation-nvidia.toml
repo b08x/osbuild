@@ -232,6 +232,7 @@ packages = [
     { name = "postgresql-server", version = "*" },
     { name = "pulseaudio-utils", version = "*" },
     { name = "python3-firewall", version = "*" },
+    { name = "python3-rich", version = "*" },
     { name = "qemu-kvm", version = "*" },
     { name = "ranger", version = "*" },
     { name = "rhel-system-roles", version = "*" },

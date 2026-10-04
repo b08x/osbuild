@@ -6,7 +6,7 @@
 # with @ are comps groups. Versions are never pinned here; use
 # osbuild_package_pins.
 label: "Base system: kernel, networking, CLI tools, ansible runtime"
-# fastfetch, fd-find, ... come from EPEL 10. Rocky CRB, Plus and RT are
+# fastfetch, fd-find, python3-rich, ... come from EPEL 10. Rocky CRB, Plus and RT are
 # depsolve sources too (BaseOS/AppStream are image-builder's base repos).
 repo_urls:
   - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
@@ -59,6 +59,7 @@ packages:
   - "plymouth-system-theme"
   - "polkit"
   - "python3-firewall"
+  - "python3-rich"
   - "ranger"
   - "rsync"
   - "tar"

@@ -275,6 +275,7 @@ system_packages:
       - tuned-switcher
       - distrobox
       - kitty
+      - python3-rich
     cli_modern:
       - fd-find
       - du-dust
