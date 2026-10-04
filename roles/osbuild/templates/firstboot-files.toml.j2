@@ -8,3 +8,11 @@ mode = "{{ f.mode }}"
 data = '''
 {{ lookup('ansible.builtin.file', 'firstboot/' ~ f.src, rstrip=false) }}'''
 {% endfor %}
+{% if _osbuild_ansible_pull_enabled | bool %}
+
+[[customizations.files]]
+path = "/etc/syncopated-ansible-pull.conf"
+mode = "0644"
+data = '''
+{{ lookup('ansible.builtin.template', 'ansible-pull.conf.j2', rstrip=false) }}'''
+{% endif %}

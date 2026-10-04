@@ -41,6 +41,13 @@
 - name: Inject first-login splash files
   when: osbuild_firstboot_enabled | bool
   vars:
+    _osbuild_ansible_pull_args: >-
+      {{ osbuild_ansible_pull_args.split()
+         if osbuild_ansible_pull_args is string
+         else osbuild_ansible_pull_args }}
+    _osbuild_ansible_pull_enabled: >-
+      {{ (osbuild_ansible_pull_repo | default('', true) | string | length > 0)
+         and (_osbuild_ansible_pull_args | length > 0) }}
     _osbuild_firstboot_files:
       - { src: syncopated-firstboot, path: /usr/local/bin/syncopated-firstboot, mode: "0755" }
       - { src: syncopated-firstboot-launcher, path: /usr/local/bin/syncopated-firstboot-launcher, mode: "0755" }
@@ -54,6 +61,13 @@
       loop: "{{ _osbuild_firstboot_files }}"
       loop_control:
         label: "{{ item.src }}"
+
+    - name: Assert ansible-pull settings fit in a TOML literal string
+      ansible.builtin.assert:
+        that: "\"'''\" not in lookup('ansible.builtin.template', 'ansible-pull.conf.j2', rstrip=false)"
+        fail_msg: "osbuild_ansible_pull_repo/osbuild_ansible_pull_args contain ''' and cannot be embedded in a TOML literal string"
+        quiet: true
+      when: _osbuild_ansible_pull_enabled | bool
 
     - name: Append first-login files to blueprint
       ansible.builtin.blockinfile:

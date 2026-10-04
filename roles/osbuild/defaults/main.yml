@@ -748,6 +748,18 @@ osbuild_output_dir: "/var/tmp/osbuild-images"
 # clones a dotfiles repository with yadm and runs `yadm bootstrap`.
 osbuild_firstboot_enabled: true
 
+# Run `ansible-pull` in the first-login splash, right after `dnf upgrade`.
+# Active only when osbuild_firstboot_enabled is true and both variables are
+# non-empty. The values are written to /etc/syncopated-ansible-pull.conf and
+# the splash runs `sudo ansible-pull -U <repo> <args>`.
+#   osbuild_ansible_pull_repo: URL of the repository to pull (-U).
+#   osbuild_ansible_pull_args: list of arguments, or a string split on
+#     whitespace, e.g. ["-C", "main", "-i", "localhost,", "local.yml"].
+# The image must contain ansible-core (provides ansible-pull) and git;
+# without ansible-pull the splash skips the step.
+osbuild_ansible_pull_repo: ""
+osbuild_ansible_pull_args: []
+
 # Append files/flatpak/flathub.flatpakrepo to every prepared blueprint as
 # /etc/flatpak/remotes.d/flathub.flatpakrepo. flatpak imports it as the
 # system remote "flathub" (GNOME Software lists it). The flatpak package must

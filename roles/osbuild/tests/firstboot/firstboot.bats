@@ -6,7 +6,7 @@
 # stubs, then a symlink farm of /usr/bin without the stubbed commands. This
 # lets a test remove gum or yadm even when the host has them installed.
 
-STUBBED="git yadm curl gum sudo systemctl nm-online dnf xdg-terminal-exec ptyxis kgx gnome-terminal kitty foot alacritty xterm"
+STUBBED="git yadm curl gum sudo systemctl nm-online dnf ansible-pull xdg-terminal-exec ptyxis kgx gnome-terminal kitty foot alacritty xterm"
 
 setup_file() {
   export SYS_BIN="$BATS_FILE_TMPDIR/sys"
@@ -47,7 +47,7 @@ setup() {
   # No graphical session unless a test sets one: yadm bootstrap then runs in
   # the same terminal, as the tests without a terminal stub expect.
   unset WAYLAND_DISPLAY DISPLAY
-  unset YADM_CLONE_RC YADM_BOOTSTRAP_RC SUDO_RC SYSTEMCTL_DM_UNITS SYSTEMCTL_DEFAULT DNF_RC DNF_UPDATES
+  unset YADM_CLONE_RC YADM_BOOTSTRAP_RC SUDO_RC SYSTEMCTL_DM_UNITS SYSTEMCTL_DEFAULT DNF_RC DNF_UPDATES ANSIBLE_PULL_RC SYNCOPATED_ANSIBLE_PULL_CONF
 
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN"
@@ -311,6 +311,66 @@ logged() {
   logged "sudo dnf -y upgrade --refresh"
   logged "dnf -y upgrade --refresh"
   [ "$(grep -n -m1 '^sudo dnf ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -m1 '^gum choose' "$STUB_LOG" | cut -d: -f1)" ]
+}
+
+# --- ansible-pull after the system update --------------------------------
+
+ansible_pull_conf() {
+  export SYNCOPATED_ANSIBLE_PULL_CONF="$BATS_TEST_TMPDIR/ansible-pull.conf"
+  printf '%s\n' "ANSIBLE_PULL_REPO=${1-https://example.com/pull.git}" "ANSIBLE_PULL_ARGS=(${2-'-i' 'localhost,' 'local.yml'})" \
+    >"$SYNCOPATED_ANSIBLE_PULL_CONF"
+}
+
+@test "ansible-pull: no configuration file means no ansible_pull step" {
+  use_stubs ansible-pull
+  export SYNCOPATED_ANSIBLE_PULL_CONF="$BATS_TEST_TMPDIR/missing.conf"
+  answers "Not now"
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  ! grep -q '^ansible-pull' "$STUB_LOG"
+  [[ $output != *ansible_pull* ]]
+}
+
+@test "ansible-pull: runs with sudo after dnf upgrade and before the dotfiles prompt" {
+  use_stubs ansible-pull
+  ansible_pull_conf
+  answers "Not now"
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  logged "sudo ansible-pull -U https://example.com/pull.git -i localhost, local.yml"
+  [[ $output == *"ansible_pull (ok)"* ]]
+  [ "$(grep -n -m1 '^sudo dnf ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -m1 '^sudo ansible-pull ' "$STUB_LOG" | cut -d: -f1)" ]
+  [ "$(grep -n -m1 '^sudo ansible-pull ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -m1 '^gum choose' "$STUB_LOG" | cut -d: -f1)" ]
+}
+
+@test "ansible-pull: a failure is reported and setup continues" {
+  use_stubs ansible-pull
+  ansible_pull_conf
+  export ANSIBLE_PULL_RC=3
+  answers "Not now"
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  [[ $output == *"ansible-pull failed (exit 3)"* ]]
+  [[ $output == *"ansible_pull (failed)"* ]]
+}
+
+@test "ansible-pull: empty arguments skip the step" {
+  use_stubs ansible-pull
+  ansible_pull_conf https://example.com/pull.git ""
+  answers "Not now"
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  ! grep -q '^ansible-pull' "$STUB_LOG"
+  [[ $output == *"ansible_pull (skipped)"* ]]
+}
+
+@test "ansible-pull: a missing ansible-pull command skips the step" {
+  ansible_pull_conf
+  answers "Not now"
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  [[ $output == *"ansible-pull not found"* ]]
+  [[ $output == *"ansible_pull (skipped)"* ]]
 }
 
 @test "fact 24: nothing to update means no reboot prompt" {

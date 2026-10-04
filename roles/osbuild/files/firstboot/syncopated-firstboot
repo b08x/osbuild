@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # syncopated-firstboot: first-login splash, run as the logged-in user, in two
 # parts.
-#   System:   update the system with dnf (offering a reboot when updates were
-#             installed), set the default boot target, report installed tools.
+#   System:   update the system with dnf, run ansible-pull when the image
+#             carries an ansible-pull configuration, offer a reboot when
+#             updates were installed, set the default boot target, report
+#             installed tools.
 #   Dotfiles: opt-in. Install yadm (the only supported dotfiles manager),
 #             clone a dotfiles repository, then run `yadm bootstrap` last, in
 #             a separate terminal window; this window then closes. The
@@ -17,6 +19,7 @@
 #
 # Overrides (used by the bats tests): SYNCOPATED_OS_RELEASE,
 # SYNCOPATED_YADM_URL, SYNCOPATED_DOTFILES_URL, SYNCOPATED_CHECK_TOOLS,
+# SYNCOPATED_ANSIBLE_PULL_CONF (path of the ansible-pull configuration),
 # SYNCOPATED_NO_ANIM=1 (skip the splash reveal delay),
 # SYNCOPATED_WINDOW_TIMEOUT (seconds to wait for the bootstrap window to start),
 # SYNCOPATED_PAUSE_ON_EXIT=1 (set by the launcher: wait for Enter before
@@ -27,6 +30,10 @@ STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/syncopated
 MARKER=$STATE_DIR/firstboot.done
 YADM_URL=${SYNCOPATED_YADM_URL:-https://github.com/yadm-dev/yadm/raw/master/yadm}
 DOTFILES_URL=${SYNCOPATED_DOTFILES_URL:-https://github.com/b08x/dots.git}
+# Written into the image when osbuild_ansible_pull_repo and
+# osbuild_ansible_pull_args are set; defines ANSIBLE_PULL_REPO (string) and
+# ANSIBLE_PULL_ARGS (array). Without the file there is no ansible_pull step.
+ANSIBLE_PULL_CONF=${SYNCOPATED_ANSIBLE_PULL_CONF:-/etc/syncopated-ansible-pull.conf}
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 WINDOW_TIMEOUT=${SYNCOPATED_WINDOW_TIMEOUT:-15}
 read -r -a CHECK_TOOLS <<<"${SYNCOPATED_CHECK_TOOLS:-git yadm gum ansible podman zsh flatpak nvidia-smi}"
@@ -41,6 +48,11 @@ RC_HANDOFF=3
 # Two groups: system setup always runs; dotfiles setup is opt-in and ends
 # with yadm bootstrap.
 SYSTEM_STEPS=(update target)
+ANSIBLE_PULL_ENABLED=0
+if [[ -r $ANSIBLE_PULL_CONF ]]; then
+  ANSIBLE_PULL_ENABLED=1
+  SYSTEM_STEPS=(update ansible_pull target)
+fi
 DOTFILES_STEPS=(yadm clone bootstrap)
 STEPS=("${SYSTEM_STEPS[@]}" "${DOTFILES_STEPS[@]}")
 # Set by update_system when dnf installed or upgraded at least one package.
@@ -518,6 +530,35 @@ update_system() {
   return "$RC_OK"
 }
 
+# Run ansible-pull as root with the repository and arguments from
+# $ANSIBLE_PULL_CONF. Skipped when the configuration is incomplete or
+# ansible-pull is not installed.
+run_ansible_pull() {
+  local ANSIBLE_PULL_REPO='' ANSIBLE_PULL_ARGS=() rc
+  # shellcheck source=/dev/null
+  if ! source "$ANSIBLE_PULL_CONF"; then
+    err "Could not read $ANSIBLE_PULL_CONF."
+    return "$RC_FAILED"
+  fi
+  if [[ -z $ANSIBLE_PULL_REPO ]] || ((${#ANSIBLE_PULL_ARGS[@]} == 0)); then
+    info "ansible-pull repository or arguments not set in $ANSIBLE_PULL_CONF; skipped."
+    return "$RC_SKIPPED"
+  fi
+  if ! command -v ansible-pull >/dev/null 2>&1; then
+    warn "ansible-pull not found; install ansible-core in the image. Skipped."
+    return "$RC_SKIPPED"
+  fi
+  info "Running: sudo ansible-pull -U $ANSIBLE_PULL_REPO ${ANSIBLE_PULL_ARGS[*]}"
+  sudo ansible-pull -U "$ANSIBLE_PULL_REPO" "${ANSIBLE_PULL_ARGS[@]}"
+  rc=$?
+  if ((rc != 0)); then
+    err "ansible-pull failed (exit $rc). Run later: sudo ansible-pull -U $ANSIBLE_PULL_REPO ${ANSIBLE_PULL_ARGS[*]}"
+    return "$RC_FAILED"
+  fi
+  ok "ansible-pull finished"
+  return "$RC_OK"
+}
+
 # Offer a reboot after installed updates. Returns 0 only when the reboot was
 # started. No marker is written, so the splash opens again at the next login,
 # where the update finds nothing to do and setup continues.
@@ -605,6 +646,7 @@ main() {
   # System setup: runs on every login until the marker exists.
   wait_for_network
   run_step update update_system
+  ((ANSIBLE_PULL_ENABLED)) && run_step ansible_pull run_ansible_pull
   if ((UPDATES_INSTALLED)) && offer_reboot; then
     return 0
   fi

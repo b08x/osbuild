@@ -804,13 +804,14 @@ One plain bash script, `files/firstboot/syncopated-firstboot`, runs at the first
 The script runs these steps in order:
 
 1. Waits up to 30 s for the network, then runs `sudo dnf -y upgrade --refresh` in the terminal. A failed update is reported and setup continues; without `dnf` the step is skipped.
-2. If the update installed anything (dnf did not print `Nothing to do.`), offers **Reboot now** or **Continue setup**. **Reboot now** runs `sudo systemctl reboot` and writes no marker, so the splash opens again at the next login; there the update finds nothing to do, no reboot is offered, and setup continues.
-3. Offers **Set up dotfiles**, **Skip for now**, or **Never ask again**.
-4. Uses `yadm` from `PATH`. If `yadm` is absent, downloads it to `~/.local/bin/yadm` and offers Retry or Skip if GitHub is unreachable.
-5. Checks the URL with `git ls-remote` and asks again if the check fails. Then runs `yadm clone --no-bootstrap`. If a yadm repository already exists, offers "Run bootstrap only" instead.
-6. Runs `yadm bootstrap` in a new terminal window, opened with the same terminal order as the launcher, so the bootstrap's own prompts and `sudo` calls work there. The first window waits until the bootstrap ends and uses its exit status; closing the bootstrap window early counts as a failure. With no graphical session or terminal emulator, or when the window has not started after 15 s (`SYNCOPATED_WINDOW_TIMEOUT`), bootstrap runs in the first window instead.
-7. If `gdm`, `lightdm`, or `sddm` is installed and the default target is not `graphical.target`, runs `sudo systemctl set-default graphical.target`. Apart from the package update and the optional reboot, this is the only system change. The script does not set DNF repo priorities or install flatpaks.
-8. Prints a ready/missing report for `git yadm gum ansible podman zsh flatpak nvidia-smi`. Missing tools do not change the exit status.
+2. If `osbuild_ansible_pull_repo` and `osbuild_ansible_pull_args` were both set at build time, runs `sudo ansible-pull -U <repo> <args>` right after the update (see [ansible-pull](#ansible-pull)). A failure is reported and setup continues.
+3. If the update installed anything (dnf did not print `Nothing to do.`), offers **Reboot now** or **Continue setup**. **Reboot now** runs `sudo systemctl reboot` and writes no marker, so the splash opens again at the next login; there the update finds nothing to do, no reboot is offered, and setup continues.
+4. Offers **Set up dotfiles**, **Skip for now**, or **Never ask again**.
+5. Uses `yadm` from `PATH`. If `yadm` is absent, downloads it to `~/.local/bin/yadm` and offers Retry or Skip if GitHub is unreachable.
+6. Checks the URL with `git ls-remote` and asks again if the check fails. Then runs `yadm clone --no-bootstrap`. If a yadm repository already exists, offers "Run bootstrap only" instead.
+7. Runs `yadm bootstrap` in a new terminal window, opened with the same terminal order as the launcher, so the bootstrap's own prompts and `sudo` calls work there. The first window waits until the bootstrap ends and uses its exit status; closing the bootstrap window early counts as a failure. With no graphical session or terminal emulator, or when the window has not started after 15 s (`SYNCOPATED_WINDOW_TIMEOUT`), bootstrap runs in the first window instead.
+8. If `gdm`, `lightdm`, or `sddm` is installed and the default target is not `graphical.target`, runs `sudo systemctl set-default graphical.target`. Apart from the package update and the optional reboot, this is the only system change. The script does not set DNF repo priorities or install flatpaks.
+9. Prints a ready/missing report for `git yadm gum ansible podman zsh flatpak nvidia-smi`. Missing tools do not change the exit status.
 
 Without `gum`, the script uses plain-text prompts and output.
 
@@ -819,6 +820,15 @@ Without `gum`, the script uses plain-text prompts and output.
 **Marker.** `~/.local/state/syncopated/firstboot.done` (or `$XDG_STATE_HOME/syncopated/firstboot.done`). The script writes it after a successful bootstrap or after **Never ask again**. While it exists, the launcher does nothing at login, for that user only. **Skip for now** and a failed clone or bootstrap leave no marker, so the splash opens again at the next login.
 
 **Rerun.** Run `syncopated-firstboot` from any terminal. The marker does not block a manual run. To restore the login splash, delete the marker.
+
+**ansible-pull.** Set both variables in the playbook (a string `osbuild_ansible_pull_args` is split on whitespace):
+
+```yaml
+osbuild_ansible_pull_repo: https://github.com/example/pull.git
+osbuild_ansible_pull_args: ["-C", "main", "-i", "localhost,", "local.yml"]
+```
+
+`tasks/blueprint.yml` then appends `/etc/syncopated-ansible-pull.conf` (a sourced shell file with `ANSIBLE_PULL_REPO` and the array `ANSIBLE_PULL_ARGS`) to the blueprint. If either variable is empty, no file is written and the splash has no `ansible_pull` step. The image needs `ansible-core` and `git`; without `ansible-pull` the step is skipped with a warning. The step runs on every login until the marker exists, so the pulled playbook must be idempotent.
 
 **Disable.** Set `osbuild_firstboot_enabled: false` to prepare blueprints without these files.
 
