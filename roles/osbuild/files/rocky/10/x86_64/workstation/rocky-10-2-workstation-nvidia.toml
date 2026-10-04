@@ -277,6 +277,7 @@ packages = [
     { name = "cuda-toolkit", version = "*" },
     { name = "nvidia-container-toolkit", version = "*" },
     { name = "google-chrome-stable", version = "*" },
+    { name = "code", version = "*" },
 ]
 
 [customizations]
@@ -409,6 +410,14 @@ gpgkeys = [
 enabled = true
 
 # Docker CE Stable
+[[customizations.repositories]]
+id = "code"
+name = "Visual Studio Code"
+baseurls = ["https://packages.microsoft.com/yumrepos/vscode"]
+gpgcheck = true
+gpgkeys = ["https://packages.microsoft.com/keys/microsoft.asc"]
+enabled = true
+
 [[customizations.repositories]]
 id = "docker-ce-stable"
 name = "Docker CE Stable - x86_64"

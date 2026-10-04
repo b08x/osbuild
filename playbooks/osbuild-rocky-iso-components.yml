@@ -45,6 +45,7 @@
       - audio
       - multimedia
       - google-chrome
+      - vscode
       - gui-toolkit
       - selection-extras
       - intel-graphics

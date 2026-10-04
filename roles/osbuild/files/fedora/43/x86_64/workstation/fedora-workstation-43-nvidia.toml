@@ -297,6 +297,7 @@ packages = [
     { name = "nvidia-settings", version = "*" },
     { name = "nvtop", version = "*" },
     { name = "google-chrome-stable", version = "*" },
+    { name = "code", version = "*" },
 ]
 
 [customizations]
@@ -439,6 +440,14 @@ gpgcheck = true
 gpgkeys = [
     "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64/1940C73E.pub",
 ]
+enabled = true
+
+[[customizations.repositories]]
+id = "code"
+name = "Visual Studio Code"
+baseurls = ["https://packages.microsoft.com/yumrepos/vscode"]
+gpgcheck = true
+gpgkeys = ["https://packages.microsoft.com/keys/microsoft.asc"]
 enabled = true
 
 [[customizations.repositories]]

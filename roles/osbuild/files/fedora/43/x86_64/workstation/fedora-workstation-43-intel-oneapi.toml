@@ -366,6 +366,7 @@ packages = [
     { name = "intel-oneapi-umf-1.0", version = "*" },
     { name = "intel-oneapi-umf-1.1", version = "*" },
     { name = "google-chrome-stable", version = "*" },
+    { name = "code", version = "*" },
 ]
 
 [customizations]

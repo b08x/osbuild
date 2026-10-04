@@ -48,6 +48,7 @@
       - audio
       - multimedia
       - google-chrome
+      - vscode
       - intel-graphics
       - development
       - containers-virt

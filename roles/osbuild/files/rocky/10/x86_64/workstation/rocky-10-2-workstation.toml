@@ -259,6 +259,7 @@ packages = [
     { name = "intel-vpl-gpu-rt", version = "*" },
     { name = "intel-vsc-firmware", version = "*" },
     { name = "google-chrome-stable", version = "*" },
+    { name = "code", version = "*" },
 ]
 
 [customizations]
@@ -296,6 +297,14 @@ fastestmirror=1
 max_parallel_downloads=10
 clean_requirements_on_remove=True
 """
+
+[[customizations.repositories]]
+id = "code"
+name = "Visual Studio Code"
+baseurls = ["https://packages.microsoft.com/yumrepos/vscode"]
+gpgcheck = true
+gpgkeys = ["https://packages.microsoft.com/keys/microsoft.asc"]
+enabled = true
 
 [[customizations.repositories]]
 id = "docker-ce-stable"
