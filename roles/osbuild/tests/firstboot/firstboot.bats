@@ -423,6 +423,22 @@ wait_window() {
   wait_window "Setup complete"
 }
 
+@test "fact 15: the bootstrap window's terminal runs in its own session" {
+  export WAYLAND_DISPLAY=wayland-test
+  ln -sf "$STUB_DIR/session-terminal" "$BIN/kitty"
+  answers "Install dotfiles with yadm" "__default__"
+  my_sid=$(ps -o sid= -p $$ | tr -d ' ')
+  run "$SCRIPT" </dev/null
+  # The splash falls back to this terminal when the window never starts, so
+  # only the logged session line matters.
+  for _ in $(seq 20); do grep -q '^session ' "$STUB_LOG" && break; sleep 0.2; done
+  line=$(grep '^session ' "$STUB_LOG")
+  pid=${line#session pid=}; pid=${pid%% *}
+  sid=${line##*sid=}
+  [ "$sid" = "$pid" ]
+  [ "$sid" != "$my_sid" ]
+}
+
 @test "fact 15: ptyxis opens the bootstrap window with --new-window" {
   export WAYLAND_DISPLAY=wayland-test
   use_live_terminal ptyxis

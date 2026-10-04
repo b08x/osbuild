@@ -401,13 +401,15 @@ open_terminal() {
   [[ -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} ]] || return 1
   for term in xdg-terminal-exec ptyxis kgx gnome-terminal kitty foot alacritty xterm; do
     command -v "$term" >/dev/null 2>&1 || continue
+    # setsid -f puts the new terminal in its own session. A plain background
+    # job stays in this window's process group, and the kernel sends that
+    # group SIGHUP when this window's shell exits, which closed the new window.
     case $term in
-      xdg-terminal-exec | kitty | foot) "$term" bash -c "$cmd" ;;
-      ptyxis) ptyxis --new-window -- bash -c "$cmd" ;;
-      kgx | gnome-terminal) "$term" -- bash -c "$cmd" ;;
-      alacritty | xterm) "$term" -e bash -c "$cmd" ;;
-    esac </dev/null >/dev/null 2>&1 &
-    disown
+      xdg-terminal-exec | kitty | foot) setsid -f "$term" bash -c "$cmd" ;;
+      ptyxis) setsid -f ptyxis --new-window -- bash -c "$cmd" ;;
+      kgx | gnome-terminal) setsid -f "$term" -- bash -c "$cmd" ;;
+      alacritty | xterm) setsid -f "$term" -e bash -c "$cmd" ;;
+    esac </dev/null >/dev/null 2>&1
     return 0
   done
   return 1
