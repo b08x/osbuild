@@ -390,7 +390,7 @@ wait_window() {
   answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  grep -q '^kitty bash -c .*syncopated-firstboot --bootstrap-window ' "$STUB_LOG"
+  grep -q '^kitty --start-as fullscreen bash -c .*syncopated-firstboot --bootstrap-window ' "$STUB_LOG"
   [[ $output == *"running in a new window"*"this window closes now"* ]]
   [[ $output != *"Setup complete"* ]]
   [ -z "$(find "$XDG_RUNTIME_DIR" -name 'syncopated-bootstrap.*')" ]
@@ -673,4 +673,15 @@ wait_window() {
   [ "$status" -eq 0 ]
   [[ $output == *"already running"* ]]
   ! grep -q '^gum choose' "$STUB_LOG"
+}
+
+@test "fact 21: skipped steps still complete setup when none failed" {
+  run bash -c 'source "$1"; MARKER=$2; declare -gA STEP_STATE=([update]=skipped [yadm]=ok [clone]=skipped [bootstrap]=skipped); finish 2; echo "rc=$?"' _ "$SCRIPT" "$MARKER"
+  [ -e "$MARKER" ]
+  [[ $output == *"rc=0"* ]]
+}
+
+@test "fact 21: a failed step blocks the marker even when bootstrap ran" {
+  run bash -c 'source "$1"; MARKER=$2; declare -gA STEP_STATE=([update]=failed [bootstrap]=skipped); finish 2' _ "$SCRIPT" "$MARKER"
+  [ ! -e "$MARKER" ]
 }

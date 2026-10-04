@@ -405,7 +405,8 @@ open_terminal() {
     # job stays in this window's process group, and the kernel sends that
     # group SIGHUP when this window's shell exits, which closed the new window.
     case $term in
-      xdg-terminal-exec | kitty | foot) setsid -f "$term" bash -c "$cmd" ;;
+      kitty) setsid -f kitty --start-as fullscreen bash -c "$cmd" ;;
+      xdg-terminal-exec | foot) setsid -f "$term" bash -c "$cmd" ;;
       ptyxis) setsid -f ptyxis --new-window -- bash -c "$cmd" ;;
       kgx | gnome-terminal) setsid -f "$term" -- bash -c "$cmd" ;;
       alacritty | xterm) setsid -f "$term" -e bash -c "$cmd" ;;
@@ -646,11 +647,18 @@ main() {
 # steps that never ran as skipped, writes the marker on success, and prints
 # the step overview and tool report. Returns 1 when setup failed, else 0.
 finish() {
-  local rc=$1 step
+  local rc=$1 step failed=0 bootstrap_ran=0
+  [[ ${STEP_STATE[bootstrap]:-} == ok || ${STEP_STATE[bootstrap]:-} == skipped ]] && bootstrap_ran=1
   for step in "${STEPS[@]}"; do
     [[ -n ${STEP_STATE[$step]:-} ]] || STEP_STATE[$step]=skipped
+    [[ ${STEP_STATE[$step]} == failed ]] && failed=1
   done
-  ((rc == RC_OK)) && write_marker
+  # Skipped steps do not block completion; only a failed step does. The
+  # bootstrap step itself must have run (ok or skipped).
+  if ((rc == RC_OK)) || ((!failed && bootstrap_ran)); then
+    write_marker
+    rc=$RC_OK
+  fi
   draw_steps
   report
 
