@@ -212,6 +212,7 @@ packages = [
     { name = "pulseaudio-utils", version = "*" },
     { name = "python3-firewall", version = "*" },
     { name = "python3-rich", version = "*" },
+    { name = "python3-psutil", version = "*" },
     { name = "qemu-kvm", version = "*" },
     { name = "ranger", version = "*" },
     { name = "rsync", version = "*" },

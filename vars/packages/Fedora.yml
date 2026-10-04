@@ -249,6 +249,7 @@ system_packages:
       - distrobox
       - kitty
       - python3-rich
+      - python3-psutil
     cli_modern:
       - fd-find
       - du-dust

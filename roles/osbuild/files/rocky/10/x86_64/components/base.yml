@@ -60,6 +60,7 @@ packages:
   - "polkit"
   - "python3-firewall"
   - "python3-rich"
+  - "python3-psutil"
   - "ranger"
   - "rsync"
   - "tar"
