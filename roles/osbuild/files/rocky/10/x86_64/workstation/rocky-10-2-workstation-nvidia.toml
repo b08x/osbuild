@@ -228,6 +228,7 @@ packages = [
     { name = "rsync", version = "*" },
     { name = "ruby-devel", version = "*" },
     { name = "ruby-build-rbenv", version = "*" },
+    { name = "ruby-build-ruby", version = "*" },
     { name = "tar", version = "*" },
     { name = "tuned", version = "*" },
     { name = "tuned-ppd", version = "*" },

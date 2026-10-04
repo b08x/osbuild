@@ -6,7 +6,9 @@
 # with @ are comps groups. Versions are never pinned here; use
 # osbuild_package_pins.
 label: "Compilers, language toolchains and -devel packages"
-# rbenv and ruby-build-rbenv are EPEL 10 packages (verified 2026-10-03);
+# rbenv, ruby-build-rbenv and ruby-build-ruby are EPEL 10 packages
+# (verified 2026-10-03). ruby-build-core ships no definitions; CRuby
+# definitions (e.g. 4.0.4) come only from ruby-build-ruby.
 # nodejs and nodejs-npm are AppStream. Rocky 10 has no package named "npm".
 repo_urls:
   - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
@@ -30,4 +32,5 @@ packages:
   - "pgvector"
   - "rbenv"
   - "ruby-build-rbenv"
+  - "ruby-build-ruby"
   - "ruby-devel"

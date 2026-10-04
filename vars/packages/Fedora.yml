@@ -209,6 +209,7 @@ system_packages:
       - nodejs-npm
       - rbenv
       - ruby-build-rbenv
+      - ruby-build-ruby
       - bats
     vcs:
       - git
