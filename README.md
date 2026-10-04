@@ -17,7 +17,9 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 │   ├── osbuild-almalinux-iso-nvidia.yml
 │   ├── osbuild-rocky-iso.yml
 │   ├── osbuild-rocky-iso-nvidia.yml
+│   ├── osbuild-rocky-iso-components.yml
 │   ├── osbuild-rocky-iso-nvidia-components.yml
+│   ├── osbuild-rocky-iso-intel-oneapi-components.yml
 │   ├── osbuild-rocky-iso-nvidia-generate.yml
 │   ├── osbuild-rocky-iso-nvidia-interactive.yml
 │   └── osbuild-rocky-cuda-container.yml
@@ -102,7 +104,7 @@ A package name can appear in three places. Each feeds a different set of builds:
 | Layer | File | Used by |
 |---|---|---|
 | Taxonomy | `vars/packages/<Distro>.yml` (`system_packages.<Category>.<subcategory>`) | Jinja-template blueprints (`osbuild.yml`), through `osbuild_component_defs` |
-| Components | `roles/osbuild/files/rocky/10/x86_64/components/<name>.yml` (`packages:`) | `osbuild-rocky-iso-nvidia-components.yml` |
+| Components | `roles/osbuild/files/rocky/10/x86_64/components/<name>.yml` (`packages:`) | The `osbuild-rocky-iso-*components.yml` playbooks |
 | Static blueprints | `roles/osbuild/files/<distro>/<major>/<arch>/<kind>/*.toml` (`packages = [ … ]`) | The other `playbooks/osbuild-*.yml` playbooks |
 
 To add a package to every workstation build, edit all three layers for each distribution that provides the name, and each static blueprint variant (`-workstation.toml` and `-workstation-nvidia.toml` are separate lists). Commit `3729a07` (`ruby-build-ruby`) is an example. Before adding a name, confirm the target repository provides it:
@@ -128,6 +130,10 @@ ansible-playbook osbuild.yml
 ```bash
 # Rocky Linux 10.2 Workstation ISO with NVIDIA drivers
 ansible-playbook playbooks/osbuild-rocky-iso-nvidia.yml
+
+# Rocky Linux 10.2 Workstation ISO with Intel GPU compute runtime and oneAPI (DPC++, MKL),
+# interactive disk layout
+ansible-playbook playbooks/osbuild-rocky-iso-intel-oneapi-components.yml
 
 # Rocky Linux 10.2 CUDA Application Container
 ansible-playbook playbooks/osbuild-rocky-cuda-container.yml

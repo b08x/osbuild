@@ -49,6 +49,7 @@ Default to generate-only: the role writes files, the user runs the build.
 | …generate-only variant (`-gen` names) | `playbooks/osbuild-rocky-iso-nvidia-generate.yml` | `builder` | static |
 | …with GUI partitioning | `playbooks/osbuild-rocky-iso-nvidia-interactive.yml` | `builder` | static |
 | …composed from components | `playbooks/osbuild-rocky-iso-nvidia-components.yml` | `builder` | components |
+| …Intel GPU compute + oneAPI (DPC++, MKL), interactive disk | `playbooks/osbuild-rocky-iso-intel-oneapi-components.yml` | `builder` | components |
 | AlmaLinux 10 workstation ISO (± NVIDIA) | `playbooks/osbuild-almalinux-iso{,-nvidia}.yml` | `tinybot` | static |
 | CUDA application container | `playbooks/osbuild-rocky-cuda-container.yml` | `builder` | static |
 | Host-native generic build | `playbooks/osbuild.yml` (= root `osbuild.yml`) | `osbuild_targets` | Jinja template |
@@ -61,7 +62,8 @@ Default to generate-only: the role writes files, the user runs the build.
    `files/<target>/<major>/<arch>/frames/workstation.toml` through
    `templates/blueprint-components.toml.j2`. Only `rocky/10/x86_64` has
    components today: `base anaconda gnome-desktop fonts audio multimedia
-   intel-graphics development containers-virt cockpit nvidia`.
+   google-chrome gui-toolkit intel-graphics intel-oneapi development
+   containers-virt cockpit selection-extras nvidia`.
    Preferred for a new Rocky 10 package mix: add or drop components instead
    of copying a monolithic blueprint.
 2. **Static** — `osbuild_use_blueprint_template: false` +
@@ -199,6 +201,11 @@ Procedure:
 
    No output means the repo does not provide that name. EL and Fedora names
    differ; check `vars/packages/00-distributions.yml` (`package_mappings`).
+   `python3 scripts/package_tracker.py verify --distro Rocky --package a,b`
+   runs the same lookup against the Rocky, AlmaLinux or Fedora repo profile
+   (`REPO_PROFILES`); `verify` without `--package` audits the whole taxonomy
+   (exit 1 when names are missing). `add` runs it by default and skips names
+   a distro's repos do not provide (`--no-verify` overrides).
    Leave the name out of a distro that has no build of it, and say so in a
    comment (the files already do this for sway on EPEL 10).
 3. **Add the repo when the package needs one the build does not use yet.**
