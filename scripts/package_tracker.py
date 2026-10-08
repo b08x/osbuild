@@ -1,26 +1,39 @@
 #!/usr/bin/env python3
-"""osbuild Package Tracker & Taxonomy TUI.
+"""osbuild package tracker.
 
-Interactive and CLI tool to:
-1. Maintain per-distribution package taxonomies (add/remove packages, groups, flatpaks)
-   in vars/packages/{Fedora,AlmaLinux,Rocky}.yml using ruamel.yaml to preserve formatting.
-2. Verify that package names exist in the repos each distro's builds use
-   (`add` checks by default, `verify` audits the taxonomy, `build --verify`).
-3. Interactively select packages, components, and groups for image builds and export
-   build selection manifests (YAML, JSON, TOML) for osbuild image generation.
+Lists, searches, adds and removes packages in the component files that the
+osbuild role composes blueprints from:
+
+    roles/osbuild/files/<distro>/<major>/<arch>/components/<name>.yml
+
+A *target* is one <distro>/<major>/<arch> directory (for example
+``rocky/10/x86_64``). Edits change only the ``packages:`` list of one component
+file. Comments, key order and the order of existing packages stay as they are;
+new packages are appended.
+
+Commands (``--target`` is required except for ``search``):
+
+    list   --target T
+    search NAME [--target T]
+    add    --target T COMPONENT PKG... [--verify] [--force]
+    remove --target T COMPONENT PKG...
+    verify --target T [COMPONENT]
+    playbook PLAYBOOK list|add|remove [COMPONENT...] [--target T] [--after C]
+    tui
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime
-import json
-import os
+import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
+import yaml
 
 try:
     import questionary
@@ -32,77 +45,243 @@ try:
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
-    from rich import print as rprint
 except ImportError:
     Console = None
-    rprint = print
-
-from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap, CommentedSeq
-
-DISTROS = ["Fedora", "AlmaLinux", "Rocky"]
-DEFAULT_DISTRO = "Fedora"
 
 console = Console() if Console else None
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FILES_SUBDIR = Path("roles") / "osbuild" / "files"
 
-def get_yaml() -> YAML:
-    """Return a configured ruamel.yaml round-trip handler."""
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    yaml.indent(mapping=2, sequence=4, offset=2)
-    return yaml
+
+# =============================================================================
+# Component files
+# =============================================================================
+
+
+class TrackerError(Exception):
+    """A user-facing error: bad target, unknown component, unusable file."""
+
+
+def discover_targets(root: Path) -> Dict[str, Path]:
+    """Return {"rocky/10/x86_64": <components dir>} for every components directory."""
+    files = root / FILES_SUBDIR
+    targets: Dict[str, Path] = {}
+    for comp_dir in sorted(files.glob("*/*/*/components")):
+        if comp_dir.is_dir():
+            targets["/".join(comp_dir.relative_to(files).parts[:3])] = comp_dir
+    return targets
+
+
+def resolve_target(targets: Dict[str, Path], wanted: Optional[str]) -> str:
+    """Return the key of the target named by --target.
+
+    A prefix that matches one target (``rocky/10``) is accepted. Raises
+    TrackerError, listing the available targets, when the value is missing,
+    unknown or ambiguous.
+    """
+    available = ", ".join(targets) or "(none found)"
+    if not wanted:
+        raise TrackerError(f"--target is required. Available targets: {available}")
+    wanted = wanted.strip("/")
+    if wanted in targets:
+        return wanted
+    matches = [t for t in targets if t.startswith(wanted + "/")]
+    if len(matches) == 1:
+        return matches[0]
+    problem = "is ambiguous" if matches else "is unknown"
+    raise TrackerError(f"--target '{wanted}' {problem}. Available targets: {available}")
+
+
+@dataclass
+class Component:
+    """One component file, as parsed."""
+
+    name: str
+    path: Path
+    label: str
+    packages: List[str]
+    repo_urls: List[str]
+    services: List[str]
+    kernel_args: List[str]
+    fragment: str
+
+
+_ITEM = re.compile(r"""^(?P<indent>\s*)-\s+(?P<quote>["']?)(?P<name>[^"'#\s][^"'#]*?)(?P=quote)\s*(?:#.*)?$""")
+_PACKAGES_KEY = re.compile(r"^packages:\s*(?:#.*)?$")
+_NEEDS_QUOTES = re.compile(r"^[@*&!%`|>{}\[\],#?:-]")
+_VALID_NAME = re.compile(r"^@?[A-Za-z0-9][A-Za-z0-9._+:@-]*$")
+
+
+def validate_package_name(name: str) -> str:
+    """Return ``name`` or raise TrackerError when it cannot be a package name."""
+    if not _VALID_NAME.match(name):
+        raise TrackerError(f"Invalid package name: {name!r}")
+    return name
+
+
+class ComponentStore:
+    """Reads and edits the component files of one target directory."""
+
+    def __init__(self, directory: Path):
+        self.directory = Path(directory)
+
+    def _path(self, name: str) -> Path:
+        return self.directory / f"{name}.yml"
+
+    def names(self) -> List[str]:
+        return sorted(p.stem for p in self.directory.glob("*.yml"))
+
+    def load(self, name: str) -> Component:
+        path = self._path(name)
+        if not path.is_file():
+            raise TrackerError(
+                f"Unknown component '{name}'. Available components: {', '.join(self.names())}"
+            )
+        data = yaml.safe_load(path.read_text()) or {}
+        if not isinstance(data, dict) or not isinstance(data.get("packages"), list):
+            raise TrackerError(f"{path}: no packages list")
+        return Component(
+            name=name,
+            path=path,
+            label=str(data.get("label", "")),
+            packages=[str(p) for p in data["packages"]],
+            repo_urls=[str(u) for u in data.get("repo_urls") or []],
+            services=[str(s) for s in data.get("services") or []],
+            kernel_args=[str(a) for a in data.get("kernel_args") or []],
+            fragment=str(data.get("fragment") or ""),
+        )
+
+    def components(self) -> Dict[str, Component]:
+        return {name: self.load(name) for name in self.names()}
+
+    def find(self, package: str, exact: bool = True) -> List[str]:
+        """Names of the components that contain ``package`` (substring when not exact)."""
+        needle = package.lower()
+        return [
+            c.name
+            for c in self.components().values()
+            if any((p.lower() == needle) if exact else (needle in p.lower()) for p in c.packages)
+        ]
+
+    def conflicts(self, component: str, packages: Iterable[str]) -> Dict[str, List[str]]:
+        """Packages that another component of this target already carries."""
+        others = {n: c for n, c in self.components().items() if n != component}
+        found: Dict[str, List[str]] = {}
+        for pkg in packages:
+            owners = [n for n, c in others.items() if pkg in c.packages]
+            if owners:
+                found[pkg] = owners
+        return found
+
+    # -- text editing ---------------------------------------------------------
+
+    @staticmethod
+    def _block(lines: List[str], path: Path) -> Tuple[int, List[int]]:
+        """Return (index of the ``packages:`` line, indexes of its item lines)."""
+        for start, line in enumerate(lines):
+            if _PACKAGES_KEY.match(line):
+                break
+        else:
+            raise TrackerError(f"{path}: packages must be a block list ('packages:' on its own line)")
+        items: List[int] = []
+        for idx in range(start + 1, len(lines)):
+            line = lines[idx]
+            if _ITEM.match(line):
+                items.append(idx)
+            elif line.strip() and not line.lstrip().startswith("#"):
+                break
+        if not items:
+            raise TrackerError(f"{path}: packages list is empty or not a block list")
+        return start, items
+
+    def add(self, component: str, packages: Sequence[str]) -> Tuple[List[str], List[str]]:
+        """Append packages to the component file.
+
+        Returns (added, already present). Nothing is written when every
+        package is already there.
+        """
+        comp = self.load(component)
+        present = set(comp.packages)
+        added: List[str] = []
+        skipped: List[str] = []
+        for pkg in dict.fromkeys(validate_package_name(p) for p in packages):
+            (skipped if pkg in present else added).append(pkg)
+        if not added:
+            return added, skipped
+
+        text = comp.path.read_text()
+        lines = text.split("\n")
+        _, items = self._block(lines, comp.path)
+        last = _ITEM.match(lines[items[-1]])
+        indent, quote = last.group("indent"), last.group("quote")
+        new_lines = []
+        for pkg in added:
+            q = quote or ('"' if _NEEDS_QUOTES.match(pkg) else "")
+            new_lines.append(f"{indent}- {q}{pkg}{q}")
+        lines[items[-1] + 1:items[-1] + 1] = new_lines
+        self._write(comp, "\n".join(lines), expect=present | set(added))
+        return added, skipped
+
+    def remove(self, component: str, packages: Sequence[str]) -> Tuple[List[str], List[str]]:
+        """Remove packages from the component file.
+
+        Returns (removed, absent). Raises TrackerError, writing nothing, when
+        the removal would leave the component without packages.
+        """
+        comp = self.load(component)
+        wanted = list(dict.fromkeys(packages))
+        removed = [p for p in wanted if p in comp.packages]
+        absent = [p for p in wanted if p not in comp.packages]
+        if not removed:
+            return removed, absent
+        remaining = [p for p in comp.packages if p not in removed]
+        if not remaining:
+            raise TrackerError(
+                f"Refusing to remove the last packages of '{component}': "
+                "a component needs a non-empty packages list"
+            )
+
+        text = comp.path.read_text()
+        lines = text.split("\n")
+        _, items = self._block(lines, comp.path)
+        drop = {i for i in items if _ITEM.match(lines[i]).group("name") in removed}
+        kept = [line for i, line in enumerate(lines) if i not in drop]
+        self._write(comp, "\n".join(kept), expect=set(remaining))
+        return removed, absent
+
+    @staticmethod
+    def _write(comp: Component, text: str, expect: set) -> None:
+        """Write ``text`` after checking it parses to the expected package set."""
+        data = yaml.safe_load(text)
+        if not isinstance(data, dict) or set(map(str, data.get("packages") or [])) != expect:
+            raise TrackerError(f"{comp.path}: edit would corrupt the file; nothing written")
+        comp.path.write_text(text)
 
 
 # =============================================================================
 # Repository availability verification
 # =============================================================================
 
-# Repositories each taxonomy is checked against: the distro's base repos plus
-# the third-party repos the builds depsolve against (EPEL, RPM Fusion, VS Code,
-# Google Chrome, Docker CE, NVIDIA CUDA and Container Toolkit). Mirrors roles/osbuild/vars/<distro>.yml and the
-# --extra-repo lists in playbooks/. Entries are (repo id, base URL).
-REPO_PROFILES: Dict[str, List[Tuple[str, str]]] = {
-    "Rocky": [
+# Base repos of each target, as image-builder resolves them. The repos a
+# component adds on top come from its repo_urls. Entries are (repo id, URL).
+BASE_REPOS: Dict[str, List[Tuple[str, str]]] = {
+    "rocky/10": [
         ("rocky-baseos", "https://dl.rockylinux.org/pub/rocky/10/BaseOS/x86_64/os/"),
         ("rocky-appstream", "https://dl.rockylinux.org/pub/rocky/10/AppStream/x86_64/os/"),
-        ("rocky-crb", "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"),
-        ("rocky-plus", "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"),
-        ("rocky-rt", "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"),
-        ("epel", "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64/"),
-        ("rpmfusion-free-updates", "http://download1.rpmfusion.org/free/el/updates/10/x86_64/"),
-        ("rpmfusion-nonfree-updates", "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64/"),
-        ("vscode", "https://packages.microsoft.com/yumrepos/vscode"),
-        ("google-chrome", "http://dl.google.com/linux/chrome/rpm/stable/x86_64"),
-        ("docker-ce-stable", "https://download.docker.com/linux/centos/10/x86_64/stable"),
-        ("cuda", "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"),
-        ("nvidia-container-toolkit", "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"),
     ],
-    "AlmaLinux": [
+    "rocky/9": [
+        ("rocky-baseos", "https://dl.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/"),
+        ("rocky-appstream", "https://dl.rockylinux.org/pub/rocky/9/AppStream/x86_64/os/"),
+    ],
+    "almalinux/10": [
         ("almalinux-baseos", "https://repo.almalinux.org/almalinux/10/BaseOS/x86_64/os/"),
         ("almalinux-appstream", "https://repo.almalinux.org/almalinux/10/AppStream/x86_64/os/"),
         ("almalinux-crb", "https://repo.almalinux.org/almalinux/10/CRB/x86_64/os/"),
-        ("epel", "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64/"),
-        ("rpmfusion-free-updates", "http://download1.rpmfusion.org/free/el/updates/10/x86_64/"),
-        ("rpmfusion-nonfree-updates", "http://download1.rpmfusion.org/nonfree/el/updates/10/x86_64/"),
-        ("vscode", "https://packages.microsoft.com/yumrepos/vscode"),
-        ("google-chrome", "http://dl.google.com/linux/chrome/rpm/stable/x86_64"),
-        ("docker-ce-stable", "https://download.docker.com/linux/centos/10/x86_64/stable"),
-        ("cuda", "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"),
-        ("nvidia-container-toolkit", "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"),
     ],
-    "Fedora": [
+    "fedora/43": [
         ("fedora", "https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/"),
         ("fedora-updates", "https://dl.fedoraproject.org/pub/fedora/linux/updates/43/Everything/x86_64/"),
-        ("rpmfusion-free", "http://download1.rpmfusion.org/free/fedora/releases/43/Everything/x86_64/os/"),
-        ("rpmfusion-free-updates", "http://download1.rpmfusion.org/free/fedora/updates/43/x86_64/"),
-        ("rpmfusion-nonfree", "http://download1.rpmfusion.org/nonfree/fedora/releases/43/Everything/x86_64/os/"),
-        ("rpmfusion-nonfree-updates", "http://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/"),
-        ("vscode", "https://packages.microsoft.com/yumrepos/vscode"),
-        ("google-chrome", "http://dl.google.com/linux/chrome/rpm/stable/x86_64"),
-        ("docker-ce-stable", "https://download.docker.com/linux/fedora/43/x86_64/stable"),
-        ("cuda", "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64"),
-        ("nvidia-container-toolkit", "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"),
     ],
 }
 
@@ -112,20 +291,45 @@ REPO_ID_PREFIX = "ptv-"
 SKIPPED_GROUP = "skipped: comps group"
 
 
+def repo_profile(target: str, repo_urls: Iterable[str] = ()) -> List[Tuple[str, str]]:
+    """Base repos of ``target`` (``rocky/10/x86_64`` or ``rocky/10``) plus extra URLs.
+
+    Extra URLs get ids from their host and path. Metalinks cannot be passed
+    to ``--repofrompath`` as base URLs and are left out.
+    """
+    key = "/".join(target.split("/")[:2])
+    if key not in BASE_REPOS:
+        raise ValueError(f"No repository profile for target '{target}'")
+    profile = list(BASE_REPOS[key])
+    seen = {url.rstrip("/") for _, url in profile}
+    for url in repo_urls:
+        if "metalink" in url or url.rstrip("/") in seen:
+            continue
+        seen.add(url.rstrip("/"))
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", re.sub(r"^\w+://", "", url)).strip("-")[:48]
+        profile.append((f"x-{slug}", url))
+    return profile
+
+
 class RepoVerifier:
-    """Check that package names exist in the repos a distro's builds use.
+    """Check that package names exist in the repos a target's builds use.
 
     One ``dnf repoquery`` call (argument list, no shell) resolves every
     requested name; results are cached per name. Names that look like options
     are rejected up front because dnf5 does not accept a ``--`` separator.
     """
 
-    def __init__(self, distro: str, arch: str = "x86_64", dnf: str = "dnf"):
-        if distro not in REPO_PROFILES:
-            raise ValueError(f"No repository profile for distro '{distro}'")
-        self.distro = distro
+    def __init__(
+        self,
+        target: str,
+        arch: str = "x86_64",
+        dnf: str = "dnf",
+        repo_urls: Iterable[str] = (),
+    ):
+        self.target = target
         self.arch = arch
         self.dnf = dnf
+        self.profile = repo_profile(target, repo_urls)
         self.cache: Dict[str, Optional[str]] = {}
 
     @staticmethod
@@ -134,7 +338,7 @@ class RepoVerifier:
 
     def _command(self, names: List[str]) -> List[str]:
         cmd = [self.dnf, "repoquery", "--quiet", f"--forcearch={self.arch}"]
-        for repo_id, url in REPO_PROFILES[self.distro]:
+        for repo_id, url in self.profile:
             # The prefix keeps ids from colliding with repos configured on the
             # host (e.g. "fedora"); --repo then limits the query to these.
             cmd += [f"--repofrompath={REPO_ID_PREFIX}{repo_id},{url}", f"--repo={REPO_ID_PREFIX}{repo_id}"]
@@ -161,12 +365,10 @@ class RepoVerifier:
                 todo.append(pkg)
 
         if todo:
-            proc = subprocess.run(
-                self._command(todo), capture_output=True, text=True, check=False
-            )
+            proc = subprocess.run(self._command(todo), capture_output=True, text=True, check=False)
             if proc.returncode != 0:
                 raise RuntimeError(
-                    f"dnf repoquery failed for {self.distro} (rc={proc.returncode}): "
+                    f"dnf repoquery failed for {self.target} (rc={proc.returncode}): "
                     f"{proc.stderr.strip()[-300:]}"
                 )
             found: Dict[str, str] = {}
@@ -180,359 +382,15 @@ class RepoVerifier:
         return result
 
 
-class TaxonomyManager:
-    """Manages loading, updating, and exporting package taxonomies."""
-
-    def __init__(self, repo_root: Optional[Path] = None):
-        if repo_root is None:
-            # Default to repo root relative to scripts/
-            self.repo_root = Path(__file__).resolve().parent.parent
-        else:
-            self.repo_root = Path(repo_root)
-
-        self.taxonomy_dir = self.repo_root / "vars" / "packages"
-        self.builds_dir = self.repo_root / "build-selections"
-        self.yaml = get_yaml()
-        self.distro_data: Dict[str, CommentedMap] = {}
-        self.distributions_map: Dict[str, Any] = {}
-        self.verifiers: Dict[str, RepoVerifier] = {}
-        self.load_all()
-
-    def get_verifier(self, distro: str) -> RepoVerifier:
-        """Return the (cached) availability verifier for a distribution."""
-        if distro not in self.verifiers:
-            self.verifiers[distro] = RepoVerifier(distro)
-        return self.verifiers[distro]
-
-    def resolve_name(self, requested_distro: str, distro: str, package: str) -> str:
-        """Translate a package name for `distro` when adding across all distros."""
-        if requested_distro == "All":
-            mappings = self.distributions_map.get("package_mappings", {})
-            if package in mappings and distro.lower() in mappings[package]:
-                return mappings[package][distro.lower()]
-        return package
-
-    def all_taxonomy_packages(
-        self, distro: str, section: str = "system_packages"
-    ) -> List[Tuple[str, str, str]]:
-        """Return (category, subcategory, package) for every entry in a section."""
-        entries: List[Tuple[str, str, str]] = []
-        for cat, subcats in (self.distro_data.get(distro, {}).get(section) or {}).items():
-            for subcat, pkgs in (subcats or {}).items():
-                for pkg in pkgs or []:
-                    if isinstance(pkg, str):
-                        entries.append((cat, subcat, pkg))
-        return entries
-
-    def load_all(self):
-        """Load all distribution files and cross-distribution mappings."""
-        dist_map_path = self.taxonomy_dir / "00-distributions.yml"
-        if dist_map_path.exists():
-            with open(dist_map_path, "r", encoding="utf-8") as f:
-                self.distributions_map = self.yaml.load(f) or {}
-
-        for distro in DISTROS:
-            distro_file = self.taxonomy_dir / f"{distro}.yml"
-            if distro_file.exists():
-                with open(distro_file, "r", encoding="utf-8") as f:
-                    self.distro_data[distro] = self.yaml.load(f) or CommentedMap()
-            else:
-                self.distro_data[distro] = CommentedMap()
-
-    def save_distro(self, distro: str):
-        """Save a specific distribution taxonomy back to disk preserving formatting."""
-        distro_file = self.taxonomy_dir / f"{distro}.yml"
-        self.taxonomy_dir.mkdir(parents=True, exist_ok=True)
-        with open(distro_file, "w", encoding="utf-8") as f:
-            self.yaml.dump(self.distro_data[distro], f)
-
-    def save_all_distros(self):
-        """Save all loaded distributions back to disk."""
-        for distro in DISTROS:
-            if distro in self.distro_data:
-                self.save_distro(distro)
-
-    def get_categories(self, distro: str, section: str = "system_packages") -> List[str]:
-        """Return category names under a given section."""
-        data = self.distro_data.get(distro, {})
-        section_data = data.get(section, {})
-        if isinstance(section_data, dict):
-            return list(section_data.keys())
-        return []
-
-    def get_subcategories(
-        self, distro: str, category: str, section: str = "system_packages"
-    ) -> List[str]:
-        """Return subcategory names under a given category."""
-        data = self.distro_data.get(distro, {})
-        cat_data = data.get(section, {}).get(category, {})
-        if isinstance(cat_data, dict):
-            return list(cat_data.keys())
-        return []
-
-    def get_packages(
-        self, distro: str, category: str, subcategory: str, section: str = "system_packages"
-    ) -> List[str]:
-        """Return package list for a given subcategory."""
-        data = self.distro_data.get(distro, {})
-        packages = data.get(section, {}).get(category, {}).get(subcategory, [])
-        if isinstance(packages, list):
-            return list(packages)
-        return []
-
-    def find_package(self, package_name: str) -> List[Dict[str, str]]:
-        """Search for a package across all distributions and sections."""
-        results = []
-        name_lower = package_name.lower()
-        for distro, data in self.distro_data.items():
-            for section in ["system_packages", "system_groups", "system_flatpaks"]:
-                sec_dict = data.get(section, {})
-                if not isinstance(sec_dict, dict):
-                    continue
-                for cat, subcats in sec_dict.items():
-                    if not isinstance(subcats, dict):
-                        continue
-                    for subcat, pkgs in subcats.items():
-                        if isinstance(pkgs, list):
-                            for p in pkgs:
-                                if name_lower in str(p).lower():
-                                    results.append(
-                                        {
-                                            "distro": distro,
-                                            "section": section,
-                                            "category": cat,
-                                            "subcategory": subcat,
-                                            "package": str(p),
-                                        }
-                                    )
-        return results
-
-    def add_package(
-        self,
-        distro: str,
-        category: str,
-        subcategory: str,
-        package: str,
-        section: str = "system_packages",
-    ) -> bool:
-        """Add a package to a distribution taxonomy."""
-        distros_to_update = DISTROS if distro == "All" else [distro]
-        added_any = False
-
-        for d in distros_to_update:
-            data = self.distro_data.get(d)
-            if data is None:
-                continue
-
-            if section not in data:
-                data[section] = CommentedMap()
-            if category not in data[section]:
-                data[section][category] = CommentedMap()
-            if subcategory not in data[section][category]:
-                data[section][category][subcategory] = CommentedSeq()
-
-            pkg_list = data[section][category][subcategory]
-
-            # Check mapping if adding across distros
-            target_pkg = self.resolve_name(distro, d, package)
-
-            if target_pkg not in pkg_list:
-                pkg_list.append(target_pkg)
-                self.save_distro(d)
-                added_any = True
-
-        return added_any
-
-    def remove_package(
-        self,
-        distro: str,
-        category: str,
-        subcategory: str,
-        package: str,
-        section: str = "system_packages",
-    ) -> bool:
-        """Remove a package from a distribution taxonomy."""
-        distros_to_update = DISTROS if distro == "All" else [distro]
-        removed_any = False
-
-        for d in distros_to_update:
-            data = self.distro_data.get(d)
-            if not data or section not in data:
-                continue
-            cat_data = data[section].get(category)
-            if not cat_data or subcategory not in cat_data:
-                continue
-
-            pkg_list = cat_data[subcategory]
-            if isinstance(pkg_list, list):
-                # Look for exact match or mapped match
-                to_remove = None
-                for p in pkg_list:
-                    if p == package:
-                        to_remove = p
-                        break
-                if to_remove:
-                    pkg_list.remove(to_remove)
-                    self.save_distro(d)
-                    removed_any = True
-
-        return removed_any
-
-    def generate_build_manifest(
-        self,
-        distro: str,
-        blueprint: str,
-        selected_subcategories: List[Tuple[str, str]],
-        extra_packages: Optional[List[str]] = None,
-        custom_package_pins: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """Aggregate packages for selected subcategories and create a build manifest."""
-        data = self.distro_data.get(distro, {})
-        sys_pkgs = data.get("system_packages", {})
-        sys_groups = data.get("system_groups", {})
-        sys_flatpaks = data.get("system_flatpaks", {})
-
-        packages: Set[str] = set()
-        groups: Set[str] = set()
-        flatpaks: Set[str] = set()
-
-        for cat, subcat in selected_subcategories:
-            # Check system_packages
-            if cat in sys_pkgs and subcat in sys_pkgs[cat]:
-                packages.update(sys_pkgs[cat][subcat])
-            # Check system_groups
-            if cat in sys_groups and subcat in sys_groups[cat]:
-                groups.update(sys_groups[cat][subcat])
-            # Check system_flatpaks
-            if cat in sys_flatpaks and subcat in sys_flatpaks[cat]:
-                flatpaks.update(sys_flatpaks[cat][subcat])
-
-        if extra_packages:
-            packages.update(extra_packages)
-
-        sorted_packages = sorted(packages)
-        sorted_groups = sorted(groups)
-        sorted_flatpaks = sorted(flatpaks)
-
-        manifest = {
-            "metadata": {
-                "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "distro": distro,
-                "blueprint": blueprint,
-                "total_packages": len(sorted_packages),
-                "total_groups": len(sorted_groups),
-                "total_flatpaks": len(sorted_flatpaks),
-                "selected_components": [f"{cat}/{subcat}" for cat, subcat in selected_subcategories],
-            },
-            "build_specification": {
-                "distro": distro,
-                "blueprint_name": blueprint,
-                "packages": sorted_packages,
-                "groups": sorted_groups,
-                "flatpaks": sorted_flatpaks,
-                "package_pins": custom_package_pins or {},
-            },
-            "ansible_vars": {
-                "osbuild_distro": f"{distro.lower()}-43" if distro == "Fedora" else f"{distro.lower()}-10.2",
-                "osbuild_blueprint_name": blueprint,
-                "osbuild_extra_packages": sorted_packages,
-            },
-        }
-
-        return manifest
-
-    def export_manifest(
-        self,
-        manifest: Dict[str, Any],
-        output_path: Optional[Path] = None,
-        export_format: str = "yaml",
-    ) -> Path:
-        """Export manifest to disk in YAML, JSON, or TOML format."""
-        if output_path is None:
-            distro = manifest["metadata"]["distro"]
-            blueprint = manifest["metadata"]["blueprint"]
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.builds_dir.mkdir(parents=True, exist_ok=True)
-            output_path = self.builds_dir / f"build-{distro.lower()}-{blueprint}-{timestamp}.{export_format}"
-        else:
-            output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if export_format == "json":
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(manifest, f, indent=2)
-        elif export_format == "toml":
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(f'name = "{manifest["metadata"]["blueprint"]}"\n')
-                f.write(f'description = "OSBuild package selection for {manifest["metadata"]["distro"]}"\n')
-                f.write('version = "1.0.0"\n\n')
-                for pkg in manifest["build_specification"]["packages"]:
-                    f.write('[[packages]]\n')
-                    f.write(f'name = "{pkg}"\n')
-                    pin = manifest["build_specification"]["package_pins"].get(pkg, "*")
-                    f.write(f'version = "{pin}"\n\n')
-        else:  # default yaml
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write("---\n# OSBuild Package Selection Manifest\n")
-                self.yaml.dump(manifest, f)
-
-        return output_path
+def verifier_for(store: ComponentStore, target: str) -> RepoVerifier:
+    """A RepoVerifier over the target's base repos and every component's repo_urls."""
+    urls = [u for c in store.components().values() for u in c.repo_urls]
+    return RepoVerifier(target, repo_urls=urls)
 
 
 # =============================================================================
-# CLI Non-Interactive Subcommands
+# CLI commands
 # =============================================================================
-
-
-def cli_list(manager: TaxonomyManager, distro: str):
-    """List taxonomy hierarchy and package counts for a distribution."""
-    if console:
-        table = Table(title=f"Package Taxonomy for {distro}")
-        table.add_column("Category", style="cyan", no_wrap=True)
-        table.add_column("Subcategory", style="magenta")
-        table.add_column("Package Count", justify="right", style="green")
-        table.add_column("Sample Packages", style="dim")
-
-        total_pkgs = 0
-        for cat in manager.get_categories(distro):
-            for subcat in manager.get_subcategories(distro, cat):
-                pkgs = manager.get_packages(distro, cat, subcat)
-                count = len(pkgs)
-                total_pkgs += count
-                sample = ", ".join(pkgs[:4]) + ("..." if len(pkgs) > 4 else "")
-                table.add_row(cat, subcat, str(count), sample)
-
-        console.print(table)
-        console.print(f"[bold green]Total packages in {distro}: {total_pkgs}[/bold green]\n")
-    else:
-        for cat in manager.get_categories(distro):
-            print(f"[{cat}]")
-            for subcat in manager.get_subcategories(distro, cat):
-                pkgs = manager.get_packages(distro, cat, subcat)
-                print(f"  - {subcat}: {len(pkgs)} pkgs ({', '.join(pkgs[:3])}...)")
-
-
-def cli_search(manager: TaxonomyManager, query: str):
-    """Search for packages across distributions."""
-    results = manager.find_package(query)
-    if not results:
-        print(f"No packages found matching '{query}'.")
-        return
-
-    if console:
-        table = Table(title=f"Search Results for '{query}'")
-        table.add_column("Distro", style="cyan")
-        table.add_column("Section", style="yellow")
-        table.add_column("Category", style="blue")
-        table.add_column("Subcategory", style="magenta")
-        table.add_column("Package", style="green bold")
-
-        for r in results:
-            table.add_row(r["distro"], r["section"], r["category"], r["subcategory"], r["package"])
-        console.print(table)
-    else:
-        for r in results:
-            print(f"[{r['distro']}] {r['category']}/{r['subcategory']} -> {r['package']}")
 
 
 def _say(kind: str, msg: str):
@@ -540,66 +398,109 @@ def _say(kind: str, msg: str):
     styles = {"ok": ("✓", "bold green"), "warn": ("!", "yellow"), "err": ("✗", "bold red")}
     mark, style = styles[kind]
     if console:
-        console.print(f"[{style}]{mark}[/{style}] {msg}")
+        console.print(f"[{style}]{mark}[/{style}] {msg}", highlight=False, soft_wrap=True)
     else:
         print(f"{mark} {msg}")
 
 
-def cli_add_package(
-    manager: TaxonomyManager,
-    distro: str,
-    category: str,
-    subcategory: str,
-    package: str,
-    section: str = "system_packages",
-    verify: bool = True,
-):
-    """Add a package via CLI.
-
-    With `verify`, each name is looked up in the target distro's repos and is
-    only added where a repo provides it. When dnf is missing the names are
-    added unverified, with a warning.
-    """
-    packages = [p.strip() for p in package.split(",") if p.strip()]
-    targets = DISTROS if distro == "All" else [distro]
-
-    if verify and not RepoVerifier.dnf_available():
-        _say("warn", "dnf not found; adding without verifying availability")
-        verify = False
-
-    for d in targets:
-        names = [manager.resolve_name(distro, d, p) for p in packages]
-        availability: Dict[str, Optional[str]] = {}
-        if verify:
-            try:
-                availability = manager.get_verifier(d).check(names)
-            except RuntimeError as exc:
-                _say("err", f"{d}: {exc}; nothing added for this distro")
-                continue
-
-        for name in names:
-            repo = availability.get(name, SKIPPED_GROUP) if verify else None
-            if verify and repo is None:
-                _say(
-                    "warn",
-                    f"'{name}' is not in any {d} repo; not added "
-                    f"(use --no-verify to add it anyway)",
-                )
-                continue
-            if manager.add_package(d, category, subcategory, name, section):
-                where = f" [{repo}]" if repo and repo != SKIPPED_GROUP else ""
-                _say("ok", f"Added '{name}' to {d} -> {category}/{subcategory} ({section}){where}")
-            else:
-                _say("warn", f"Package '{name}' already exists in {d} -> {category}/{subcategory}")
+def parse_packages(raw: Sequence[str]) -> List[str]:
+    """Split names given as separate arguments or comma-separated lists."""
+    names: List[str] = []
+    for item in raw:
+        names += [p for p in re.split(r"[,\s]+", item) if p]
+    return list(dict.fromkeys(names))
 
 
-def cli_verify(
-    manager: TaxonomyManager,
-    distro: str,
-    packages: Optional[str] = None,
-    section: str = "system_packages",
+def cli_list(store: ComponentStore, target: str) -> int:
+    components = store.components()
+    width = max((len(n) for n in components), default=0)
+    print(f"{target}: {len(components)} components, {sum(len(c.packages) for c in components.values())} packages")
+    for name, comp in components.items():
+        print(f"  {name:<{width}}  {len(comp.packages):>4}  {comp.label}")
+    return 0
+
+
+def cli_search(stores: Dict[str, ComponentStore], query: str) -> int:
+    hits = 0
+    for target, store in stores.items():
+        for comp in store.components().values():
+            for pkg in comp.packages:
+                if query.lower() in pkg.lower():
+                    print(f"{target}/{comp.name}: {pkg}")
+                    hits += 1
+    if not hits:
+        _say("warn", f"No package matching '{query}'")
+        return 1
+    return 0
+
+
+def cli_add(
+    store: ComponentStore,
+    target: str,
+    component: str,
+    packages: Sequence[str],
+    verify: bool = False,
+    force: bool = False,
 ) -> int:
-    """Check taxonomy entries (or the given names) against the distro repos.
+    """Add packages to a component. Returns 0 when all were added or present.
+
+    1 when some were refused (not in the repos, or in another component
+    without --force); 2 when the command could not run.
+    """
+    names = [validate_package_name(p) for p in packages]
+    store.load(component)
+
+    availability: Dict[str, Optional[str]] = {}
+    if verify:
+        if not RepoVerifier.dnf_available():
+            _say("err", "dnf not found; cannot verify (drop --verify to add unverified)")
+            return 2
+        try:
+            availability = verifier_for(store, target).check(names)
+        except RuntimeError as exc:
+            _say("err", f"{exc}; nothing added")
+            return 2
+
+    refused = 0
+    to_add: List[str] = []
+    here = set(store.load(component).packages)
+    conflicts = store.conflicts(component, names)
+    for name in names:
+        if name in here:
+            _say("warn", f"'{name}' is already in {component}")
+        elif verify and availability.get(name, SKIPPED_GROUP) is None:
+            _say("warn", f"'{name}' is not in any {target} repo; not added")
+            refused += 1
+        elif name in conflicts and not force:
+            _say(
+                "warn",
+                f"'{name}' is already in {', '.join(conflicts[name])}; not added (use --force to add it anyway)",
+            )
+            refused += 1
+        else:
+            if name in conflicts:
+                _say("warn", f"'{name}' is also in {', '.join(conflicts[name])}")
+            to_add.append(name)
+
+    added, _ = store.add(component, to_add)
+    for name in added:
+        repo = availability.get(name)
+        where = f" [{repo}]" if repo and repo != SKIPPED_GROUP else ""
+        _say("ok", f"Added '{name}' to {target}/{component}{where}")
+    return 1 if refused else 0
+
+
+def cli_remove(store: ComponentStore, target: str, component: str, packages: Sequence[str]) -> int:
+    removed, absent = store.remove(component, [validate_package_name(p) for p in packages])
+    for name in removed:
+        _say("ok", f"Removed '{name}' from {target}/{component}")
+    for name in absent:
+        _say("warn", f"'{name}' is not in {component}")
+    return 0 if removed or not absent else 1
+
+
+def cli_verify(store: ComponentStore, target: str, component: Optional[str] = None) -> int:
+    """Check a component (or the whole target) against the target's repos.
 
     Returns 0 when every name is available, 1 when some are missing, 2 when
     verification could not run.
@@ -607,486 +508,414 @@ def cli_verify(
     if not RepoVerifier.dnf_available():
         _say("err", "dnf not found; cannot verify availability")
         return 2
-
-    targets = DISTROS if distro == "All" else [distro]
-    missing_total = 0
-    for d in targets:
-        if packages:
-            names = [manager.resolve_name(distro, d, p.strip()) for p in packages.split(",") if p.strip()]
-            locations: Dict[str, List[str]] = {n: [] for n in names}
-        else:
-            locations = {}
-            for cat, subcat, pkg in manager.all_taxonomy_packages(d, section):
-                locations.setdefault(pkg, []).append(f"{cat}/{subcat}")
-            names = list(locations)
-
-        try:
-            availability = manager.get_verifier(d).check(names)
-        except RuntimeError as exc:
-            _say("err", str(exc))
-            return 2
-
-        missing = sorted(n for n, repo in availability.items() if repo is None)
-        checked = sum(1 for r in availability.values() if r != SKIPPED_GROUP)
-        _say("ok" if not missing else "warn", f"{d}: {checked - len(missing)}/{checked} available")
-        for name in missing:
-            where = ", ".join(locations.get(name, []))
-            print(f"    missing: {name}" + (f"  ({where})" if where else ""))
-        missing_total += len(missing)
-
-    return 1 if missing_total else 0
-
-
-def cli_remove_package(
-    manager: TaxonomyManager,
-    distro: str,
-    category: str,
-    subcategory: str,
-    package: str,
-    section: str = "system_packages",
-):
-    """Remove a package via CLI."""
-    packages = [p.strip() for p in package.split(",") if p.strip()]
-    for p in packages:
-        success = manager.remove_package(distro, category, subcategory, p, section)
-        if success:
-            msg = f"Removed '{p}' from {distro} -> {category}/{subcategory} ({section})"
-            if console:
-                console.print(f"[bold green]✓[/bold green] {msg}")
-            else:
-                print(f"✓ {msg}")
-        else:
-            msg = f"Package '{p}' not found in {distro} -> {category}/{subcategory}"
-            if console:
-                console.print(f"[yellow]![/yellow] {msg}")
-            else:
-                print(f"! {msg}")
-
-
-def cli_build_manifest(
-    manager: TaxonomyManager,
-    distro: str,
-    blueprint: str,
-    subcategories: List[str],
-    output: Optional[str] = None,
-    export_format: str = "yaml",
-    verify: bool = False,
-):
-    """Generate and export a build manifest via CLI."""
-    # Resolve (cat, subcat) pairs
-    selected_pairs: List[Tuple[str, str]] = []
-    for req in subcategories:
-        if "/" in req:
-            cat, subcat = req.split("/", 1)
-            selected_pairs.append((cat, subcat))
-        else:
-            # Search which category contains this subcategory
-            matched = False
-            for cat in manager.get_categories(distro):
-                if req in manager.get_subcategories(distro, cat):
-                    selected_pairs.append((cat, req))
-                    matched = True
-                    break
-            if not matched:
-                print(f"Warning: subcategory '{req}' not found in {distro} taxonomy.")
-
-    manifest = manager.generate_build_manifest(distro, blueprint, selected_pairs)
-    if verify:
-        if RepoVerifier.dnf_available():
-            try:
-                found = manager.get_verifier(distro).check(
-                    manifest["build_specification"]["packages"]
-                )
-                unavailable = sorted(n for n, repo in found.items() if repo is None)
-                manifest["metadata"]["unavailable_packages"] = unavailable
-                for name in unavailable:
-                    _say("warn", f"'{name}' is not in any {distro} repo")
-            except RuntimeError as exc:
-                _say("err", str(exc))
-        else:
-            _say("warn", "dnf not found; skipping availability check")
-    out_path = manager.export_manifest(
-        manifest, Path(output) if output else None, export_format=export_format
-    )
-    if console:
-        console.print(
-            Panel(
-                f"[bold green]Build Selection Manifest Saved![/bold green]\n\n"
-                f"• Target Distro: [cyan]{distro}[/cyan]\n"
-                f"• Blueprint: [magenta]{blueprint}[/magenta]\n"
-                f"• Total Packages: [bold]{manifest['metadata']['total_packages']}[/bold]\n"
-                f"• Output File: [blue]{out_path}[/blue]",
-                title="Manifest Summary",
-            )
-        )
-    else:
-        print(f"Manifest written to: {out_path} ({manifest['metadata']['total_packages']} packages)")
+    components = {component: store.load(component)} if component else store.components()
+    locations: Dict[str, List[str]] = {}
+    for comp in components.values():
+        for pkg in comp.packages:
+            locations.setdefault(pkg, []).append(comp.name)
+    try:
+        availability = verifier_for(store, target).check(list(locations))
+    except RuntimeError as exc:
+        _say("err", str(exc))
+        return 2
+    missing = sorted(n for n, repo in availability.items() if repo is None)
+    checked = sum(1 for r in availability.values() if r != SKIPPED_GROUP)
+    _say("ok" if not missing else "warn", f"{target}: {checked - len(missing)}/{checked} available")
+    for name in missing:
+        print(f"    missing: {name}  ({', '.join(locations[name])})")
+    return 1 if missing else 0
 
 
 # =============================================================================
-# Interactive TUI Workflows (Questionary + Rich)
+# Playbook component selection
+# =============================================================================
+
+_COMPONENTS_KEY = re.compile(r"^(?P<indent>\s*)osbuild_blueprint_components:\s*(?:#.*)?$")
+_DISTRO_LINE = re.compile(r"""^\s*osbuild_distro:\s*["']?(?P<distro>[a-z]+)-(?P<ver>\d+)""", re.M)
+_ARCH_LINE = re.compile(r"""^\s*osbuild_arch:\s*["']?(?P<arch>[\w]+)""", re.M)
+_NAME_ITEM = re.compile(r"^(?P<indent>\s*)-\s+(?P<name>[A-Za-z0-9][\w.-]*)\s*(?:#.*)?$")
+
+
+class PlaybookSelection:
+    """The ``osbuild_blueprint_components`` block list of one playbook file.
+
+    Edits touch only that list's item lines; everything else stays byte for byte.
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.lines = self.path.read_text().split("\n")
+        self._start = next((i for i, l in enumerate(self.lines) if _COMPONENTS_KEY.match(l)), None)
+        if self._start is None:
+            raise TrackerError(f"{self.path}: no 'osbuild_blueprint_components:' block list found")
+        self._items = self._scan()
+        if not self._items:
+            raise TrackerError(f"{self.path}: osbuild_blueprint_components is not a block list of names")
+
+    def _scan(self) -> List[int]:
+        items: List[int] = []
+        for idx in range(self._start + 1, len(self.lines)):
+            line = self.lines[idx]
+            if _NAME_ITEM.match(line):
+                items.append(idx)
+            elif line.strip() and not line.lstrip().startswith("#"):
+                break
+        return items
+
+    @property
+    def components(self) -> List[str]:
+        return [_NAME_ITEM.match(self.lines[i]).group("name") for i in self._items]
+
+    def target(self) -> Optional[str]:
+        """``<distro>/<major>/<arch>`` from the playbook's osbuild_distro, if it sets one."""
+        text = "\n".join(self.lines)
+        m = _DISTRO_LINE.search(text)
+        if not m:
+            return None
+        arch = _ARCH_LINE.search(text)
+        return f"{m['distro']}/{m['ver']}/{arch['arch'] if arch else 'x86_64'}"
+
+    def add(self, names: Sequence[str], after: Optional[str] = None) -> List[str]:
+        """Append names (or insert after ``after``). Returns the names actually added."""
+        new = [n for n in dict.fromkeys(names) if n not in self.components]
+        if not new:
+            return new
+        at = self._items[-1]
+        if after:
+            if after not in self.components:
+                raise TrackerError(f"--after '{after}' is not selected in {self.path.name}")
+            at = self._items[self.components.index(after)]
+        indent = _NAME_ITEM.match(self.lines[at]).group("indent")
+        self.lines[at + 1:at + 1] = [f"{indent}- {n}" for n in new]
+        self._items = self._scan()
+        return new
+
+    def remove(self, names: Sequence[str]) -> List[str]:
+        """Remove names. Refuses to empty the list. Returns the names removed."""
+        gone = [n for n in dict.fromkeys(names) if n in self.components]
+        if gone and len(gone) == len(self.components):
+            raise TrackerError("Refusing to remove every component from the playbook")
+        drop = {i for i in self._items if _NAME_ITEM.match(self.lines[i]).group("name") in gone}
+        self.lines = [l for i, l in enumerate(self.lines) if i not in drop]
+        self._start = next(i for i, l in enumerate(self.lines) if _COMPONENTS_KEY.match(l))
+        self._items = self._scan()
+        return gone
+
+    def save(self) -> None:
+        text = "\n".join(self.lines)
+        reread = [m.group("name") for l in text.split("\n")[self._start + 1:] if (m := _NAME_ITEM.match(l))]
+        if reread[: len(self.components)] != self.components:
+            raise TrackerError(f"{self.path}: edit would corrupt the file; nothing written")
+        self.path.write_text(text)
+
+
+def _playbook_store(targets: Dict[str, Path], pb: PlaybookSelection, wanted: Optional[str]) -> Tuple[str, ComponentStore]:
+    key = resolve_target(targets, wanted or pb.target())
+    return key, ComponentStore(targets[key])
+
+
+def cli_playbook(
+    targets: Dict[str, Path],
+    path: Path,
+    action: str,
+    names: Sequence[str],
+    target: Optional[str] = None,
+    after: Optional[str] = None,
+) -> int:
+    """list/add/remove components in a playbook. add checks the names exist for the target."""
+    pb = PlaybookSelection(path)
+    key, store = _playbook_store(targets, pb, target)
+    available = store.names()
+    if action == "list":
+        print(f"{path} ({key})")
+        for name in available:
+            comp = store.load(name)
+            mark = "x" if name in pb.components else " "
+            print(f"  [{mark}] {name:<18} {len(comp.packages):>4}  {comp.label}")
+        unknown = [c for c in pb.components if c not in available]
+        for name in unknown:
+            _say("warn", f"'{name}' is selected but has no component file in {key}")
+        return 1 if unknown else 0
+    names = parse_packages(names)
+    if action == "add":
+        bad = [n for n in names if n not in available]
+        if bad:
+            raise TrackerError(f"No such component for {key}: {', '.join(bad)}. Available: {', '.join(available)}")
+        added = pb.add(names, after)
+        for n in names:
+            _say("ok" if n in added else "warn", f"{'Added' if n in added else 'Already selected:'} '{n}'")
+    else:
+        removed = pb.remove(names)
+        for n in names:
+            _say("ok" if n in removed else "warn", f"{'Removed' if n in removed else 'Not selected:'} '{n}'")
+    pb.save()
+    return 0
+
+
+# =============================================================================
+# TUI
 # =============================================================================
 
 
-def tui_search(manager: TaxonomyManager):
-    """Interactive package search."""
-    if not questionary:
-        print("Error: questionary library required for interactive mode.")
-        return
-
-    term = questionary.text("Enter search term:").ask()
-    if term and term.strip():
-        cli_search(manager, term.strip())
+# questionary replaces Choice(value=None) with the title, so "Back" and "Exit"
+# need their own sentinel values.
+_BACK = "\0back"
+_EXIT = "\0exit"
 
 
-def tui_add_package(manager: TaxonomyManager):
-    """Interactive wizard to add package(s) to taxonomy."""
-    if not questionary:
-        return
-
-    distro_choice = questionary.select(
-        "Select target distribution:",
-        choices=["All", *DISTROS],
-        default="All",
-    ).ask()
-    if not distro_choice:
-        return
-
-    ref_distro = "Fedora" if distro_choice == "All" else distro_choice
-    categories = manager.get_categories(ref_distro)
-    categories.append("➕ Create New Category...")
-
-    cat_choice = questionary.select("Select category:", choices=categories).ask()
-    if not cat_choice:
-        return
-
-    if cat_choice == "➕ Create New Category...":
-        cat_choice = questionary.text("Enter new category name:").ask()
-        if not cat_choice:
-            return
-        subcats = ["➕ Create New Subcategory..."]
-    else:
-        subcats = manager.get_subcategories(ref_distro, cat_choice)
-        subcats.append("➕ Create New Subcategory...")
-
-    subcat_choice = questionary.select(
-        f"Select subcategory under [{cat_choice}]:", choices=subcats
-    ).ask()
-    if not subcat_choice:
-        return
-
-    if subcat_choice == "➕ Create New Subcategory...":
-        subcat_choice = questionary.text("Enter new subcategory name:").ask()
-        if not subcat_choice:
-            return
-
-    pkg_input = questionary.text(
-        "Enter package name(s) (comma-separated):"
-    ).ask()
-    if not pkg_input or not pkg_input.strip():
-        return
-
-    cli_add_package(
-        manager,
-        distro=distro_choice,
-        category=cat_choice,
-        subcategory=subcat_choice,
-        package=pkg_input.strip(),
-    )
-
-
-def tui_remove_package(manager: TaxonomyManager):
-    """Interactive wizard to remove package(s) from taxonomy."""
-    if not questionary:
-        return
-
-    distro_choice = questionary.select(
-        "Select distribution:",
-        choices=DISTROS,
-        default="Fedora",
-    ).ask()
-    if not distro_choice:
-        return
-
-    categories = manager.get_categories(distro_choice)
-    if not categories:
-        print(f"No categories found for {distro_choice}.")
-        return
-
-    cat_choice = questionary.select("Select category:", choices=categories).ask()
-    if not cat_choice:
-        return
-
-    subcats = manager.get_subcategories(distro_choice, cat_choice)
-    if not subcats:
-        print(f"No subcategories in {cat_choice}.")
-        return
-
-    subcat_choice = questionary.select("Select subcategory:", choices=subcats).ask()
-    if not subcat_choice:
-        return
-
-    pkgs = manager.get_packages(distro_choice, cat_choice, subcat_choice)
-    if not pkgs:
-        print(f"No packages in {cat_choice}/{subcat_choice}.")
-        return
-
-    to_remove = questionary.checkbox(
-        f"Select package(s) to remove from {cat_choice}/{subcat_choice}:",
-        choices=[Choice(p) for p in pkgs],
-    ).ask()
-
-    if not to_remove:
-        return
-
-    confirm = questionary.confirm(
-        f"Confirm removal of {len(to_remove)} package(s) from {distro_choice}?"
-    ).ask()
-    if confirm:
-        for p in to_remove:
-            manager.remove_package(
-                distro=distro_choice,
-                category=cat_choice,
-                subcategory=subcat_choice,
-                package=p,
-            )
-        if console:
-            console.print(f"[bold green]Successfully removed {len(to_remove)} package(s).[/bold green]")
-        else:
-            print(f"Successfully removed {len(to_remove)} package(s).")
-
-
-def tui_select_build_packages(manager: TaxonomyManager):
-    """Interactive package selection for image build tracking."""
-    if not questionary:
-        return
-
-    distro = questionary.select(
-        "Select target OS distribution:",
-        choices=DISTROS,
-        default="Fedora",
-    ).ask()
-    if not distro:
-        return
-
-    blueprint = questionary.text(
-        "Enter blueprint name:",
-        default="workstation",
-    ).ask()
-    if not blueprint:
-        return
-
-    # Build checklist of categories/subcategories
-    choices = []
-    for cat in manager.get_categories(distro):
-        choices.append(Separator(f"── {cat} ──"))
-        for subcat in manager.get_subcategories(distro, cat):
-            pkgs = manager.get_packages(distro, cat, subcat)
-            label = f"{cat}/{subcat} ({len(pkgs)} pkgs)"
-            # Default check common core components
-            checked = subcat in ["base", "kernel", "installer", "ansible"]
-            choices.append(Choice(title=label, value=(cat, subcat), checked=checked))
-
-    selected_subcats = questionary.checkbox(
-        "Select components / subcategories for this build:",
-        choices=choices,
-    ).ask()
-
-    if not selected_subcats:
-        print("No components selected. Build canceled.")
-        return
-
-    # Extra packages prompt
-    extra_str = questionary.text(
-        "Optional: Enter any extra packages to include (comma-separated):"
-    ).ask()
-    extra_pkgs = [p.strip() for p in extra_str.split(",") if p.strip()] if extra_str else []
-
-    # Export format prompt
-    fmt = questionary.select(
-        "Select export format for the build manifest:",
-        choices=["yaml", "json", "toml"],
-        default="yaml",
-    ).ask()
-
-    manifest = manager.generate_build_manifest(
-        distro=distro,
-        blueprint=blueprint,
-        selected_subcategories=selected_subcats,
-        extra_packages=extra_pkgs,
-    )
-
-    out_path = manager.export_manifest(manifest, export_format=fmt)
-
+def show_details(comp: Component) -> None:
+    """Print a component's label, repo_urls, services, kernel_args and fragment."""
+    rows = [
+        ("label", comp.label),
+        ("repo_urls", "\n".join(comp.repo_urls) or "-"),
+        ("services", ", ".join(comp.services) or "-"),
+        ("kernel_args", " ".join(comp.kernel_args) or "-"),
+        ("fragment", comp.fragment or "-"),
+    ]
     if console:
-        console.print(
-            Panel(
-                f"[bold green]✓ Build Manifest Successfully Created![/bold green]\n\n"
-                f"• Target Distro: [cyan]{distro}[/cyan]\n"
-                f"• Blueprint: [magenta]{blueprint}[/magenta]\n"
-                f"• Components Selected: [yellow]{len(selected_subcats)}[/yellow]\n"
-                f"• Total Packages Resolved: [bold white]{manifest['metadata']['total_packages']}[/bold white]\n"
-                f"• Saved To: [bold blue]{out_path}[/bold blue]\n\n"
-                f"[dim]Tip: You can use these packages in your osbuild playbook or blueprint.[/dim]",
-                title="OSBuild Tracking Record",
-            )
-        )
+        table = Table(show_header=False, box=None)
+        for key, value in rows:
+            table.add_row(f"[bold]{key}[/bold]", value)
+        console.print(Panel(table, title=f"{comp.name} ({len(comp.packages)} packages)", expand=False))
     else:
-        print(f"Manifest written to: {out_path} ({manifest['metadata']['total_packages']} packages)")
+        print(f"{comp.name} ({len(comp.packages)} packages)")
+        for key, value in rows:
+            print(f"  {key}: {value}")
 
 
-def tui_main_loop(manager: TaxonomyManager):
-    """Main interactive TUI loop."""
+def tui_edit_packages(store: ComponentStore, target: str, name: str) -> None:
+    """Checkbox over the component's packages; unchecked ones are removed after confirmation."""
+    comp = store.load(name)
+    kept = questionary.checkbox(
+        f"{name}: uncheck the packages to remove",
+        choices=[Choice(p, checked=True) for p in comp.packages],
+    ).ask()
+    if kept is None:
+        return
+    removals = [p for p in comp.packages if p not in kept]
+    if not removals:
+        _say("ok", "No changes")
+        return
+    if not kept:
+        _say("err", "A component needs at least one package; nothing removed")
+        return
+    if not questionary.confirm(
+        f"Remove {len(removals)} package(s) from {name}?\n  " + "\n  ".join(removals), default=False
+    ).ask():
+        return
+    cli_remove(store, target, name, removals)
+
+
+def tui_add_packages(store: ComponentStore, target: str, name: str) -> None:
+    """Prompt for names; optional verify; duplicates elsewhere need confirmation."""
+    raw = questionary.text("Packages to add (space or comma separated):").ask()
+    names = parse_packages([raw or ""])
+    if not names:
+        return
+    try:
+        for n in names:
+            validate_package_name(n)
+    except TrackerError as exc:
+        _say("err", str(exc))
+        return
+    verify = RepoVerifier.dnf_available() and questionary.confirm(
+        "Verify against the target's repos?", default=True
+    ).ask()
+    force = False
+    conflicts = store.conflicts(name, names)
+    if conflicts:
+        listing = "\n  ".join(f"{p}: also in {', '.join(c)}" for p, c in conflicts.items())
+        force = bool(questionary.confirm(f"Already in another component:\n  {listing}\nAdd anyway?", default=False).ask())
+    cli_add(store, target, name, names, verify=bool(verify), force=force)
+
+
+def tui_component_menu(store: ComponentStore, target: str, name: str) -> None:
+    while True:
+        comp = store.load(name)
+        action = questionary.select(
+            f"{target}/{name} - {comp.label} ({len(comp.packages)} packages)",
+            choices=["Edit packages", "Add packages", "Show details", "Back"],
+        ).ask()
+        if action is None or action == "Back":
+            return
+        if action == "Edit packages":
+            tui_edit_packages(store, target, name)
+        elif action == "Add packages":
+            tui_add_packages(store, target, name)
+        elif action == "Show details":
+            show_details(comp)
+
+
+def tui_components(store: ComponentStore, target: str) -> None:
+    while True:
+        components = store.components()
+        choices = [Choice(f"{n}  {c.label} ({len(c.packages)})", value=n) for n, c in components.items()]
+        choices += [Separator(), Choice("Back", value=_BACK)]
+        name = questionary.select(f"{target}: choose a component", choices=choices).ask()
+        if name is None or name == _BACK:
+            return
+        tui_component_menu(store, target, name)
+
+
+def tui_playbook(targets: Dict[str, Path], root: Path) -> None:
+    """Pick a playbook, then check/uncheck the components it builds from."""
+    playbooks = sorted(
+        p for p in (root / "playbooks").glob("*.yml")
+        if "osbuild_blueprint_components:" in p.read_text() and not p.name.endswith("osbuild.yml")
+    )
+    if not playbooks:
+        _say("warn", "No playbook with a component list found")
+        return
+    choices = [Choice(p.name, value=str(p)) for p in playbooks] + [Separator(), Choice("Back", value=_BACK)]
+    picked = questionary.select("Choose a playbook:", choices=choices).ask()
+    if picked is None or picked == _BACK:
+        return
+    try:
+        pb = PlaybookSelection(Path(picked))
+        key, store = _playbook_store(targets, pb, None)
+    except TrackerError as exc:
+        _say("err", str(exc))
+        return
+    selected = pb.components
+    names = store.names()
+    ordered = selected + [n for n in names if n not in selected]
+    answer = questionary.checkbox(
+        f"{Path(picked).name} ({key}): check the components to build from",
+        choices=[
+            Choice(f"{n}  {store.load(n).label}" if n in names else f"{n}  (no component file)", value=n, checked=n in selected)
+            for n in ordered
+        ],
+    ).ask()
+    if answer is None:
+        return
+    drop = [n for n in selected if n not in answer]
+    add = [n for n in answer if n not in selected]
+    if not (drop or add):
+        _say("ok", "No changes")
+        return
+    summary = "\n  ".join([f"+ {n}" for n in add] + [f"- {n}" for n in drop])
+    if not questionary.confirm(f"Apply to {Path(picked).name}?\n  {summary}", default=True).ask():
+        return
+    try:
+        pb.add(add)
+        pb.remove(drop)
+        pb.save()
+    except TrackerError as exc:
+        _say("err", str(exc))
+        return
+    _say("ok", f"Updated {Path(picked).name}")
+
+
+def tui_main_loop(stores: Dict[str, ComponentStore], root: Path = REPO_ROOT) -> None:
     if not questionary:
         print("Error: questionary library not found. Run 'pip install questionary rich'.")
         return
-
     if console:
-        console.print(
-            Panel(
-                "[bold cyan]OSBuild Package Taxonomy & Build Tracker[/bold cyan]\n"
-                "[dim]Maintain distribution taxonomies and build package sets[/dim]",
-                style="bold blue",
-            )
-        )
-
+        console.print(Panel("[bold cyan]osbuild package tracker[/bold cyan]", style="bold blue", expand=False))
+    targets = {t: st.directory for t, st in stores.items()}
     while True:
-        action = questionary.select(
-            "What would you like to do?",
-            choices=[
-                "📦 Select Packages & Create Build Manifest",
-                "🔍 Search Packages in Taxonomy",
-                "📋 List Taxonomy Categories & Counts",
-                "➕ Add Package to Taxonomy",
-                "➖ Remove Package from Taxonomy",
-                "🚪 Exit",
-            ],
+        what = questionary.select(
+            "What would you like to edit?",
+            choices=["Packages in a component", "Components in a playbook", "Exit"],
         ).ask()
-
-        if action is None or "Exit" in action:
-            break
-        elif "Select Packages" in action:
-            tui_select_build_packages(manager)
-        elif "Search Packages" in action:
-            tui_search(manager)
-        elif "List Taxonomy" in action:
-            distro = questionary.select("Select distribution:", choices=DISTROS).ask()
-            if distro:
-                cli_list(manager, distro)
-        elif "Add Package" in action:
-            tui_add_package(manager)
-        elif "Remove Package" in action:
-            tui_remove_package(manager)
-
-
-# =============================================================================
-# Entry Point
-# =============================================================================
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="osbuild Package Tracker & Taxonomy TUI",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    parser.add_argument("--repo-root", type=str, help="Path to repository root")
-    parser.add_argument(
-        "--distro",
-        choices=["All", *DISTROS],
-        default="Fedora",
-        help="Target distribution (default: Fedora)",
-    )
-
-    subparsers = parser.add_subparsers(dest="command")
-
-    # list
-    list_p = subparsers.add_parser("list", help="List categories and package counts")
-    list_p.add_argument("--distro", choices=DISTROS, default="Fedora")
-
-    # search
-    search_p = subparsers.add_parser("search", help="Search for package across taxonomies")
-    search_p.add_argument("query", help="Package name substring to search for")
-
-    # add
-    add_p = subparsers.add_parser("add", help="Add package(s) to taxonomy")
-    add_p.add_argument("--distro", choices=["All", *DISTROS], default="All")
-    add_p.add_argument("--category", required=True, help="Category name (e.g. System)")
-    add_p.add_argument("--subcategory", required=True, help="Subcategory name (e.g. base)")
-    add_p.add_argument("--package", required=True, help="Package name or comma-separated list")
-    add_p.add_argument("--section", default="system_packages", help="YAML section (default: system_packages)")
-    add_p.add_argument(
-        "--no-verify",
-        action="store_true",
-        help="Add without checking the package exists in the distro's repos",
-    )
-
-    # verify
-    verify_p = subparsers.add_parser(
-        "verify", help="Check package availability in each distro's repos"
-    )
-    verify_p.add_argument("--distro", choices=["All", *DISTROS], default="All")
-    verify_p.add_argument("--package", help="Package name or comma-separated list (default: whole taxonomy)")
-    verify_p.add_argument("--section", default="system_packages", help="YAML section (default: system_packages)")
-
-    # remove
-    rm_p = subparsers.add_parser("remove", help="Remove package(s) from taxonomy")
-    rm_p.add_argument("--distro", choices=["All", *DISTROS], default="Fedora")
-    rm_p.add_argument("--category", required=True, help="Category name (e.g. System)")
-    rm_p.add_argument("--subcategory", required=True, help="Subcategory name (e.g. base)")
-    rm_p.add_argument("--package", required=True, help="Package name or comma-separated list")
-    rm_p.add_argument("--section", default="system_packages", help="YAML section (default: system_packages)")
-
-    # build
-    build_p = subparsers.add_parser("build", help="Generate build package manifest")
-    build_p.add_argument("--distro", choices=DISTROS, default="Fedora")
-    build_p.add_argument("--blueprint", default="workstation", help="Blueprint name")
-    build_p.add_argument(
-        "--subcategories",
-        required=True,
-        help="Comma-separated list of subcategories or Category/Subcategory pairs",
-    )
-    build_p.add_argument("--output", help="Path to write the manifest")
-    build_p.add_argument("--format", choices=["yaml", "json", "toml"], default="yaml")
-    build_p.add_argument(
-        "--verify",
-        action="store_true",
-        help="Warn about packages that no repo of the distro provides",
-    )
-
-    # interactive
-    subparsers.add_parser("tui", help="Launch interactive TUI mode")
-
-    args = parser.parse_args()
-
-    repo_root = Path(args.repo_root) if args.repo_root else None
-    manager = TaxonomyManager(repo_root=repo_root)
-
-    if args.command == "list":
-        cli_list(manager, args.distro)
-    elif args.command == "search":
-        cli_search(manager, args.query)
-    elif args.command == "add":
-        cli_add_package(
-            manager, args.distro, args.category, args.subcategory, args.package,
-            args.section, verify=not args.no_verify,
-        )
-    elif args.command == "verify":
-        sys.exit(cli_verify(manager, args.distro, args.package, args.section))
-    elif args.command == "remove":
-        cli_remove_package(manager, args.distro, args.category, args.subcategory, args.package, args.section)
-    elif args.command == "build":
-        subcats = [s.strip() for s in args.subcategories.split(",") if s.strip()]
-        cli_build_manifest(
-            manager, args.distro, args.blueprint, subcats, args.output, args.format, args.verify
-        )
-    elif args.command == "tui" or args.command is None:
-        if sys.stdin.isatty():
-            tui_main_loop(manager)
+        if what is None or what == "Exit":
+            return
+        if what == "Components in a playbook":
+            tui_playbook(targets, root)
+            continue
+        if len(stores) == 1:
+            target = next(iter(stores))
         else:
-            # If piped or non-interactive with no command, display brief summary or help
-            cli_list(manager, args.distro)
+            target = questionary.select(
+                "Select target:", choices=[*stores, Separator(), Choice("Exit", value=_EXIT)]
+            ).ask()
+            if target is None or target == _EXIT:
+                continue
+        tui_components(stores[target], target)
+
+
+# =============================================================================
+# Entry point
+# =============================================================================
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="List, search, add and remove packages in the osbuild role's component files",
+    )
+    parser.add_argument("--repo-root", type=Path, default=REPO_ROOT, help="Path to the repository root")
+    sub = parser.add_subparsers(dest="command")
+
+    def target_arg(p, required=True):
+        p.add_argument("--target", help="<distro>/<major>/<arch>, e.g. rocky/10/x86_64")
+
+    p = sub.add_parser("list", help="List a target's components with label and package count")
+    target_arg(p)
+    p = sub.add_parser("search", help="Find the components that contain a package")
+    p.add_argument("name", help="Package name or substring")
+    target_arg(p)
+    p = sub.add_parser("add", help="Append packages to a component")
+    target_arg(p)
+    p.add_argument("component")
+    p.add_argument("packages", nargs="+", metavar="PKG")
+    p.add_argument("--verify", action="store_true", help="Check each package against the target's repos first")
+    p.add_argument("--force", action="store_true", help="Add packages that another component already has")
+    p = sub.add_parser("remove", help="Remove packages from a component")
+    target_arg(p)
+    p.add_argument("component")
+    p.add_argument("packages", nargs="+", metavar="PKG")
+    p = sub.add_parser("verify", help="Check a component or the whole target against the repos")
+    target_arg(p)
+    p.add_argument("component", nargs="?")
+    p = sub.add_parser("playbook", help="List, add or remove the components a playbook builds from")
+    p.add_argument("path", type=Path, help="Playbook file, e.g. playbooks/osbuild-rocky-iso-components.yml")
+    p.add_argument("action", choices=["list", "add", "remove"])
+    p.add_argument("components", nargs="*", metavar="COMPONENT")
+    p.add_argument("--target", help="Override the target derived from the playbook's osbuild_distro")
+    p.add_argument("--after", help="With add: insert after this selected component")
+    sub.add_parser("tui", help="Launch the interactive menu")
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    targets = discover_targets(args.repo_root)
+    stores = {t: ComponentStore(d) for t, d in targets.items()}
+
+    try:
+        if args.command in (None, "tui"):
+            if not sys.stdin.isatty():
+                parser.print_help()
+                return 2
+            tui_main_loop(stores, args.repo_root)
+            return 0
+        if args.command == "search":
+            if args.target:
+                key = resolve_target(targets, args.target)
+                stores = {key: stores[key]}
+            return cli_search(stores, args.name)
+
+        if args.command == "playbook":
+            if args.action != "list" and not args.components:
+                parser.error(f"playbook {args.action} needs at least one COMPONENT")
+            return cli_playbook(targets, args.path, args.action, args.components, args.target, args.after)
+
+        target = resolve_target(targets, args.target)
+        store = stores[target]
+        if args.command == "list":
+            return cli_list(store, target)
+        if args.command == "add":
+            return cli_add(store, target, args.component, parse_packages(args.packages), args.verify, args.force)
+        if args.command == "remove":
+            return cli_remove(store, target, args.component, parse_packages(args.packages))
+        if args.command == "verify":
+            return cli_verify(store, target, args.component)
+    except TrackerError as exc:
+        _say("err", str(exc))
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
