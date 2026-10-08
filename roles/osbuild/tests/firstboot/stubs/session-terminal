@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# Terminal emulator stub that logs its own pid and session id, so tests can
-# check that the splash started it in a session of its own.
-source "${STUB_DIR:?}/_lib.sh"
-stub_log "session pid=$$ sid=$(ps -o sid= -p $$ | tr -d ' ')"
-exit 0

@@ -791,13 +791,13 @@ vars:
 
 ### First-Login Splash (yadm dotfiles)
 
-One plain bash script, `files/firstboot/syncopated-firstboot`, runs at the first graphical login of each user. It shows a splash, updates the system with `dnf`, and asks for a dotfiles repository URL (pre-filled with `https://github.com/b08x/dots.git`). It then clones that repository with `yadm` and runs `yadm bootstrap` as the logged-in user. The script contains no build-time substitutions; it reads `NAME` and `VERSION_ID` from `/etc/os-release` when it runs, so the same bytes go into every distro's image.
+One plain bash script, `files/firstboot/syncopated-firstboot`, runs at the first graphical login of each user. It shows a splash, updates the system with `dnf`, and prints the `yadm clone` and `yadm bootstrap` commands for the dotfiles repository (`https://github.com/b08x/dots.git`). It does not run them; the user runs them when ready. The script contains no build-time substitutions; it reads `NAME` and `VERSION_ID` from `/etc/os-release` when it runs, so the same bytes go into every distro's image.
 
 `tasks/blueprint.yml` appends the three files to every prepared blueprint, static or templated, inside one `blockinfile` block (`# BEGIN/END syncopated-firstboot`). The blueprints in `files/` and `templates/blueprint.toml.j2` do not contain copies. Edit only `files/firstboot/`.
 
 | Installed path | Mode | Purpose |
 |---|---|---|
-| `/usr/local/bin/syncopated-firstboot` | 0755 | Splash, system update and reboot offer, yadm install/clone, bootstrap in a second window, tool report |
+| `/usr/local/bin/syncopated-firstboot` | 0755 | Splash, system update and reboot offer, tool report, printed yadm commands |
 | `/usr/local/bin/syncopated-firstboot-launcher` | 0755 | Opens a terminal running the script unless the user's marker exists |
 | `/etc/xdg/autostart/syncopated-firstboot.desktop` | 0644 | Starts the launcher at graphical login |
 
@@ -806,20 +806,25 @@ The script runs these steps in order:
 1. Waits up to 30 s for the network, then runs `sudo dnf -y upgrade --refresh` in the terminal. A failed update is reported and setup continues; without `dnf` the step is skipped.
 2. If `osbuild_ansible_pull_repo` and `osbuild_ansible_pull_args` were both set at build time, runs `sudo ansible-pull -U <repo> <args>` right after the update (see [ansible-pull](#ansible-pull)). A failure is reported and setup continues.
 3. If the update installed anything (dnf did not print `Nothing to do.`), offers **Reboot now** or **Continue setup**. **Reboot now** runs `sudo systemctl reboot` and writes no marker, so the splash opens again at the next login; there the update finds nothing to do, no reboot is offered, and setup continues.
-4. Offers **Set up dotfiles**, **Skip for now**, or **Never ask again**.
-5. Uses `yadm` from `PATH`. If `yadm` is absent, downloads it to `~/.local/bin/yadm` and offers Retry or Skip if GitHub is unreachable.
-6. Checks the URL with `git ls-remote` and asks again if the check fails. Then runs `yadm clone --no-bootstrap`. If a yadm repository already exists, offers "Run bootstrap only" instead.
-7. Runs `yadm bootstrap` in a new terminal window, opened with the same terminal order as the launcher, so the bootstrap's own prompts and `sudo` calls work there. The first window waits until the bootstrap ends and uses its exit status; closing the bootstrap window early counts as a failure. With no graphical session or terminal emulator, or when the window has not started after 15 s (`SYNCOPATED_WINDOW_TIMEOUT`), bootstrap runs in the first window instead.
-8. If `gdm`, `lightdm`, or `sddm` is installed and the default target is not `graphical.target`, runs `sudo systemctl set-default graphical.target`. Apart from the package update and the optional reboot, this is the only system change. The script does not set DNF repo priorities or install flatpaks.
-9. Prints a ready/missing report for `git yadm gum ansible podman zsh flatpak nvidia-smi`. Missing tools do not change the exit status.
+4. If `gdm`, `lightdm`, or `sddm` is installed and the default target is not `graphical.target`, runs `sudo systemctl set-default graphical.target`. Apart from the package update and the optional reboot, this is the only system change. The script does not set DNF repo priorities or install flatpaks.
+5. Prints a ready/missing report for `git yadm gum ansible podman zsh flatpak nvidia-smi`. Missing tools do not change the exit status.
+6. Prints the dotfiles commands, unstyled and indented by two spaces, without running them:
 
-Without `gum`, the script uses plain-text prompts and output.
+   ```bash
+   yadm clone --no-bootstrap https://github.com/b08x/dots.git
+   yadm bootstrap
+   ```
 
-**Splash.** The script first clears the terminal and draws the Syncopated logo as ASCII art, centered and revealed row by row. The mark is violet and the wordmark is ember. It then waits at a pulsing `press enter to begin` prompt. Colors are 24-bit when `COLORTERM` is `truecolor` or `24bit`, and 256-color otherwise. A terminal narrower than the art shows only the mark. When stdin or stdout is not a terminal, the script prints the art uncolored and continues without waiting. `SYNCOPATED_NO_ANIM=1` removes the row-by-row delay. The same palette colors `gum` prompts and borders. Any `GUM_CHOOSE_*` or `GUM_INPUT_*` variable already set in the environment overrides it.
+   When `yadm` is not on `PATH`, a download line is printed first: `mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/yadm <yadm URL> && chmod 0755 ~/.local/bin/yadm`. `SYNCOPATED_DOTFILES_URL` and `SYNCOPATED_YADM_URL` change the printed URLs.
+7. Writes the marker.
 
-**Marker.** `~/.local/state/syncopated/firstboot.done` (or `$XDG_STATE_HOME/syncopated/firstboot.done`). The script writes it after a successful bootstrap or after **Never ask again**. While it exists, the launcher does nothing at login, for that user only. **Skip for now** and a failed clone or bootstrap leave no marker, so the splash opens again at the next login.
+Without `gum`, the script uses plain-text prompts and output. The launcher sets `SYNCOPATED_PAUSE_ON_EXIT=1`, so the window waits for Enter and the printed commands stay on screen.
 
-**Rerun.** Run `syncopated-firstboot` from any terminal. The marker does not block a manual run. To restore the login splash, delete the marker.
+**Splash.** The script first clears the terminal and draws the Syncopated logo as ASCII art, centered and revealed row by row. The mark is violet and the wordmark is ember. It then waits at a pulsing `press enter to begin` prompt. Colors are 24-bit when `COLORTERM` is `truecolor` or `24bit`, and 256-color otherwise. A terminal narrower than the art shows only the mark. When stdin or stdout is not a terminal, the script prints the art uncolored and continues without waiting. `SYNCOPATED_NO_ANIM=1` removes the row-by-row delay. The same palette colors `gum` prompts and borders. Any `GUM_CHOOSE_*` variable already set in the environment overrides it.
+
+**Marker.** `~/.local/state/syncopated/firstboot.done` (or `$XDG_STATE_HOME/syncopated/firstboot.done`). The script writes it after printing the yadm commands. While it exists, the launcher does nothing at login, for that user only. **Reboot now** leaves no marker, so the splash opens again at the next login.
+
+**Rerun.** Run `syncopated-firstboot` from any terminal to print the yadm commands again. The marker does not block a manual run. To restore the login splash, delete the marker.
 
 **ansible-pull.** Set both variables in the playbook (a string `osbuild_ansible_pull_args` is split on whitespace):
 
@@ -836,7 +841,7 @@ osbuild_ansible_pull_args: ["-C", "main", "-i", "localhost,", "local.yml"]
 
 ```bash
 shellcheck -x roles/osbuild/files/firstboot/syncopated-firstboot{,-launcher}
-bats roles/osbuild/tests/firstboot/                                  # stubbed git/yadm/curl/gum/sudo/systemctl/dnf
+bats roles/osbuild/tests/firstboot/                                  # stubbed yadm/gum/sudo/systemctl/dnf; asserts yadm, git and curl are never run
 ansible-playbook roles/osbuild/tests/validate_firstboot_injection.yml  # all blueprints, run twice
 ```
 

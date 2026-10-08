@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# syncopated-firstboot: first-login splash, run as the logged-in user, in two
-# parts.
+# syncopated-firstboot: first-login splash, run as the logged-in user.
 #   System:   update the system with dnf, run ansible-pull when the image
 #             carries an ansible-pull configuration, offer a reboot when
 #             updates were installed, set the default boot target, report
 #             installed tools.
-#   Dotfiles: opt-in. Install yadm (the only supported dotfiles manager),
-#             clone a dotfiles repository, then run `yadm bootstrap` last, in
-#             a separate terminal window; this window then closes. The
-#             bootstrap window writes the marker on success, shows an overview
-#             of every step, and waits for Enter.
-# Declining dotfiles ("No") completes setup; "Not now" asks again at the next
-# login.
+#   Dotfiles: print the commands that clone a dotfiles repository with yadm
+#             and run `yadm bootstrap`. The script does not run them; the user
+#             runs them when ready.
+# After the commands are printed the marker is written and setup is complete.
 #
 # The autostart launcher (syncopated-firstboot-launcher) stops opening this
 # script once the per-user marker exists. Running it by name always shows the
@@ -21,9 +17,8 @@
 # SYNCOPATED_YADM_URL, SYNCOPATED_DOTFILES_URL, SYNCOPATED_CHECK_TOOLS,
 # SYNCOPATED_ANSIBLE_PULL_CONF (path of the ansible-pull configuration),
 # SYNCOPATED_NO_ANIM=1 (skip the splash reveal delay),
-# SYNCOPATED_WINDOW_TIMEOUT (seconds to wait for the bootstrap window to start),
 # SYNCOPATED_PAUSE_ON_EXIT=1 (set by the launcher: wait for Enter before
-# exiting, except after handing setup to the bootstrap window).
+# exiting).
 
 OS_RELEASE=${SYNCOPATED_OS_RELEASE:-/etc/os-release}
 STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/syncopated
@@ -34,31 +29,21 @@ DOTFILES_URL=${SYNCOPATED_DOTFILES_URL:-https://github.com/b08x/dots.git}
 # osbuild_ansible_pull_args are set; defines ANSIBLE_PULL_REPO (string) and
 # ANSIBLE_PULL_ARGS (array). Without the file there is no ansible_pull step.
 ANSIBLE_PULL_CONF=${SYNCOPATED_ANSIBLE_PULL_CONF:-/etc/syncopated-ansible-pull.conf}
-SELF=$(readlink -f "${BASH_SOURCE[0]}")
-WINDOW_TIMEOUT=${SYNCOPATED_WINDOW_TIMEOUT:-15}
 read -r -a CHECK_TOOLS <<<"${SYNCOPATED_CHECK_TOOLS:-git yadm gum ansible podman zsh flatpak nvidia-smi}"
 
 # Step return codes.
 RC_OK=0
 RC_FAILED=1
 RC_SKIPPED=2
-# run_bootstrap: yadm bootstrap runs in a new window, which finishes setup.
-RC_HANDOFF=3
 
-# Two groups: system setup always runs; dotfiles setup is opt-in and ends
-# with yadm bootstrap.
 SYSTEM_STEPS=(update target)
 ANSIBLE_PULL_ENABLED=0
 if [[ -r $ANSIBLE_PULL_CONF ]]; then
   ANSIBLE_PULL_ENABLED=1
   SYSTEM_STEPS=(update ansible_pull target)
 fi
-DOTFILES_STEPS=(yadm clone bootstrap)
-STEPS=("${SYSTEM_STEPS[@]}" "${DOTFILES_STEPS[@]}")
 # Set by update_system when dnf installed or upgraded at least one package.
 UPDATES_INSTALLED=0
-# Set by main when setup continues in the bootstrap window.
-HANDED_OFF=0
 declare -A STEP_STATE=()
 
 # Brand palette, sampled from the Syncopated logo: a violet mark and an ember
@@ -74,9 +59,6 @@ EMBER_DIM=('#7A3A1C' 94)
 export GUM_CHOOSE_HEADER_FOREGROUND=${GUM_CHOOSE_HEADER_FOREGROUND:-${VIOLET_LIGHT[0]}}
 export GUM_CHOOSE_CURSOR_FOREGROUND=${GUM_CHOOSE_CURSOR_FOREGROUND:-${EMBER[0]}}
 export GUM_CHOOSE_SELECTED_FOREGROUND=${GUM_CHOOSE_SELECTED_FOREGROUND:-${EMBER[0]}}
-export GUM_INPUT_HEADER_FOREGROUND=${GUM_INPUT_HEADER_FOREGROUND:-${VIOLET_LIGHT[0]}}
-export GUM_INPUT_PROMPT_FOREGROUND=${GUM_INPUT_PROMPT_FOREGROUND:-${EMBER[0]}}
-export GUM_INPUT_CURSOR_FOREGROUND=${GUM_INPUT_CURSOR_FOREGROUND:-${EMBER[0]}}
 
 # Splash art (~/Images/brand-logo-selectionB-ascii-art.txt, trailing blanks
 # and the common 3-column indent removed). Columns before ART_SPLIT are the
@@ -270,25 +252,17 @@ step_lines() {
     case $state in
       ok) icon='✓' ;;
       failed) icon='✗' ;;
-      skipped | declined) icon='-' ;;
+      skipped) icon='-' ;;
       *) icon='·' ;;
     esac
     LINES+=("  $icon $step ($state)")
   done
 }
 
-# draw_steps : print both step groups. Skips a redraw identical to the last
-# one (the last step's redraw and the final overview would repeat it).
-DRAWN_STATES=
+# draw_steps : print the system steps.
 draw_steps() {
-  local states
-  states=$(declare -p STEP_STATE)
-  [[ $states == "$DRAWN_STATES" ]] && return 0
-  DRAWN_STATES=$states
   local LINES=('System')
   step_lines "${SYSTEM_STEPS[@]}"
-  LINES+=('Dotfiles (yadm)')
-  step_lines "${DOTFILES_STEPS[@]}"
   local lines=("${LINES[@]}")
   if have_gum; then
     gum style --border rounded --border-foreground "${VIOLET_DIM[0]}" --padding "0 2" "${lines[@]}"
@@ -324,17 +298,6 @@ choose() {
   done
 }
 
-# prompt_url DEFAULT : print the URL the user entered. Fails on cancel/EOF.
-prompt_url() {
-  local default=$1 reply
-  if have_gum; then
-    gum input --header "Dotfiles repository URL" --value "$default" --width 70
-    return
-  fi
-  read -r -e -i "$default" -p "Dotfiles repository URL: " reply || return 1
-  printf '%s\n' "${reply:-$default}"
-}
-
 # --- steps ---------------------------------------------------------------------
 
 acquire_lock() {
@@ -355,152 +318,18 @@ wait_for_network() {
   nm-online -q -t 30 || warn "The network is not online yet."
 }
 
-ensure_yadm() {
-  if command -v yadm >/dev/null 2>&1; then
-    ok "yadm found: $(command -v yadm)"
-    return "$RC_OK"
+# Print the commands that install the dotfiles with yadm. Nothing is run.
+# The yadm download line is printed only when yadm is not installed. The
+# commands go to stdout without styling so they can be copied as they are.
+print_dotfiles_commands() {
+  info "Dotfiles (yadm): run these commands in a terminal to install your dotfiles."
+  if ! command -v yadm >/dev/null 2>&1; then
+    printf '  %s\n' \
+      "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/yadm $YADM_URL && chmod 0755 ~/.local/bin/yadm"
   fi
-  local bin=$HOME/.local/bin tmp
-  mkdir -p "$bin" || return "$RC_FAILED"
-  while :; do
-    info "Downloading yadm from $YADM_URL"
-    tmp=$(mktemp "$bin/.yadm.XXXXXX") || return "$RC_FAILED"
-    if curl -fsSL --connect-timeout 15 -o "$tmp" "$YADM_URL"; then
-      chmod 0755 "$tmp" && mv -f "$tmp" "$bin/yadm" || return "$RC_FAILED"
-      [[ :$PATH: == *":$bin:"* ]] || PATH=$bin:$PATH
-      ok "yadm installed: $bin/yadm"
-      return "$RC_OK"
-    fi
-    rm -f "$tmp"
-    err "GitHub is unreachable: could not download yadm."
-    [[ $(choose "Download failed. Retry?" "Retry" "Skip") == Retry ]] || return "$RC_SKIPPED"
-  done
-}
-
-clone_dotfiles() {
-  local repo url
-  repo=$(yadm introspect repo 2>/dev/null)
-  if [[ -n $repo && -d $repo ]]; then
-    case $(choose "A yadm repository already exists at $repo." "Run bootstrap only" "Skip") in
-      "Run bootstrap only") return "$RC_OK" ;;
-      *) return "$RC_SKIPPED" ;;
-    esac
-  fi
-  url=$DOTFILES_URL
-  while :; do
-    url=$(prompt_url "$url") || return "$RC_SKIPPED"
-    if [[ -z $url ]]; then
-      warn "Enter a repository URL."
-      url=$DOTFILES_URL
-      continue
-    fi
-    info "Checking $url"
-    git ls-remote -q "$url" >/dev/null 2>&1 && break
-    err "Cannot read repository $url. Check the URL and the network, then try again."
-  done
-  if ! yadm clone --no-bootstrap "$url"; then
-    err "yadm clone failed."
-    return "$RC_FAILED"
-  fi
-  ok "Cloned $url"
-}
-
-# open_terminal COMMAND : start a new terminal window running COMMAND with
-# bash, in the background. Fails without a graphical session or a known
-# terminal emulator. Same terminal order as syncopated-firstboot-launcher.
-open_terminal() {
-  local cmd=$1 term
-  [[ -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} ]] || return 1
-  for term in xdg-terminal-exec ptyxis kgx gnome-terminal kitty foot alacritty xterm; do
-    command -v "$term" >/dev/null 2>&1 || continue
-    # setsid -f puts the new terminal in its own session. A plain background
-    # job stays in this window's process group, and the kernel sends that
-    # group SIGHUP when this window's shell exits, which closed the new window.
-    case $term in
-      kitty) setsid -f kitty --start-as fullscreen bash -c "$cmd" ;;
-      xdg-terminal-exec | foot) setsid -f "$term" bash -c "$cmd" ;;
-      ptyxis) setsid -f ptyxis --new-window -- bash -c "$cmd" ;;
-      kgx | gnome-terminal) setsid -f "$term" -- bash -c "$cmd" ;;
-      alacritty | xterm) setsid -f "$term" -e bash -c "$cmd" ;;
-    esac </dev/null >/dev/null 2>&1
-    return 0
-  done
-  return 1
-}
-
-# wait_window_start STATUS_FILE : wait up to WINDOW_TIMEOUT seconds for the
-# bootstrap window to write "running". On timeout, write "cancelled" so a
-# window that starts late exits without running bootstrap.
-wait_window_start() {
-  local status=$1 tries=$((WINDOW_TIMEOUT * 2))
-  while ((tries-- > 0)); do
-    [[ -s $status ]] && return 0
-    sleep 0.5
-  done
-  printf 'cancelled\n' >"$status"
-  return 1
-}
-
-# step_states : print the recorded step states as "step=state ...".
-step_states() {
-  local step pairs=()
-  for step in "${STEPS[@]}"; do
-    [[ -n ${STEP_STATE[$step]:-} ]] && pairs+=("$step=${STEP_STATE[$step]}")
-  done
-  printf '%s\n' "${pairs[*]}"
-}
-
-# yadm_bootstrap YADM : run yadm bootstrap in this terminal.
-yadm_bootstrap() {
-  local rc
-  "$1" bootstrap
-  rc=$?
-  if ((rc != 0)); then
-    err "yadm bootstrap exited with an error (status $rc)."
-    return "$RC_FAILED"
-  fi
-  ok "yadm bootstrap finished"
-}
-
-# Start yadm bootstrap in a new terminal window and return RC_HANDOFF once
-# the window has started; that window finishes setup. Falls back to this
-# terminal when no window can be opened.
-run_bootstrap() {
-  local status yadm_bin
-  yadm_bin=$(command -v yadm) || yadm_bin=yadm
-  status=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/syncopated-bootstrap.XXXXXX") || return "$RC_FAILED"
-  if open_terminal "$(printf '%q ' "$SELF" --bootstrap-window "$status" "$yadm_bin" "$(step_states)")" &&
-    wait_window_start "$status"; then
-    rm -f "$status"
-    info "yadm bootstrap is running in a new window. Answer its prompts there; this window closes now."
-    return "$RC_HANDOFF"
-  fi
-  rm -f "$status"
-  info "No new terminal window available. Running yadm bootstrap here; answer its prompts in this terminal."
-  yadm_bootstrap "$yadm_bin"
-}
-
-# --bootstrap-window STATUS_FILE [YADM [STATES]] : body of the bootstrap
-# window. Writes "running" to STATUS_FILE so the first window can close, runs
-# yadm bootstrap, then finishes setup (marker on success, step overview, tool
-# report) and waits for Enter. STATES ("step=state ...") holds the results of
-# the steps the first window ran. Does nothing when STATUS_FILE is missing or
-# already written (the first window timed out and ran bootstrap itself).
-bootstrap_window() {
-  local status=${1:-} yadm_bin=${2:-yadm} pair pairs rc
-  [[ -n $status && -e $status && ! -s $status ]] || return 1
-  printf 'running\n' >"$status"
-  read -r -a pairs <<<"${3:-}"
-  for pair in "${pairs[@]}"; do
-    STEP_STATE[${pair%%=*}]=${pair#*=}
-  done
-  banner
-  info "Running yadm bootstrap. Answer its prompts in this window."
-  run_step bootstrap yadm_bootstrap "$yadm_bin"
-  finish $?
-  rc=$?
-  read -rp 'Press Enter to close this window…' _
-  return "$rc"
+  printf '  %s\n' \
+    "yadm clone --no-bootstrap $DOTFILES_URL" \
+    "yadm bootstrap"
 }
 
 # Apply every available package update. dnf prints "Nothing to do." when
@@ -595,7 +424,6 @@ set_graphical_target() {
 }
 
 # run_step NAME COMMAND... : run a step, record its state, redraw the list.
-# A handed-off step is not drawn: this window is about to close.
 run_step() {
   local name=$1 rc
   shift
@@ -604,7 +432,6 @@ run_step() {
   case $rc in
     "$RC_OK") STEP_STATE[$name]=ok ;;
     "$RC_SKIPPED") STEP_STATE[$name]=skipped ;;
-    "$RC_HANDOFF") return "$rc" ;;
     *) STEP_STATE[$name]=failed ;;
   esac
   draw_steps
@@ -653,82 +480,17 @@ main() {
   run_step target set_graphical_target
   report
 
-  # Dotfiles setup: opt-in. yadm is the only supported dotfiles manager.
-  local action rc step
-  action=$(choose "Install your dotfiles with yadm? This clones a dotfiles repository and runs yadm bootstrap last." \
-    "Install dotfiles with yadm" "Not now" "No") || action="Not now"
-  case $action in
-    "Install dotfiles with yadm") ;;
-    "No")
-      for step in "${DOTFILES_STEPS[@]}"; do STEP_STATE[$step]=declined; done
-      draw_steps
-      write_marker
-      ok "System setup complete. Dotfiles declined; the splash will not open at login again. Run syncopated-firstboot to install them later."
-      return 0
-      ;;
-    *)
-      for step in "${DOTFILES_STEPS[@]}"; do STEP_STATE[$step]=skipped; done
-      draw_steps
-      info "System setup complete. Dotfiles postponed; the splash opens again at the next login, or run syncopated-firstboot."
-      return 0
-      ;;
-  esac
-
-  run_step yadm ensure_yadm &&
-    run_step clone clone_dotfiles &&
-    run_step bootstrap run_bootstrap
-  rc=$?
-  if ((rc == RC_HANDOFF)); then
-    HANDED_OFF=1
-    return 0
-  fi
-  finish "$rc"
-}
-
-# finish RC : close out the dotfiles setup whose last step returned RC. Marks
-# steps that never ran as skipped, writes the marker on success, and prints
-# the step overview and tool report. Returns 1 when setup failed, else 0.
-finish() {
-  local rc=$1 step failed=0 bootstrap_ran=0
-  [[ ${STEP_STATE[bootstrap]:-} == ok || ${STEP_STATE[bootstrap]:-} == skipped ]] && bootstrap_ran=1
-  for step in "${STEPS[@]}"; do
-    [[ -n ${STEP_STATE[$step]:-} ]] || STEP_STATE[$step]=skipped
-    [[ ${STEP_STATE[$step]} == failed ]] && failed=1
-  done
-  # Skipped steps do not block completion; only a failed step does. The
-  # bootstrap step itself must have run (ok or skipped).
-  if ((rc == RC_OK)) || ((!failed && bootstrap_ran)); then
-    write_marker
-    rc=$RC_OK
-  fi
-  draw_steps
-  report
-
-  case $rc in
-    "$RC_OK")
-      ok "Setup complete. The splash will not open at login again."
-      return 0
-      ;;
-    "$RC_SKIPPED")
-      info "Dotfiles setup skipped. The splash opens again at the next login, or run syncopated-firstboot."
-      return 0
-      ;;
-    *)
-      err "Dotfiles setup did not finish. The splash opens again at the next login, or run syncopated-firstboot."
-      return 1
-      ;;
-  esac
+  # Dotfiles: print the yadm commands; the user runs them.
+  print_dotfiles_commands
+  write_marker
+  ok "Setup complete. The splash will not open at login again. Run syncopated-firstboot to show these commands again."
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   set -uo pipefail
-  if [[ ${1:-} == --bootstrap-window ]]; then
-    bootstrap_window "${@:2}"
-    exit
-  fi
   main "$@"
   rc=$?
-  if [[ -n ${SYNCOPATED_PAUSE_ON_EXIT:-} ]] && ((!HANDED_OFF)) && [[ -t 0 ]]; then
+  if [[ -n ${SYNCOPATED_PAUSE_ON_EXIT:-} ]] && [[ -t 0 ]]; then
     read -rp 'Press Enter to close…' _
   fi
   exit "$rc"

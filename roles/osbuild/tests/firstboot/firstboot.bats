@@ -43,11 +43,9 @@ setup() {
   printf '%s\n' 'NAME="Test OS"' 'VERSION_ID="9.9"' 'ID=testos' >"$SYNCOPATED_OS_RELEASE"
   export SYNCOPATED_NO_ANIM=1
   export SYNCOPATED_CHECK_TOOLS="git gum not-a-real-tool"
-  unset SYNCOPATED_DOTFILES_URL SYNCOPATED_YADM_URL SYNCOPATED_WINDOW_TIMEOUT
-  # No graphical session unless a test sets one: yadm bootstrap then runs in
-  # the same terminal, as the tests without a terminal stub expect.
+  unset SYNCOPATED_DOTFILES_URL SYNCOPATED_YADM_URL
   unset WAYLAND_DISPLAY DISPLAY
-  unset YADM_CLONE_RC YADM_BOOTSTRAP_RC SUDO_RC SYSTEMCTL_DM_UNITS SYSTEMCTL_DEFAULT DNF_RC DNF_UPDATES ANSIBLE_PULL_RC SYNCOPATED_ANSIBLE_PULL_CONF
+  unset SUDO_RC SYSTEMCTL_DM_UNITS SYSTEMCTL_DEFAULT DNF_RC DNF_UPDATES ANSIBLE_PULL_RC SYNCOPATED_ANSIBLE_PULL_CONF
 
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN"
@@ -64,11 +62,6 @@ use_terminal() {
   ln -sf "$STUB_DIR/fake-terminal" "$BIN/$1"
 }
 
-# use_live_terminal NAME : a terminal stub that runs its bash -c command.
-use_live_terminal() {
-  ln -sf "$STUB_DIR/live-terminal" "$BIN/$1"
-}
-
 answers() {
   printf '%s\n' "$@" >"$GUM_QUEUE"
 }
@@ -77,10 +70,14 @@ logged() {
   grep -qxF -- "$1" "$STUB_LOG"
 }
 
+# printed LINE : the output holds LINE, indented by two spaces, on its own.
+printed() {
+  grep -qxF -- "  $1" <<<"$output"
+}
+
 # --- fact 6: runtime os-release banner -------------------------------------
 
 @test "fact 6: banner shows NAME and VERSION_ID from os-release (gum)" {
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"Test OS 9.9"* ]]
@@ -88,7 +85,7 @@ logged() {
 
 @test "fact 6: banner shows NAME and VERSION_ID from os-release (plain)" {
   rm "$BIN/gum"
-  run "$SCRIPT" <<<"2"
+  run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"Test OS 9.9"* ]]
 }
@@ -101,11 +98,10 @@ logged() {
 # --- fact 7: splash content (non-animated parts) --------------------------
 
 @test "fact 7: splash prints logo, double-border banner and step list" {
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   grep -q -- '--border double' "$STUB_LOG"
-  for step in System update target "Dotfiles (yadm)" yadm clone bootstrap; do
+  for step in System update target; do
     [[ $output == *"$step"* ]]
   done
   [[ $output == *'"+(tt)>.'* ]]
@@ -114,12 +110,12 @@ logged() {
 
 # --- fact 8: no gum --------------------------------------------------------
 
-@test "fact 8: without gum the full setup completes with plain prompts" {
+@test "fact 8: without gum the setup completes and prints the yadm commands" {
   rm "$BIN/gum"
-  run "$SCRIPT" < <(printf '1\n\n')
+  run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  logged "yadm clone --no-bootstrap $DOTS"
-  logged "yadm bootstrap"
+  printed "yadm clone --no-bootstrap $DOTS"
+  printed "yadm bootstrap"
   [ -e "$MARKER" ]
   ! grep -q '^gum ' "$STUB_LOG"
 }
@@ -148,129 +144,62 @@ logged() {
   [ "$status" -eq 1 ]
 }
 
-# --- fact 10: yadm download ------------------------------------------------
-
-@test "fact 10: missing yadm is downloaded to ~/.local/bin/yadm and made executable" {
-  rm "$BIN/yadm"
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
+@test "fact 9: launcher asks the script to pause on exit instead of pausing itself" {
+  use_terminal ptyxis
+  run "$LAUNCHER"
   [ "$status" -eq 0 ]
-  grep -q '^curl .*https://github.com/yadm-dev/yadm/raw/master/yadm' "$STUB_LOG"
-  [ -x "$HOME/.local/bin/yadm" ]
-  logged "yadm clone --no-bootstrap $DOTS"
+  grep -q '^ptyxis .*SYNCOPATED_PAUSE_ON_EXIT=1 .*syncopated-firstboot' "$STUB_LOG"
+  ! grep -q 'read ' "$STUB_LOG"
 }
 
-@test "fact 10: an installed yadm is used without downloading" {
-  answers "Install dotfiles with yadm" "__default__"
+# --- dotfiles: commands are printed, never run ------------------------------
+
+@test "dotfiles: yadm clone and bootstrap commands are printed in order" {
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  ! grep -q '^curl ' "$STUB_LOG"
+  [[ $output == *"  yadm clone --no-bootstrap $DOTS"$'\n'"  yadm bootstrap"* ]]
+}
+
+@test "dotfiles: the script runs no yadm, git or curl command" {
+  rm "$BIN/yadm"
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  ! grep -qE '^(yadm|git|curl|sudo yadm) ' "$STUB_LOG"
   [ ! -e "$HOME/.local/bin/yadm" ]
+  [ ! -e "$HOME/.local/share/yadm" ]
 }
 
-# --- fact 11: GitHub unreachable ------------------------------------------
+@test "dotfiles: the script asks no dotfiles question" {
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  ! grep -qE '^gum (choose|input)' "$STUB_LOG"
+}
 
-@test "fact 11: download failure offers Retry, and a retry succeeds" {
+@test "fact 10: missing yadm adds the download command before the clone" {
   rm "$BIN/yadm"
-  printf '6\n0\n' >"$CURL_QUEUE"
-  answers "Install dotfiles with yadm" "Retry" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  [[ $output == *"unreachable"* ]]
-  grep -q '^gum choose .*Retry.*Skip' "$STUB_LOG"
-  [ "$(grep -c '^curl ' "$STUB_LOG")" -eq 2 ]
-  [ -x "$HOME/.local/bin/yadm" ]
+  printed "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/yadm https://github.com/yadm-dev/yadm/raw/master/yadm && chmod 0755 ~/.local/bin/yadm"
+  [[ $output == *"~/.local/bin/yadm"*"yadm clone --no-bootstrap $DOTS"* ]]
 }
 
-@test "fact 11: download failure then Skip exits cleanly without a marker" {
-  rm "$BIN/yadm"
-  printf '6\n' >"$CURL_QUEUE"
-  answers "Install dotfiles with yadm" "Skip"
+@test "fact 10: an installed yadm prints no download command" {
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  [[ $output == *"unreachable"* ]]
-  [[ $output != *"line "*": "* ]]
-  ! grep -q '^yadm clone' "$STUB_LOG"
-  [ ! -e "$MARKER" ]
+  [[ $output != *"curl "* ]]
 }
 
-# --- fact 12: pre-filled URL ----------------------------------------------
-
-@test "fact 12: URL prompt is pre-filled with b08x/dots" {
-  answers "Install dotfiles with yadm" "__default__"
+@test "fact 12: SYNCOPATED_DOTFILES_URL changes the printed clone URL" {
+  export SYNCOPATED_DOTFILES_URL=https://example.com/me/dots.git
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  grep -qF -- "gum input" "$STUB_LOG"
-  grep -qF -- "--value $DOTS" "$STUB_LOG"
-}
-
-@test "fact 12: an edited URL is the one cloned" {
-  answers "Install dotfiles with yadm" "https://example.com/me/dots.git"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  logged "yadm clone --no-bootstrap https://example.com/me/dots.git"
-}
-
-# --- fact 13: ls-remote validation ----------------------------------------
-
-@test "fact 13: an unreachable URL shows an error and re-prompts" {
-  answers "Install dotfiles with yadm" "https://example.com/bad.git" "$DOTS"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  grep -q '^git ls-remote .*https://example.com/bad.git' "$STUB_LOG"
-  [[ $output == *"Cannot read repository https://example.com/bad.git"* ]]
-  [ "$(grep -c '^gum input' "$STUB_LOG")" -eq 2 ]
-  ! grep -q '^yadm clone .*bad' "$STUB_LOG"
-  logged "yadm clone --no-bootstrap $DOTS"
-}
-
-@test "fact 13: cancelling the prompt skips without a marker" {
-  answers "Install dotfiles with yadm"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  ! grep -q '^yadm clone' "$STUB_LOG"
-  [ ! -e "$MARKER" ]
-}
-
-# --- fact 14: user-level yadm ---------------------------------------------
-
-@test "fact 14: yadm clone and bootstrap run directly, not through sudo" {
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  logged "yadm clone --no-bootstrap $DOTS"
-  logged "yadm bootstrap"
-  ! grep -q '^sudo .*yadm' "$STUB_LOG"
-  [ -d "$HOME/.local/share/yadm/repo.git" ]
-}
-
-# --- fact 16: existing repo -----------------------------------------------
-
-@test "fact 16: an existing yadm repo is not cloned again; bootstrap only" {
-  mkdir -p "$HOME/.local/share/yadm/repo.git"
-  answers "Install dotfiles with yadm" "Run bootstrap only"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  ! grep -q '^yadm clone' "$STUB_LOG"
-  ! grep -q '^gum input' "$STUB_LOG"
-  logged "yadm bootstrap"
-  [ -e "$MARKER" ]
-}
-
-@test "fact 16: an existing yadm repo can be skipped" {
-  mkdir -p "$HOME/.local/share/yadm/repo.git"
-  answers "Install dotfiles with yadm" "Skip"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  ! grep -q '^yadm bootstrap' "$STUB_LOG"
-  [ ! -e "$MARKER" ]
+  printed "yadm clone --no-bootstrap https://example.com/me/dots.git"
 }
 
 # --- fact 17: graphical.target --------------------------------------------
 
 @test "fact 17: graphical.target is set with sudo when a display manager exists" {
   export SYSTEMCTL_DM_UNITS="gdm.service"
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   logged "sudo systemctl set-default graphical.target"
@@ -278,7 +207,6 @@ logged() {
 }
 
 @test "fact 17: no display manager means no system change" {
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   ! grep -q '^sudo systemctl ' "$STUB_LOG"
@@ -287,7 +215,6 @@ logged() {
 
 @test "fact 17: already graphical.target means no system change" {
   export SYSTEMCTL_DM_UNITS="sddm.service" SYSTEMCTL_DEFAULT="graphical.target"
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   ! grep -q '^sudo systemctl ' "$STUB_LOG"
@@ -295,7 +222,6 @@ logged() {
 
 @test "fact 17: a sudo failure is reported and does not fail the run" {
   export SYSTEMCTL_DM_UNITS="lightdm.service" SUDO_RC=1
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"graphical.target"* ]]
@@ -304,13 +230,12 @@ logged() {
 
 # --- fact 24: system update and reboot offer -----------------------------
 
-@test "fact 24: dnf upgrade runs with sudo before the dotfiles prompt" {
-  answers "Not now"
+@test "fact 24: dnf upgrade runs with sudo before the yadm commands are printed" {
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   logged "sudo dnf -y upgrade --refresh"
   logged "dnf -y upgrade --refresh"
-  [ "$(grep -n -m1 '^sudo dnf ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -m1 '^gum choose' "$STUB_LOG" | cut -d: -f1)" ]
+  [[ $output == *"System is up to date"*"yadm clone"* ]]
 }
 
 # --- ansible-pull after the system update --------------------------------
@@ -324,30 +249,26 @@ ansible_pull_conf() {
 @test "ansible-pull: no configuration file means no ansible_pull step" {
   use_stubs ansible-pull
   export SYNCOPATED_ANSIBLE_PULL_CONF="$BATS_TEST_TMPDIR/missing.conf"
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   ! grep -q '^ansible-pull' "$STUB_LOG"
   [[ $output != *ansible_pull* ]]
 }
 
-@test "ansible-pull: runs with sudo after dnf upgrade and before the dotfiles prompt" {
+@test "ansible-pull: runs with sudo after dnf upgrade and before the yadm commands" {
   use_stubs ansible-pull
   ansible_pull_conf
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   logged "sudo ansible-pull -U https://example.com/pull.git -i localhost, local.yml"
-  [[ $output == *"ansible_pull (ok)"* ]]
+  [[ $output == *"ansible_pull (ok)"*"yadm clone"* ]]
   [ "$(grep -n -m1 '^sudo dnf ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -m1 '^sudo ansible-pull ' "$STUB_LOG" | cut -d: -f1)" ]
-  [ "$(grep -n -m1 '^sudo ansible-pull ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -m1 '^gum choose' "$STUB_LOG" | cut -d: -f1)" ]
 }
 
 @test "ansible-pull: a failure is reported and setup continues" {
   use_stubs ansible-pull
   ansible_pull_conf
   export ANSIBLE_PULL_RC=3
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"ansible-pull failed (exit 3)"* ]]
@@ -357,7 +278,6 @@ ansible_pull_conf() {
 @test "ansible-pull: empty arguments skip the step" {
   use_stubs ansible-pull
   ansible_pull_conf https://example.com/pull.git ""
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   ! grep -q '^ansible-pull' "$STUB_LOG"
@@ -366,7 +286,6 @@ ansible_pull_conf() {
 
 @test "ansible-pull: a missing ansible-pull command skips the step" {
   ansible_pull_conf
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"ansible-pull not found"* ]]
@@ -374,7 +293,6 @@ ansible_pull_conf() {
 }
 
 @test "fact 24: nothing to update means no reboot prompt" {
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   ! grep -q 'Reboot now' "$STUB_LOG"
@@ -387,17 +305,17 @@ ansible_pull_conf() {
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   logged "sudo systemctl reboot"
-  ! grep -q '^yadm clone' "$STUB_LOG"
+  [[ $output != *"yadm clone"* ]]
   [ ! -e "$MARKER" ]
 }
 
-@test "fact 24: Continue setup after updates runs the dotfiles setup" {
+@test "fact 24: Continue setup after updates prints the yadm commands" {
   export DNF_UPDATES=1
-  answers "Continue setup" "Install dotfiles with yadm" "__default__"
+  answers "Continue setup"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   ! logged "sudo systemctl reboot"
-  logged "yadm clone --no-bootstrap $DOTS"
+  printed "yadm clone --no-bootstrap $DOTS"
   [ -e "$MARKER" ]
 }
 
@@ -411,7 +329,6 @@ ansible_pull_conf() {
 
 @test "fact 24: a failed update is reported and setup continues" {
   export DNF_RC=1
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"update (failed)"* ]]
@@ -421,165 +338,11 @@ ansible_pull_conf() {
 
 @test "fact 24: no dnf means the update step is skipped" {
   rm "$BIN/dnf"
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   ! grep -q 'dnf' "$STUB_LOG"
   [[ $output == *"update (skipped)"* ]]
   [ -e "$MARKER" ]
-}
-
-# --- fact 15: yadm bootstrap in a separate window --------------------------
-
-# wait_window TEXT : wait up to 10 s for the bootstrap window started by a
-# live terminal stub to print TEXT; the splash no longer waits for it.
-wait_window() {
-  local out="${STUB_LOG%.log}.window.out" tries=100
-  while ((tries-- > 0)); do
-    grep -qF -- "$1" "$out" 2>/dev/null && return 0
-    sleep 0.1
-  done
-  echo "window never printed: $1" >&2
-  cat "$out" >&2 2>/dev/null
-  return 1
-}
-
-@test "fact 15: yadm bootstrap runs in a new terminal window and the splash exits" {
-  export WAYLAND_DISPLAY=wayland-test
-  use_live_terminal kitty
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  grep -q '^kitty --start-as fullscreen bash -c .*syncopated-firstboot --bootstrap-window ' "$STUB_LOG"
-  [[ $output == *"running in a new window"*"this window closes now"* ]]
-  [[ $output != *"Setup complete"* ]]
-  [ -z "$(find "$XDG_RUNTIME_DIR" -name 'syncopated-bootstrap.*')" ]
-  wait_window "Setup complete"
-  [ "$(grep -c '^yadm bootstrap$' "$STUB_LOG")" -eq 1 ]
-  [ -e "$MARKER" ]
-}
-
-@test "fact 15: the bootstrap window shows an overview of every step" {
-  export WAYLAND_DISPLAY=wayland-test
-  use_live_terminal kitty
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  wait_window "Setup complete"
-  out=$(<"${STUB_LOG%.log}.window.out")
-  [[ $out == *"System"*"update ("*"target (ok)"*"Dotfiles (yadm)"*"yadm (ok)"*"clone (ok)"*"bootstrap (ok)"* ]]
-  [[ $out == *"Tool check"* ]]
-}
-
-@test "fact 15: graphical.target is set before the bootstrap window opens" {
-  export WAYLAND_DISPLAY=wayland-test SYSTEMCTL_DM_UNITS="gdm.service"
-  use_live_terminal kitty
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  set_line=$(grep -n '^sudo systemctl set-default graphical.target$' "$STUB_LOG" | cut -d: -f1)
-  kitty_line=$(grep -n '^kitty ' "$STUB_LOG" | cut -d: -f1)
-  [ -n "$set_line" ] && [ "$set_line" -lt "$kitty_line" ]
-  wait_window "Setup complete"
-}
-
-@test "fact 15: the bootstrap window's terminal runs in its own session" {
-  export WAYLAND_DISPLAY=wayland-test
-  ln -sf "$STUB_DIR/session-terminal" "$BIN/kitty"
-  answers "Install dotfiles with yadm" "__default__"
-  my_sid=$(ps -o sid= -p $$ | tr -d ' ')
-  run "$SCRIPT" </dev/null
-  # The splash falls back to this terminal when the window never starts, so
-  # only the logged session line matters.
-  for _ in $(seq 20); do grep -q '^session ' "$STUB_LOG" && break; sleep 0.2; done
-  line=$(grep '^session ' "$STUB_LOG")
-  pid=${line#session pid=}; pid=${pid%% *}
-  sid=${line##*sid=}
-  [ "$sid" = "$pid" ]
-  [ "$sid" != "$my_sid" ]
-}
-
-@test "fact 15: ptyxis opens the bootstrap window with --new-window" {
-  export WAYLAND_DISPLAY=wayland-test
-  use_live_terminal ptyxis
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  grep -q '^ptyxis --new-window -- bash -c ' "$STUB_LOG"
-  wait_window "Setup complete"
-  [ -e "$MARKER" ]
-}
-
-@test "fact 15: a failed bootstrap in the window writes no marker" {
-  export WAYLAND_DISPLAY=wayland-test YADM_BOOTSTRAP_RC=3
-  use_live_terminal kitty
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  wait_window "Dotfiles setup did not finish"
-  grep -qF "status 3" "${STUB_LOG%.log}.window.out"
-  grep -qF "bootstrap (failed)" "${STUB_LOG%.log}.window.out"
-  [ ! -e "$MARKER" ]
-}
-
-@test "fact 15: the bootstrap window draws its final step list once" {
-  export WAYLAND_DISPLAY=wayland-test YADM_BOOTSTRAP_RC=3
-  use_live_terminal kitty
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  wait_window "Dotfiles setup did not finish"
-  [ "$(grep -c 'bootstrap (failed)' "${STUB_LOG%.log}.window.out")" -eq 1 ]
-}
-
-@test "fact 15: without a graphical session bootstrap runs in the same terminal" {
-  use_live_terminal kitty
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  ! grep -q '^kitty ' "$STUB_LOG"
-  logged "yadm bootstrap"
-  [[ $output == *"Running yadm bootstrap here"* ]]
-  [[ $output == *"Tool check"* ]]
-  [ -e "$MARKER" ]
-}
-
-@test "fact 15: a window that never starts falls back to the same terminal" {
-  export WAYLAND_DISPLAY=wayland-test SYNCOPATED_WINDOW_TIMEOUT=1
-  use_terminal kitty
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  grep -q '^kitty ' "$STUB_LOG"
-  [ "$(grep -c '^yadm bootstrap$' "$STUB_LOG")" -eq 1 ]
-  [ -e "$MARKER" ]
-}
-
-@test "fact 15: a late window does not run bootstrap after the timeout" {
-  status_file="$BATS_TEST_TMPDIR/status"
-  printf 'cancelled\n' >"$status_file"
-  run "$SCRIPT" --bootstrap-window "$status_file" "$BIN/yadm" </dev/null
-  [ "$status" -eq 1 ]
-  ! grep -q '^yadm bootstrap' "$STUB_LOG"
-}
-
-@test "fact 15: the bootstrap window reports the step states it was given" {
-  status_file="$BATS_TEST_TMPDIR/status"
-  : >"$status_file"
-  run "$SCRIPT" --bootstrap-window "$status_file" "$BIN/yadm" "update=skipped yadm=ok clone=ok target=ok" </dev/null
-  [ "$status" -eq 0 ]
-  [ "$(<"$status_file")" = running ]
-  [[ $output == *"update (skipped)"* ]]
-  [[ $output == *"clone (ok)"* ]]
-  [[ $output == *"bootstrap (ok)"* ]]
-  [ -e "$MARKER" ]
-}
-
-@test "fact 9: launcher asks the script to pause on exit instead of pausing itself" {
-  use_terminal ptyxis
-  run "$LAUNCHER"
-  [ "$status" -eq 0 ]
-  grep -q '^ptyxis .*SYNCOPATED_PAUSE_ON_EXIT=1 .*syncopated-firstboot' "$STUB_LOG"
-  ! grep -q 'read ' "$STUB_LOG"
 }
 
 # --- fact 18: no repo priorities or flatpaks ------------------------------
@@ -592,66 +355,25 @@ wait_window() {
 # --- fact 19: tool report -------------------------------------------------
 
 @test "fact 19: final report lists ready and missing tools without failing" {
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"ready"*"git"* ]]
   [[ $output == *"missing"*"not-a-real-tool"* ]]
 }
 
-# --- fact 20: three choices -----------------------------------------------
-
-@test "fact 20: dotfiles opt-in offers Install dotfiles with yadm, Not now, No" {
-  answers "Not now"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  grep -q '^gum choose .*Install dotfiles with yadm Not now No$' "$STUB_LOG"
-}
-
-# --- system and dotfiles parts ------------------------------------------
-
-@test "system setup runs before the dotfiles prompt, whatever the answer" {
+@test "the yadm commands are the last thing printed before setup completes" {
   export SYSTEMCTL_DM_UNITS="gdm.service"
-  answers "Not now"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  logged "sudo systemctl set-default graphical.target"
-  [[ $output == *"Tool check"*"target (ok)"*"yadm (skipped)"* ]]
-  ! grep -q '^yadm ' "$STUB_LOG"
-}
-
-@test "No marks every dotfiles step declined" {
-  answers "No"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  for step in yadm clone bootstrap; do
-    [[ $output == *"$step (declined)"* ]]
-  done
-}
-
-@test "yadm bootstrap is the last command of the dotfiles part" {
-  export SYSTEMCTL_DM_UNITS="gdm.service"
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  [ "$(grep -v '^gum ' "$STUB_LOG" | tail -n 1)" = "yadm bootstrap" ]
+  [[ $output == *"Tool check"*"yadm clone"*"yadm bootstrap"*"Setup complete"* ]]
 }
 
 # --- fact 21: marker ------------------------------------------------------
 
-@test "fact 21: successful bootstrap writes the per-user marker" {
-  answers "Install dotfiles with yadm" "__default__"
+@test "fact 21: printing the commands writes the per-user marker" {
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [ -e "$MARKER" ]
-}
-
-@test "fact 21: No (dotfiles declined) writes the marker without cloning" {
-  answers "No"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  [ -e "$MARKER" ]
-  ! grep -q '^yadm ' "$STUB_LOG"
 }
 
 @test "fact 21: launcher does nothing when the marker exists" {
@@ -676,33 +398,10 @@ wait_window() {
 
 # --- fact 22: retry at next login -----------------------------------------
 
-@test "fact 22: Not now writes no marker" {
-  answers "Not now"
-  run "$SCRIPT" </dev/null
-  [ "$status" -eq 0 ]
-  [ ! -e "$MARKER" ]
-}
-
-@test "fact 22: a failed clone writes no marker and exits non-zero" {
-  export YADM_CLONE_RC=1
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -ne 0 ]
-  [ ! -e "$MARKER" ]
-  ! grep -q '^yadm bootstrap' "$STUB_LOG"
-}
-
-@test "fact 22: a failed bootstrap writes no marker and exits non-zero" {
-  export YADM_BOOTSTRAP_RC=1
-  answers "Install dotfiles with yadm" "__default__"
-  run "$SCRIPT" </dev/null
-  [ "$status" -ne 0 ]
-  [ ! -e "$MARKER" ]
-}
-
-@test "fact 22: launcher opens the splash again after a skip" {
+@test "fact 22: launcher opens the splash again after a reboot" {
   use_terminal ptyxis
-  answers "Not now"
+  export DNF_UPDATES=1
+  answers "Reboot now"
   run "$SCRIPT" </dev/null
   : >"$STUB_LOG"
   run "$LAUNCHER"
@@ -715,33 +414,21 @@ wait_window() {
 @test "fact 23: running the script by name ignores the marker" {
   mkdir -p "${MARKER%/*}"
   touch "$MARKER"
-  answers "Install dotfiles with yadm" "__default__"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
   [[ $output == *"Test OS 9.9"* ]]
-  logged "yadm bootstrap"
+  printed "yadm bootstrap"
 }
 
 # --- concurrency ----------------------------------------------------------
 
 @test "a second instance exits while the lock is held" {
-  answers "Install dotfiles with yadm" "__default__"
   exec 8>"$XDG_RUNTIME_DIR/syncopated-firstboot.lock"
   flock -n 8
   run "$SCRIPT" </dev/null
   exec 8>&-
   [ "$status" -eq 0 ]
   [[ $output == *"already running"* ]]
-  ! grep -q '^gum choose' "$STUB_LOG"
-}
-
-@test "fact 21: skipped steps still complete setup when none failed" {
-  run bash -c 'source "$1"; MARKER=$2; declare -gA STEP_STATE=([update]=skipped [yadm]=ok [clone]=skipped [bootstrap]=skipped); finish 2; echo "rc=$?"' _ "$SCRIPT" "$MARKER"
-  [ -e "$MARKER" ]
-  [[ $output == *"rc=0"* ]]
-}
-
-@test "fact 21: a failed step blocks the marker even when bootstrap ran" {
-  run bash -c 'source "$1"; MARKER=$2; declare -gA STEP_STATE=([update]=failed [bootstrap]=skipped); finish 2' _ "$SCRIPT" "$MARKER"
-  [ ! -e "$MARKER" ]
+  [[ $output != *"yadm clone"* ]]
+  ! grep -q '^sudo ' "$STUB_LOG"
 }
