@@ -26,7 +26,6 @@ kernel_args: []
 packages:
   - "a2jmidid"
   - "alsa-plugins-pulseaudio"
-  - "ansible-collection-community-general"
   - "bridge-utils"
   - "cmake"
   - "distribution-gpg-keys"

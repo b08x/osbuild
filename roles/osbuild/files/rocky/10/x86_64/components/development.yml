@@ -40,3 +40,4 @@ packages:
   - "ruby-build-ruby"
   - "ruby-devel"
   - "sassc"
+  - "libxkbfile-devel"
