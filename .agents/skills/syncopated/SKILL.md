@@ -16,11 +16,11 @@ Repository facts:
   local connection) and `tinybot` (AlmaLinux 10).
 - `roles/composer_cli/` (`composer_cli.yml`) is the osbuild-composer/Weldr
   alternative. This skill targets `roles/osbuild/` only.
-- Package taxonomy: `vars/packages/<Fedora|Rocky|AlmaLinux>.yml`, loaded for
-  the *target* distro (`osbuild_target_distribution`, derived from
-  `osbuild_distro`). Edit it with `scripts/package_tracker.py`
-  (`list|search|add|remove|build`). Manifests in `build-selections/` are not
-  read by the role.
+- Package data: the component files in
+  `roles/osbuild/files/<distro>/<major>/<arch>/components/*.yml`, selected by
+  `osbuild_blueprint_components` and resolved for the *target* distro
+  (`osbuild_target_distribution`, derived from `osbuild_distro`). Edit them
+  with `scripts/package_tracker.py` (`list|search|add|remove|verify|tui`).
 
 ## 1. Clarify (AskUserQuestion, max 3 questions)
 
@@ -44,36 +44,32 @@ Default to generate-only: the role writes files, the user runs the build.
 
 | Need | Start from | Host | Blueprint source |
 |------|-----------|------|------------------|
-| Rocky 10 workstation ISO | `playbooks/osbuild-rocky-iso.yml` | `tinybot` | static |
-| Rocky 10 NVIDIA workstation ISO | `playbooks/osbuild-rocky-iso-nvidia.yml` | `builder` | static |
-| …generate-only variant (`-gen` names) | `playbooks/osbuild-rocky-iso-nvidia-generate.yml` | `builder` | static |
-| …with GUI partitioning | `playbooks/osbuild-rocky-iso-nvidia-interactive.yml` | `builder` | static |
-| …composed from components | `playbooks/osbuild-rocky-iso-nvidia-components.yml` | `builder` | components |
+| Rocky 10 NVIDIA workstation ISO | `playbooks/osbuild-rocky-iso-nvidia-components.yml` | `builder` | components |
+| …without NVIDIA | `playbooks/osbuild-rocky-iso-components.yml` | `builder` | components |
 | …Intel GPU compute + oneAPI (DPC++, MKL), interactive disk | `playbooks/osbuild-rocky-iso-intel-oneapi-components.yml` | `builder` | components |
-| AlmaLinux 10 workstation ISO (± NVIDIA) | `playbooks/osbuild-almalinux-iso{,-nvidia}.yml` | `tinybot` | static |
-| CUDA application container | `playbooks/osbuild-rocky-cuda-container.yml` | `builder` | static |
-| Host-native generic build | `playbooks/osbuild.yml` (= root `osbuild.yml`) | `osbuild_targets` | Jinja template |
+| AlmaLinux 10 workstation ISO (± NVIDIA) | `playbooks/osbuild-almalinux-iso{,-nvidia}.yml` | `tinybot` | components |
+| CUDA application container | `playbooks/osbuild-rocky-cuda-container.yml` | `builder` | components (`cuda-container` + `frames/container.toml`) |
+| Host-native generic build | `playbooks/osbuild.yml` (= root `osbuild.yml`) | `osbuild_targets` | components, chosen per `ansible_distribution` |
 
 ### Blueprint source (exactly one applies)
 
-1. **Components** — `osbuild_blueprint_components` non-empty. Takes
-   precedence over the other two. The role merges
+1. **Components** — `osbuild_blueprint_components` non-empty. The role merges
    `files/<target>/<major>/<arch>/components/<name>.yml` with the frame
-   `files/<target>/<major>/<arch>/frames/workstation.toml` through
-   `templates/blueprint-components.toml.j2`. Only `rocky/10/x86_64` has
-   components today: `base anaconda gnome-desktop fonts audio multimedia
-   google-chrome gui-toolkit intel-graphics intel-oneapi development
-   containers-virt cockpit selection-extras nvidia`.
-   Preferred for a new Rocky 10 package mix: add or drop components instead
-   of copying a monolithic blueprint.
-2. **Static** — `osbuild_use_blueprint_template: false` +
-   `osbuild_static_blueprint_path: "files/<distro>/<major>/<arch>/<kind>/<file>.toml"`.
-   Existing static blueprints: `rocky/10` and `rocky/9` workstation (± nvidia),
-   `almalinux/10` workstation (± nvidia), `fedora/43` workstation
-   (`-nvidia`, `-intel-oneapi`, `-igx`), `rocky/10/.../container/rocky-10-2-cuda-container.toml`.
+   `files/<target>/<major>/<arch>/frames/workstation.toml` (set
+   `osbuild_blueprint_frame_path` for another frame) through
+   `templates/blueprint-components.toml.j2`. Four targets ship components:
+   `rocky/10`, `rocky/9`, `almalinux/10` and `fedora/43` (all `x86_64`). They
+   share `base anaconda gnome-desktop fonts audio multimedia google-chrome
+   vscode intel-graphics development containers-virt cockpit nvidia`; Rocky 10
+   adds `gui-toolkit selection-extras intel-oneapi cuda-container`, Fedora 43
+   adds `sway`. Add or drop components instead of copying a monolithic
+   blueprint: `python3 scripts/package_tracker.py playbook <file> list|add|remove <component>...`
+   edits a playbook's `osbuild_blueprint_components` in place. bootc builds need components too.
+2. **Static** — `osbuild_blueprint_components: []` +
+   `osbuild_static_blueprint_path: "<distro>/<major>/<arch>/<kind>/<file>.toml"`
+   (relative to `roles/osbuild/files/`). Remaining static blueprints:
+   `fedora/43` `-intel-oneapi` and `-igx`, `rocky/10` workstation (± nvidia).
    Use for non-installer types and for distros without components.
-3. **Jinja template** — `osbuild_use_blueprint_template: true` (role default).
-   Emits workstation installer modules; suits only ISO builds.
 
 Component file schema (`tasks/components.yml` asserts `label` and a non-empty
 `packages`):
@@ -85,6 +81,9 @@ repo_urls: ["https://..."]            # appended to osbuild_extra_repo_urls
 services: ["unit"]                    # merged into [customizations.services]
 kernel_args: ["arg=value"]            # merged into [customizations.kernel] append
 fragment: name.toml                   # optional, appended verbatim
+flatpaks: ["org.app.Id"]              # optional, bootc builds only
+bootc_repos: ["shell snippet"]        # optional, bootc builds only
+copr_repos: ["owner/project"]         # optional, bootc builds only
 ```
 
 - A `fragment` file may only contain array-of-tables (`[[customizations.files]]`,
@@ -95,12 +94,7 @@ fragment: name.toml                   # optional, appended verbatim
   `packages`, `[customizations]`, `[customizations.kernel]` or
   `[customizations.services]`.
 - `osbuild_extra_packages` is added to the merged package list.
-- `osbuild_components` is a separate, older mechanism
-  (`osbuild_component_defs` in `defaults/main.yml`, checked by
-  `tasks/validate_components.yml`). Its `sources` feed `osbuild_sources`.
-  With static or component blueprints keep it at `[base, anaconda]`
-  (+ `development`, `container-tools` on same-distro hosts) — those add no
-  packages.
+- `python3 roles/osbuild/tests/validate_schema.py` checks every component file.
 
 ### Hard rules (each was a real failure or verified behavior)
 
@@ -113,15 +107,14 @@ fragment: name.toml                   # optional, appended verbatim
   (`vars/<host distro>.yml`) come from the *host's* `ansible_distribution`.
   For an EL target on a Fedora host (Rocky/AlmaLinux on gir), set
   `osbuild_sources: []` and supply every non-base repo through
-  `osbuild_extra_repo_urls` or component `repo_urls`. Do not add the `nvidia`
-  entry to `osbuild_components` for EL targets on Fedora hosts. For an EL 10
+  `osbuild_extra_repo_urls` or component `repo_urls`. For an EL 10
   target on an EL 10 host (Rocky or AlmaLinux target on tinybot), keep the
   default `osbuild_sources`: both EL distros share `osbuild_distro_sources_el`,
   and names missing from the host's `repo` dictionary (`rocky-*` on
   AlmaLinux) are skipped, so add those URLs to `osbuild_extra_repo_urls`.
 - **Rocky depsolve repos:** Rocky playbooks pass CRB, Plus and RT as extra
   repos (`https://dl.rockylinux.org/pub/rocky/<major>/{CRB,plus,RT}/x86_64/os/`);
-  the Rocky 10 `base` component carries them in `repo_urls`. On EL 10,
+  the Rocky `base` components carry them in `repo_urls`. On EL 10,
   `libyaml-devel` comes from CRB.
 - `[[customizations.repositories]]` in a blueprint only writes `.repo` files
   into the image; depsolve ignores it. Every non-base repo a package comes from
@@ -138,7 +131,7 @@ fragment: name.toml                   # optional, appended verbatim
   extending it. Files appended with `'''` literal strings must not contain `'''`.
 - Variants of an existing build get their own `osbuild_blueprint_name` and
   `osbuild_output_filename`, so they do not overwrite each other's files in
-  `/var/tmp/osbuild-images`. A variant may reuse the same static blueprint.
+  `/var/tmp/osbuild-images`. A variant may reuse the same components.
 - Stamp output names with `_git_commit` (pre_task copied from existing
   playbooks) and keep the `image-builder list` assert pre_task.
 - Container images: name the output `.tar` and set `osbuild_container_tag`;
@@ -156,10 +149,10 @@ fragment: name.toml                   # optional, appended verbatim
 |----------|---------|--------|
 | `osbuild_only_generate` | `true` | Write `<name>.toml` + `build-<name>.sh`; `-e osbuild_only_generate=false` builds in the play |
 | `osbuild_build_bootc` | `false` | bootc mode; takes priority over `osbuild_only_generate` |
-| `osbuild_blueprint_components` | `[]` | Non-empty → component-composed blueprint (§2) |
+| `osbuild_blueprint_components` | `[]` | The only package selector → component-composed blueprint (§2) |
 | `osbuild_components_dir` / `osbuild_blueprint_frame_path` | `<target>/<major>/<arch>/components`, `…/frames/workstation.toml` | Paths relative to `roles/osbuild/files/`, resolved from the target distro |
-| `osbuild_extra_packages` | `[]` | Extra packages (template and component blueprints only) |
-| `osbuild_package_pins` | `{}` | `{pkg: "ver.*"}`; template and component blueprints only, static files build with `*` |
+| `osbuild_extra_packages` | `[]` | Extra packages (component blueprints only) |
+| `osbuild_package_pins` | `{}` | `{pkg: "ver.*"}`; component blueprints only, static files build with `*` |
 | `osbuild_kickstart_enabled` | `true` | Embed `files/kickstart/*.ks` as `[customizations.installer.kickstart]` |
 | `osbuild_kickstart_partitioning` | `auto` | `interactive` → `syncopated-interactive.ks`, no storage commands |
 | `osbuild_kickstart_{root_percent,root_min_gib,reserve_percent,usr_percent,usr_max_gib,var_max_gib,home_min_gib,disk_min_gib}` | `10,16,10,80,256,128,100,40` | `auto` layout: `/`, unassigned vg00 reserve, `/usr` (capped), `/var` (rest, capped), `/home` only if ≥ home_min_gib is left. Built-in defaults in `syncopated.ks` must match `defaults/main.yml` (bats checks) |
@@ -174,22 +167,18 @@ markers; grep for them in the generated `.toml`.
 
 ## 4. Add or remove packages
 
-A package name is listed in up to three places. Which builds see a change
-depends on which layer the change is made in:
-
-| Layer | File | Read by |
-|-------|------|---------|
-| Taxonomy | `vars/packages/<Fedora\|Rocky\|AlmaLinux>.yml` → `system_packages.<Category>.<subcategory>` | Jinja-template blueprints, through `osbuild_component_defs` (`defaults/main.yml`) |
-| Components | `roles/osbuild/files/rocky/10/x86_64/components/<name>.yml` → `packages:` | `osbuild_blueprint_components` playbooks |
-| Static blueprints | `roles/osbuild/files/<distro>/<major>/<arch>/<kind>/*.toml` → `packages = [ … ]` | Playbooks with `osbuild_use_blueprint_template: false` |
+The component files are the only package data: a package name lives in
+`roles/osbuild/files/<distro>/<major>/<arch>/components/<name>.yml` →
+`packages:`, once per target. Static blueprints (`osbuild_static_blueprint_path`)
+are hand-written and outside the tracker.
 
 Procedure:
 
-1. **Find every list that carries the package or its neighbours.**
-   `grep -rn -- '<pkg>' vars/packages roles/osbuild/files`. A change that is
-   meant for "the workstation" goes into all three layers for every distro
-   where the name exists, and into each variant file (`-workstation.toml`
-   and `-workstation-nvidia.toml` are separate lists). Commit 3729a07
+1. **Find every component that carries the package or its neighbours.**
+   `python3 scripts/package_tracker.py search <pkg>` prints every
+   target/component that has it. A change meant for "the workstation" goes
+   into the matching component of every target where the name exists
+   (`list --target T` shows the components). Commit 3729a07
    (`ruby-build-ruby`) shows the full set of files for one addition.
 2. **Confirm the name exists in the target repos before adding it.** Query
    each repo the build depsolves against (base repos plus its extra repos):
@@ -200,13 +189,11 @@ Procedure:
    ```
 
    No output means the repo does not provide that name. EL and Fedora names
-   differ; check `vars/packages/00-distributions.yml` (`package_mappings`).
-   `python3 scripts/package_tracker.py verify --distro Rocky --package a,b`
-   runs the same lookup against the Rocky, AlmaLinux or Fedora repo profile
-   (`REPO_PROFILES`); `verify` without `--package` audits the whole taxonomy
-   (exit 1 when names are missing). `add` runs it by default and skips names
-   a distro's repos do not provide (`--no-verify` overrides).
-   Leave the name out of a distro that has no build of it, and say so in a
+   differ. `python3 scripts/package_tracker.py add --target T COMPONENT a b --verify`
+   runs the same lookup against the target's base repos plus the `repo_urls`
+   of its components, and skips names no repo provides. `verify --target T
+   [COMPONENT]` audits existing entries (exit 1 when names are missing).
+   Leave the name out of a target that has no build of it, and say so in a
    comment (the files already do this for sway on EPEL 10).
 3. **Add the repo when the package needs one the build does not use yet.**
    Depsolve: the component's `repo_urls` or the playbook's
@@ -214,33 +201,29 @@ Procedure:
    `[[customizations.repositories]]` entry (static blueprint, component
    fragment or frame). One without the other fails depsolve or leaves the
    installed system unable to update the package.
-4. **Edit the taxonomy** by hand or with the tracker:
+4. **Edit the component** with the tracker or by hand:
 
    ```bash
-   python3 scripts/package_tracker.py add    --distro All --category System --subcategory base --package a,b
-   python3 scripts/package_tracker.py remove --distro Rocky --category System --subcategory base --package a
+   python3 scripts/package_tracker.py add    --target rocky/10/x86_64 base a b --verify
+   python3 scripts/package_tracker.py remove --target rocky/10/x86_64 base a
+   python3 scripts/package_tracker.py tui    # Edit / Add / Show details per component
    ```
 
-   - `--distro All` translates the name per distro through `package_mappings`
-     on `add`; `remove` matches the exact name only.
-   - `add` appends to the end of the subcategory list, after any comment
-     block; move the line if a comment groups related names.
-   - Every save rewrites the whole file: it drops the leading `---` and
-     reformats `audio:\n    []` in `Rocky.yml` and `AlmaLinux.yml`. Review
-     `git diff vars/packages` and revert those lines.
-5. **Edit components and static blueprints by hand.**
-   - Component `packages:` entries are quoted strings; comps groups start
-     with `@`. Record the source repo and verification date in the file's
-     comment header, as the existing components do.
-   - Static blueprint entries are `{ name = "<pkg>", version = "*" },`
-     inside the inline `packages = [ … ]` array; comps groups are
-     `{ name = "@<group>", version = "*" }`. Never add a `[[packages]]`
-     table. Keep `version = "*"`; pins belong in `osbuild_package_pins`
-     (template and component blueprints only).
+   - `--target` is required (exit 2 with the target list otherwise).
+   - `add` appends to the end of the `packages:` list and keeps comments, key
+     order and the existing order. A name already in another component of the
+     same target is refused with a warning naming it, unless `--force`.
+   - `remove` refuses to empty a component.
+5. **By hand**, component `packages:` entries are quoted strings; comps
+   groups start with `@`. Record the source repo and verification date in the
+   file's comment header, as the existing components do. Static blueprint
+   entries are `{ name = "<pkg>", version = "*" },` inside the inline
+   `packages = [ … ]` array; never add a `[[packages]]` table. Keep
+   `version = "*"`; pins belong in `osbuild_package_pins`.
 6. **Removing a package** also removes what exists only for it: the
    component's `services:` units, `kernel_args`, fragment files and
    `repo_urls`, and matching `[customizations.services]` /
-   `[customizations.repositories]` entries in static blueprints. An explicit
+   `[customizations.repositories]` entries in fragments. An explicit
    removal does not exclude the package when another package requires it;
    confirm with the manifest RPM list (§5).
 7. **Verify** (§5) for every playbook whose files changed: regenerate,
@@ -248,8 +231,7 @@ Procedure:
    (added) or absent (removed) in the manifest RPM list. Run
    `ansible-playbook roles/osbuild/tests/validate_firstboot_injection.yml`
    after editing any static blueprint (it parses every one as TOML) and
-   `python3 roles/osbuild/tests/validate_schema.py` after editing
-   `osbuild_component_defs`.
+   `python3 -m pytest tests -q` after editing a component file.
 
 Commit convention: `➕ chore(packages): …` for additions, `🐛 fix(packages): …`
 when the package repairs broken behavior; the body names the files and the
@@ -284,7 +266,7 @@ ansible-lint playbooks/<new>.yml roles/osbuild
   | firstboot, `tasks/blueprint.yml`, any static blueprint | `ansible-playbook roles/osbuild/tests/validate_firstboot_injection.yml` | `failed=0` |
   | `files/firstboot/` | `shellcheck -x roles/osbuild/files/firstboot/syncopated-firstboot{,-launcher}` and `bats roles/osbuild/tests/firstboot/` | clean / all ok |
   | `tasks/select_build_mode.yml` | `ansible-playbook -i roles/osbuild/tests/inventory roles/osbuild/tests/validate_build_modes.yml` | `failed=0` |
-  | `osbuild_component_defs` | `python3 roles/osbuild/tests/validate_schema.py` | rc=0 |
+  | a component file | `python3 roles/osbuild/tests/validate_schema.py` and `python3 -m pytest tests -q` | rc=0 / all pass |
 
 - `/var/tmp/osbuild-images` is root-owned on gir; use a scratch dir for manual
   manifest runs.
