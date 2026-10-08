@@ -23,9 +23,12 @@
 #   podman run --rm --device nvidia.com/gpu=all localhost/rocky-10-2-cuda-container:<commit> nvidia-smi
 #   podman run --rm --device nvidia.com/gpu=all localhost/rocky-10-2-cuda-container:<commit> /usr/local/cuda/bin/nvcc --version
 #
-# As in osbuild-rocky-iso-nvidia.yml, gir is Fedora 43 and the role would
-# otherwise take its source list from the host distribution, so
-# osbuild_sources is emptied and the one non-base repo is passed explicitly.
+# The blueprint is the cuda-container component
+# (files/rocky/10/x86_64/components/cuda-container.yml) plus the frame
+# files/rocky/10/x86_64/frames/container.toml. gir is Fedora 43 and the role
+# would otherwise take its source list from the host distribution, so
+# osbuild_sources is emptied; the component's repo_urls pass the CUDA repo and
+# Rocky CRB, Plus and RT to image-builder.
 
 - name: Prepare Rocky Linux 10.2 CUDA application container
   hosts: builder
@@ -37,8 +40,9 @@
     osbuild_image_type: container
 
     osbuild_blueprint_name: "rocky-10-2-cuda-container"
-    osbuild_use_blueprint_template: false
-    osbuild_static_blueprint_path: "files/rocky/10/x86_64/container/rocky-10-2-cuda-container.toml"
+    osbuild_blueprint_components:
+      - cuda-container
+    osbuild_blueprint_frame_path: "rocky/10/x86_64/frames/container.toml"
     osbuild_build_bootc: false
 
     # The installer kickstart, wheel sudoers drop-in, first-login splash and
@@ -50,16 +54,7 @@
     osbuild_firstboot_enabled: false
     osbuild_flathub_enabled: false
 
-    osbuild_components:
-      - base
-
     osbuild_sources: []
-    osbuild_extra_repo_urls:
-      - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
-      # Rocky CRB, Plus and RT (BaseOS/AppStream are image-builder's base repos).
-      - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
-      - "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"
-      - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
 
     osbuild_output_dir: "/var/tmp/osbuild-images"
     osbuild_output_filename: "rocky-10-2-cuda-container-{{ _git_commit }}.tar"

@@ -47,7 +47,6 @@
     osbuild_kickstart_partitioning: interactive
 
     # Composed from component files; see header.
-    osbuild_use_blueprint_template: false
     osbuild_blueprint_components:
       - base
       - anaconda
@@ -69,13 +68,6 @@
     osbuild_only_generate: true
     osbuild_build_bootc: false
     osbuild_image_type: image-installer
-
-    # Legacy component definitions (osbuild_component_defs), still validated by
-    # the role. base and anaconda contribute no sources and no packages here;
-    # package selection is osbuild_blueprint_components above.
-    osbuild_components:
-      - base
-      - anaconda
 
     # Suppress the host-derived (Fedora) common source list. See header.
     osbuild_sources: []

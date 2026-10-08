@@ -2,11 +2,13 @@
 ---
 # Build the AlmaLinux 10.2 workstation ISO installer on tinybot.
 #
-# Uses the static, pre-verified blueprint at
-# roles/osbuild/files/almalinux/10/x86_64/workstation/almalinux-10-2-workstation.toml
-# rather than the dynamic Jinja2 template — that blueprint's package list was
+# Composes the blueprint from the component files in
+# roles/osbuild/files/almalinux/10/x86_64/components/ and the frame
+# files/almalinux/10/x86_64/frames/workstation.toml. The package names were
 # checked package-by-package against live AlmaLinux 10 / EPEL 10 / RPM Fusion
-# EL 10 repodata and intentionally excludes sway (no EPEL 10 build).
+# EL 10 repodata and intentionally exclude sway (no EPEL 10 build). Each
+# component's repo_urls become --extra-repo, so the selection decides which
+# repos image-builder depsolves against.
 #
 # tinybot is itself AlmaLinux 10, so it builds its own distro's installer.
 
@@ -25,10 +27,20 @@
     osbuild_blueprint_version: "1.0.0"
     osbuild_blueprint_description: "AlmaLinux Workstation 10.2"
 
-    # Static blueprint, not the Jinja2 template — the file already has its
-    # full package list and customizations baked in.
-    osbuild_use_blueprint_template: false
-    osbuild_static_blueprint_path: "files/almalinux/10/x86_64/workstation/almalinux-10-2-workstation.toml"
+    # Composed from component files; see header.
+    osbuild_blueprint_components:
+      - base
+      - anaconda
+      - gnome-desktop
+      - fonts
+      - audio
+      - multimedia
+      - google-chrome
+      - vscode
+      - intel-graphics
+      - development
+      - containers-virt
+      - cockpit
 
     # Build mode: traditional ISO, not bootc. The role default
     # (osbuild_only_generate: true) writes the blueprint and
@@ -39,14 +51,8 @@
     osbuild_build_bootc: false
     osbuild_image_type: image-installer
 
-    # Components only drive --extra-repo sources and gpgkey fetching here
-    # (the static blueprint already carries its own packages); anaconda is
-    # required for an installer ISO.
-    osbuild_components:
-      - base
-      - anaconda
-      - development
-      - container-tools
+    # --extra-repo URLs come from the components' repo_urls.
+    osbuild_sources: []
 
     osbuild_output_dir: "/var/tmp/osbuild-images"
     # _git_commit is set in pre_tasks: short HEAD hash of this repo, with a

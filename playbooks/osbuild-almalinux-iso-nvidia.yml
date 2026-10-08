@@ -2,15 +2,15 @@
 ---
 # Build the AlmaLinux 10.2 workstation ISO installer (NVIDIA variant) on tinybot.
 #
-# Uses the static, pre-verified NVIDIA blueprint at
-# roles/osbuild/files/almalinux/10/x86_64/workstation/almalinux-10-3-workstation-nvidia.toml
-# rather than the dynamic Jinja2 template — that blueprint's package list was
+# Composes the blueprint from the component files in
+# roles/osbuild/files/almalinux/10/x86_64/components/ and the frame
+# files/almalinux/10/x86_64/frames/workstation.toml. The package names were
 # checked package-by-package against live AlmaLinux 10 / EPEL 10 / RPM Fusion
-# EL 10 repodata and intentionally excludes sway (no EPEL 10 build).
+# EL 10 repodata and intentionally exclude sway (no EPEL 10 build).
 #
-# The NVIDIA blueprint carries its own [[customizations.repositories]] entries
-# for the CUDA EL10 repo and NVIDIA Container Toolkit repo; the extra-repo
-# URLs below ensure image-builder can resolve those repos during the build.
+# The nvidia component carries the CUDA EL10 and NVIDIA Container Toolkit
+# repositories (fragment nvidia.toml) and passes their URLs to image-builder
+# as --extra-repo (repo_urls), so no extra URLs are listed here.
 #
 # tinybot is itself AlmaLinux 10, so it builds its own distro's installer.
 
@@ -29,11 +29,21 @@
     osbuild_blueprint_version: "1.0.0"
     osbuild_blueprint_description: "AlmaLinux Workstation 10.2 (NVIDIA)"
 
-    # Static blueprint, not the Jinja2 template — the file already has its
-    # full package list, NVIDIA packages, kernel args, CDI service, and
-    # repository entries baked in.
-    osbuild_use_blueprint_template: false
-    osbuild_static_blueprint_path: "files/almalinux/10/x86_64/workstation/almalinux-10-2-workstation-nvidia.toml"
+    # Composed from component files; see header.
+    osbuild_blueprint_components:
+      - base
+      - anaconda
+      - gnome-desktop
+      - fonts
+      - audio
+      - multimedia
+      - google-chrome
+      - vscode
+      - intel-graphics
+      - development
+      - containers-virt
+      - cockpit
+      - nvidia
 
     # Build mode: traditional ISO, not bootc. The role default
     # (osbuild_only_generate: true) writes the blueprint and
@@ -44,12 +54,8 @@
     osbuild_build_bootc: false
     osbuild_image_type: image-installer
 
-    # Components only drive --extra-repo sources and gpgkey fetching here
-    # (the static blueprint already carries its own packages); anaconda is
-    # required for an installer ISO.
-    osbuild_components:
-      - base
-      - anaconda
+    # --extra-repo URLs come from the components' repo_urls.
+    osbuild_sources: []
 
     osbuild_output_dir: "/var/tmp/osbuild-images"
     # _git_commit is set in pre_tasks: short HEAD hash of this repo, with a
@@ -57,20 +63,6 @@
     osbuild_output_filename: "almalinux-10-2-workstation-nvidia-{{ _git_commit }}.iso"
 
     osbuild_build_retries: 1
-
-    # Extra-repo URLs for the NVIDIA stack. These mirror the
-    # [[customizations.repositories]] entries in the blueprint and ensure
-    # image-builder can resolve the CUDA EL10 and NVIDIA Container Toolkit
-    # repos during the build, even if the blueprint's internal repo definitions
-    # are not fully processed by the compose pipeline.
-    #
-    # CUDA EL10: https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64
-    #   GPG key:  https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/CDF6BA43.pub
-    # NVIDIA Container Toolkit: https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64
-    #   GPG key: https://nvidia.github.io/libnvidia-container/gpgkey
-    osbuild_extra_repo_urls:
-      - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
-      - "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
 
   pre_tasks:
     # Lookups run on the controller; set_fact evaluates this once, so every
