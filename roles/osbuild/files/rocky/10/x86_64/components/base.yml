@@ -75,3 +75,7 @@ packages:
   - "zsh"
   - "yq"
   - "input-remapper"
+  - "inxi"
+  - "yadm"
+  - "ydotool"
+  - "gitflow"
