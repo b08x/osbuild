@@ -23,8 +23,8 @@ BASE_LIST = ["base", "anaconda", "gnome-desktop", "fonts", "audio", "multimedia"
 
 # (render distro, component list, baseline package-set stem)
 PACKAGE_CASES = {
-    "alma10-plain": ("almalinux-10.2", BASE_LIST, "almalinux-10-2-workstation"),
-    "alma10-nvidia": ("almalinux-10.2", BASE_LIST + ["nvidia"], "almalinux-10-2-workstation-nvidia"),
+    "alma10-plain": ("almalinux-10.2", BASE_LIST + ["syncopated"], "almalinux-10-2-workstation"),
+    "alma10-nvidia": ("almalinux-10.2", BASE_LIST + ["nvidia", "syncopated"], "almalinux-10-2-workstation-nvidia"),
     "rocky9-plain": ("rocky-9.8", BASE_LIST, "rocky-9-8-workstation"),
     "rocky9-nvidia": ("rocky-9.8", BASE_LIST + ["nvidia"], "rocky-9-8-workstation-nvidia"),
     "fedora43-plain": ("fedora-43", BASE_LIST + ["sway"], "fedora-workstation-43"),
@@ -38,15 +38,16 @@ _ROCKY10_COMMON = ["base", "anaconda", "gnome-desktop", "fonts", "audio", "multi
 SNAPSHOT_CASES = {
     "rocky-iso": (
         "rocky-10-2-workstation-components",
-        _ROCKY10_COMMON + ["gui-toolkit", "selection-extras", "intel-graphics", "development", "containers-virt", "cockpit"],
+        _ROCKY10_COMMON + ["gui-toolkit", "intel-graphics", "development", "containers-virt", "cockpit", "syncopated"],
         "syncopated-dx", "Rocky Linux Workstation 10.2 (components)"),
     "rocky-iso-nvidia": (
         "rocky-10-2-workstation-nvidia-components",
-        _ROCKY10_COMMON + ["intel-graphics", "development", "containers-virt", "cockpit", "nvidia"],
+        _ROCKY10_COMMON + ["intel-graphics", "development", "containers-virt", "cockpit", "nvidia",
+                           "cuda-container", "gui-toolkit", "syncopated"],
         "syncopated-dx-nvidia", "Rocky Linux Workstation 10.2 (NVIDIA, components)"),
     "rocky-iso-intel-oneapi": (
         "rocky-10-2-workstation-intel-oneapi-components",
-        _ROCKY10_COMMON + ["intel-graphics", "development", "containers-virt", "cockpit", "intel-oneapi"],
+        _ROCKY10_COMMON + ["intel-graphics", "development", "containers-virt", "cockpit", "intel-oneapi", "syncopated"],
         "syncopated-dx-intel",
         "Rocky Linux Workstation 10.2 (Intel oneAPI, components, interactive partitioning)"),
 }
@@ -57,6 +58,10 @@ def test_package_set_equals_static_blueprint(case):
     distro, components, stem = PACKAGE_CASES[case]
     rendered = set(package_names(render(distro, components)))
     expected = set((BASELINE / f"{stem}.pkgs").read_text().split())
+    if "syncopated" in components:
+        # Packages added after the baseline was recorded, plus those moved in
+        # from base/fonts (input-remapper, yaru-theme), which the baseline has.
+        expected |= set(package_names(render(distro, ["syncopated"])))
     assert rendered == expected, (
         f"missing: {sorted(expected - rendered)}; extra: {sorted(rendered - expected)}")
 

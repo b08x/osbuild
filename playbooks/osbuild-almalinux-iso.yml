@@ -41,6 +41,7 @@
       - development
       - containers-virt
       - cockpit
+      - syncopated
 
     # Build mode: traditional ISO, not bootc. The role default
     # (osbuild_only_generate: true) writes the blueprint and

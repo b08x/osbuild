@@ -64,4 +64,3 @@ packages:
   - "uv"
   - "zsh"
   - "yq"
-  - "input-remapper"

@@ -1,0 +1,7 @@
+[[customizations.repositories]]
+id = "copr-syncopated"
+name = "Syncopated"
+baseurls = ["https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"]
+gpgcheck = true
+gpgkeys = ["https://download.copr.fedorainfracloud.org/results/b08x/syncopated/pubkey.gpg"]
+enabled = true
