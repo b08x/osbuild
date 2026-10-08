@@ -253,8 +253,7 @@ osbuild_locale: "en_US.UTF-8"
 # Package lists live in the component files (see "Component File Schema" above).
 
 # Additional packages to include beyond the selected components
-osbuild_extra_packages:
-  []
+osbuild_extra_packages: []
   # - vim-enhanced
   # - tmux
   # - htop
@@ -369,8 +368,8 @@ osbuild_kickstart_file: "kickstart/{{ 'syncopated-interactive.ks' if osbuild_kic
 osbuild_kickstart_compliant_tmp: tmpfs
 osbuild_kickstart_compliant_encrypt: false
 osbuild_kickstart_compliant_disk_min_gib: 160
-osbuild_kickstart_compliant_root_gib: 25
-osbuild_kickstart_compliant_usr_gib: 40
+osbuild_kickstart_compliant_root_gib: 45
+osbuild_kickstart_compliant_usr_gib: 60
 osbuild_kickstart_compliant_tmp_gib: 8
 osbuild_kickstart_compliant_var_tmp_gib: 8
 osbuild_kickstart_compliant_var_log_gib: 10
