@@ -1,0 +1,19 @@
+# Blueprint component "syncopated" for Rocky Linux 10 (x86_64).
+# was verified against live repodata there (2026-10-01). Entries starting
+# with @ are comps groups. Versions are never pinned here; use
+# osbuild_package_pins.
+label: "syncopated"
+repo_urls:
+  - "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"
+services: []
+kernel_args: []
+fragment: syncopated.toml
+packages:
+  - "cpulimit"
+  - "gitflow"
+  - "input-remapper"
+  - "inxi"
+  - "vips-devel"
+  - "yadm"
+  - "yaru-theme"
+  - "ydotool"

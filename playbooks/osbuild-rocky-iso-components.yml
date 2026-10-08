@@ -46,11 +46,11 @@
       - google-chrome
       - vscode
       - gui-toolkit
-      - selection-extras
       - intel-graphics
       - development
       - containers-virt
       - cockpit
+      - syncopated
 
     # Build mode: traditional ISO, not bootc. Generate files only; do not
     # invoke image-builder. "minimal-installer" is Fedora-only; EL

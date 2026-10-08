@@ -9,6 +9,7 @@
 label: "Qt and GTK toolkits and theme configuration tools"
 repo_urls:
   - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+  - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
 services: []
 kernel_args: []
 packages:
@@ -25,3 +26,4 @@ packages:
   - "qt6-qtmultimedia"
   - "qt6-qttools"
   - "qt6ct"
+  - "xdg-utils"

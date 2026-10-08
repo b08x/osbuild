@@ -10,10 +10,11 @@ repo_urls: []
 services: []
 kernel_args: []
 packages:
+  - "a2jmidid"
   - "alsa-lib-devel"
+  - "alsa-plugins-pulseaudio"
   - "alsa-utils"
   - "pavucontrol"
-  - "pipewire"
   - "pipewire-alsa"
   - "pipewire-devel"
   - "pipewire-gstreamer"
@@ -21,5 +22,6 @@ packages:
   - "pipewire-jack-audio-connection-kit-libs"
   - "pipewire-pulseaudio"
   - "pipewire-utils"
+  - "pipewire"
   - "pulseaudio-utils"
   - "wireplumber"

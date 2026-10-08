@@ -24,6 +24,6 @@ kernel_args: []
 packages:
   - "cuda-toolkit"
   - "gcc-c++"
-  - "make"
   - "git"
+  - "make"
   - "which"

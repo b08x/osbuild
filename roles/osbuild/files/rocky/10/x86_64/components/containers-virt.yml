@@ -22,3 +22,5 @@ packages:
   - "virt-install"
   - "@virtualization-host-environment"
   - "virt-viewer"
+  - "libvirt-daemon-kvm"
+  - "virt-manager"

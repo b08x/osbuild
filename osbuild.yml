@@ -71,6 +71,7 @@
         - containers-virt
         - cockpit
         - nvidia
+        - syncopated
       Rocky: *components_el
     osbuild_blueprint_components: "{{ osbuild_blueprint_components_default[ansible_distribution] }}"
 
