@@ -269,6 +269,7 @@ BASE_REPOS: Dict[str, List[Tuple[str, str]]] = {
     "rocky/10": [
         ("rocky-baseos", "https://dl.rockylinux.org/pub/rocky/10/BaseOS/x86_64/os/"),
         ("rocky-appstream", "https://dl.rockylinux.org/pub/rocky/10/AppStream/x86_64/os/"),
+        ("copr-syncopated", "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"),
     ],
     "rocky/9": [
         ("rocky-baseos", "https://dl.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/"),
@@ -278,10 +279,12 @@ BASE_REPOS: Dict[str, List[Tuple[str, str]]] = {
         ("almalinux-baseos", "https://repo.almalinux.org/almalinux/10/BaseOS/x86_64/os/"),
         ("almalinux-appstream", "https://repo.almalinux.org/almalinux/10/AppStream/x86_64/os/"),
         ("almalinux-crb", "https://repo.almalinux.org/almalinux/10/CRB/x86_64/os/"),
+        ("copr-syncopated", "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"),
     ],
     "fedora/43": [
         ("fedora", "https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/"),
         ("fedora-updates", "https://dl.fedoraproject.org/pub/fedora/linux/updates/43/Everything/x86_64/"),
+        ("copr-syncopated", "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/fedora-43-x86_64/"),
     ],
 }
 

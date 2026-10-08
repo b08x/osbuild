@@ -13,6 +13,7 @@ repo_urls:
   - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
   - "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"
   - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
+  - "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"
 services:
   - "sshd"
   - "NetworkManager"
@@ -73,3 +74,4 @@ packages:
   - "uv"
   - "zsh"
   - "yq"
+  - "input-remapper"

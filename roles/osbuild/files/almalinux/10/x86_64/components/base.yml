@@ -7,6 +7,7 @@
 label: "Base system: kernel, networking, CLI tools, ansible runtime"
 repo_urls:
   - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+  - "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"
 services:
   - "sshd"
   - "NetworkManager"
@@ -63,3 +64,4 @@ packages:
   - "uv"
   - "zsh"
   - "yq"
+  - "input-remapper"

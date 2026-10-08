@@ -21,6 +21,7 @@ repo_urls:
   - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
   - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
   - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
+  - "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"
 services: []
 kernel_args: []
 packages:
@@ -40,3 +41,4 @@ packages:
   - "tuned-profiles-realtime"
   - "virt-manager"
   - "xdg-utils"
+  - "yaru-theme"

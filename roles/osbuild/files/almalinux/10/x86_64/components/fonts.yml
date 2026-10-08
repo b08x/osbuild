@@ -5,7 +5,8 @@
 # Entries starting with @ are comps groups. Versions are never pinned here;
 # use osbuild_package_pins.
 label: "Font set"
-repo_urls: []
+repo_urls:
+  - "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"
 services: []
 kernel_args: []
 packages:
@@ -99,3 +100,4 @@ packages:
   - "urw-base35-p052-fonts"
   - "urw-base35-standard-symbols-ps-fonts"
   - "urw-base35-z003-fonts"
+  - "yaru-theme"
