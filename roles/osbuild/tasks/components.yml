@@ -23,6 +23,15 @@
     quiet: true
   loop: "{{ osbuild_blueprint_components }}"
 
+- name: Assert at most one openscap-* component is selected
+  ansible.builtin.assert:
+    that: osbuild_blueprint_components | select('match', '^openscap-') | list | length <= 1
+    fail_msg: >-
+      Each openscap-* component declares [customizations.openscap], which
+      image-builder accepts once per blueprint. Selected:
+      {{ osbuild_blueprint_components | select('match', '^openscap-') | join(', ') }}
+    quiet: true
+
 - name: Merge component data
   ansible.builtin.set_fact:
     _osbuild_bp_packages: >-

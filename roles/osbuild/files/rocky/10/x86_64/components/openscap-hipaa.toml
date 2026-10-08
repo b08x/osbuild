@@ -1,0 +1,6 @@
+# Remediation runs at image build time (org.osbuild.oscap.remediation in the
+# "os" pipeline); scap-security-guide and openscap-scanner are added by
+# image-builder. Profile: Health Insurance Portability and Accountability Act (HIPAA).
+[customizations.openscap]
+profile_id = "xccdf_org.ssgproject.content_profile_hipaa"
+datastream = "/usr/share/xml/scap/ssg/content/ssg-rhel10-ds.xml"

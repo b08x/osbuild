@@ -2,16 +2,32 @@
 # into every prepared blueprint by tasks/blueprint.yml; edit the source file,
 # not this. lang/keyboard/timezone come from osbuild_locale, osbuild_keyboard
 # and osbuild_timezone{{ '; the first %pre writes the osbuild_kickstart_* disk
-# layout variables for the %pre in the source file' if osbuild_kickstart_partitioning == 'auto' else '' }}.
+# layout variables for the %pre in the source file' if osbuild_kickstart_partitioning in ['auto', 'compliant'] else '' }}.
 
 [customizations.installer.kickstart]
 contents = '''
 lang {{ osbuild_locale }}
 keyboard {{ osbuild_keyboard }}
 timezone {{ osbuild_timezone }} --utc
-{% if osbuild_kickstart_partitioning == 'auto' %}
+{% if osbuild_kickstart_partitioning in ['auto', 'compliant'] %}
 %pre --interpreter=/usr/bin/bash --erroronfail
 cat >/tmp/syncopated-layout.env <<'EOF'
+{% if osbuild_kickstart_partitioning == 'compliant' %}
+LAYOUT_MODE=compliant
+MIN_MIB={{ (osbuild_kickstart_compliant_disk_min_gib | int) * 1024 }}
+RESERVE_PCT={{ osbuild_kickstart_compliant_reserve_percent | int }}
+C_ROOT_MIB={{ (osbuild_kickstart_compliant_root_gib | int) * 1024 }}
+C_USR_MIB={{ (osbuild_kickstart_compliant_usr_gib | int) * 1024 }}
+C_TMP_MIB={{ (osbuild_kickstart_compliant_tmp_gib | int) * 1024 }}
+C_VARTMP_MIB={{ (osbuild_kickstart_compliant_var_tmp_gib | int) * 1024 }}
+C_VARLOG_MIB={{ (osbuild_kickstart_compliant_var_log_gib | int) * 1024 }}
+C_AUDIT_MIB={{ (osbuild_kickstart_compliant_audit_gib | int) * 1024 }}
+C_VAR_PCT={{ osbuild_kickstart_compliant_var_percent | int }}
+C_VAR_MIN_MIB={{ (osbuild_kickstart_compliant_var_min_gib | int) * 1024 }}
+C_VAR_MAX_MIB={{ (osbuild_kickstart_compliant_var_max_gib | int) * 1024 }}
+TMP_MODE={{ osbuild_kickstart_compliant_tmp }}
+ENCRYPT={{ 1 if osbuild_kickstart_compliant_encrypt | bool else 0 }}
+{% else %}
 MIN_MIB={{ (osbuild_kickstart_disk_min_gib | int) * 1024 }}
 ROOT_PCT={{ osbuild_kickstart_root_percent | int }}
 ROOT_MIN_MIB={{ (osbuild_kickstart_root_min_gib | int) * 1024 }}
@@ -20,6 +36,7 @@ USR_PCT={{ osbuild_kickstart_usr_percent | int }}
 USR_MAX_MIB={{ (osbuild_kickstart_usr_max_gib | int) * 1024 }}
 VAR_MAX_MIB={{ (osbuild_kickstart_var_max_gib | int) * 1024 }}
 HOME_MIN_MIB={{ (osbuild_kickstart_home_min_gib | int) * 1024 }}
+{% endif %}
 EOF
 %end
 {% endif %}

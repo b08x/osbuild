@@ -149,9 +149,37 @@
 
     - name: Assert kickstart partitioning mode is known
       ansible.builtin.assert:
-        that: osbuild_kickstart_partitioning in ['auto', 'interactive']
-        fail_msg: "osbuild_kickstart_partitioning must be auto or interactive, got '{{ osbuild_kickstart_partitioning }}'"
+        that: osbuild_kickstart_partitioning in ['auto', 'interactive', 'compliant']
+        fail_msg: "osbuild_kickstart_partitioning must be auto, interactive or compliant, got '{{ osbuild_kickstart_partitioning }}'"
         quiet: true
+
+    - name: Assert compliant kickstart layout variables are sane
+      when: osbuild_kickstart_partitioning == 'compliant'
+      ansible.builtin.assert:
+        that:
+          - _layout | map('string') | select('match', '^[0-9]+$') | list | length == _layout | length
+          - osbuild_kickstart_compliant_tmp in ['tmpfs', 'lv']
+          - osbuild_kickstart_compliant_var_min_gib | int <= osbuild_kickstart_compliant_var_max_gib | int
+          - osbuild_kickstart_compliant_reserve_percent | int + osbuild_kickstart_compliant_var_percent | int < 100
+          - osbuild_kickstart_compliant_disk_min_gib | int > 0
+        fail_msg: >-
+          osbuild_kickstart_compliant_* sizes must be non-negative integers,
+          _tmp must be tmpfs or lv, var_min_gib at most var_max_gib, and
+          reserve_percent + var_percent below 100. Got {{ _layout }}.
+        quiet: true
+      vars:
+        _layout:
+          - "{{ osbuild_kickstart_compliant_disk_min_gib }}"
+          - "{{ osbuild_kickstart_compliant_root_gib }}"
+          - "{{ osbuild_kickstart_compliant_usr_gib }}"
+          - "{{ osbuild_kickstart_compliant_tmp_gib }}"
+          - "{{ osbuild_kickstart_compliant_var_tmp_gib }}"
+          - "{{ osbuild_kickstart_compliant_var_log_gib }}"
+          - "{{ osbuild_kickstart_compliant_audit_gib }}"
+          - "{{ osbuild_kickstart_compliant_var_percent }}"
+          - "{{ osbuild_kickstart_compliant_var_min_gib }}"
+          - "{{ osbuild_kickstart_compliant_var_max_gib }}"
+          - "{{ osbuild_kickstart_compliant_reserve_percent }}"
 
     - name: Assert kickstart disk layout variables are sane
       when: osbuild_kickstart_partitioning == 'auto'

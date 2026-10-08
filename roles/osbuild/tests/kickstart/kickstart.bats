@@ -244,3 +244,71 @@ EOF
     [ "$status" -eq 0 ]
   done
 }
+
+# --- compliant layout (LAYOUT_MODE=compliant) -------------------------------
+
+compliant() {
+  printf 'LAYOUT_MODE=compliant\n%s\n' "$*" >"$SYNC_PRE_LAYOUT"
+  export SYNC_PRE_POST_OUT="$BATS_TEST_TMPDIR/partitions-post.ks"
+}
+
+@test "compliant: 477 GiB disk gets every separate mount with hardening options" {
+  disk nvme0n1 477 nvme
+  compliant ""
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  for mp in /usr /var /var/tmp /var/log /var/log/audit /home; do
+    grep -q "^logvol $mp " "$SYNC_PRE_OUT"
+  done
+  ! grep -q "^logvol /tmp " "$SYNC_PRE_OUT"
+  grep -q '^logvol /var/tmp .*--fsoptions="nodev,nosuid,noexec"' "$SYNC_PRE_OUT"
+  grep -q '^logvol /home .*--fsoptions="nodev,nosuid"' "$SYNC_PRE_OUT"
+  grep -q '^part /boot .*--fsoptions="nodev,nosuid"' "$SYNC_PRE_OUT"
+  ! grep -q -- '--encrypted' "$SYNC_PRE_OUT"
+}
+
+@test "compliant: tmpfs /tmp is an fstab line in a %post include" {
+  disk nvme0n1 477 nvme
+  compliant ""
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  grep -q '^%post' "$SYNC_PRE_POST_OUT"
+  grep -q 'tmpfs /tmp tmpfs defaults,nodev,nosuid,noexec' "$SYNC_PRE_POST_OUT"
+  [ "$(tail -n1 "$SYNC_PRE_POST_OUT")" = "%end" ]
+}
+
+@test "compliant: TMP_MODE=lv adds a /tmp volume and an empty %post include" {
+  disk nvme0n1 477 nvme
+  compliant "TMP_MODE=lv"
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  grep -q '^logvol /tmp .*noexec' "$SYNC_PRE_OUT"
+  [ ! -s "$SYNC_PRE_POST_OUT" ]
+}
+
+@test "compliant: ENCRYPT=1 encrypts the physical volume" {
+  disk nvme0n1 477 nvme
+  compliant "ENCRYPT=1"
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  grep -q '^part pv.00 .*--encrypted' "$SYNC_PRE_OUT"
+}
+
+@test "compliant: 932 GiB disk clamps /var and gives the rest to /home" {
+  disk nvme0n1 932 nvme
+  compliant ""
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  var=$(sed -n 's/^logvol \/var --.*--size=\([0-9]*\).*/\1/p' "$SYNC_PRE_OUT")
+  home=$(sed -n 's/^logvol \/home --.*--size=\([0-9]*\).*/\1/p' "$SYNC_PRE_OUT")
+  [ "$var" -le 204800 ]
+  [ "$home" -gt 500000 ]
+}
+
+@test "compliant: a 100 GiB disk aborts below the 160 GiB minimum" {
+  disk nvme0n1 100 nvme
+  compliant ""
+  run bash "$PRE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"at least"* ]]
+}

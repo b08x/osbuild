@@ -347,8 +347,38 @@ osbuild_kickstart_enabled: true
 #   interactive — files/kickstart/syncopated-interactive.ks: no storage
 #                 commands; Anaconda's Installation Destination screen must be
 #                 completed by the user.
+#   compliant   — files/kickstart/syncopated.ks with a layout for the OpenSCAP
+#                 profiles (CIS, PCI-DSS, HIPAA): separate /usr, /var,
+#                 /var/tmp, /var/log, /var/log/audit, /home and (tmp=lv) /tmp,
+#                 with nodev/nosuid/noexec mount options. See below.
 osbuild_kickstart_partitioning: auto
 osbuild_kickstart_file: "kickstart/{{ 'syncopated-interactive.ks' if osbuild_kickstart_partitioning == 'interactive' else 'syncopated.ks' }}"
+
+# Layout for osbuild_kickstart_partitioning: compliant. Usable space = disk
+# size - 4 GiB. Fixed volumes first (/, /usr, /var/tmp, /var/log,
+# /var/log/audit, and /tmp when compliant_tmp is lv); /var gets var_percent of
+# the usable space clamped to var_min_gib..var_max_gib; reserve_percent stays
+# unassigned in vg00 for `lvextend -r`; /home takes the rest. Mount options
+# live in the kickstart because Anaconda writes /etc/fstab after the build-time
+# remediation. Disks smaller than disk_min_gib abort the install.
+#   compliant_tmp   tmpfs: fstab line added in %post (size = tmp_gib); a
+#                   partition_for_tmp rule may still flag it.
+#                   lv: a tmp_gib volume.
+#   compliant_encrypt  true: LUKS on the physical volume; Anaconda asks for a
+#                   passphrase at install.
+osbuild_kickstart_compliant_tmp: tmpfs
+osbuild_kickstart_compliant_encrypt: false
+osbuild_kickstart_compliant_disk_min_gib: 160
+osbuild_kickstart_compliant_root_gib: 25
+osbuild_kickstart_compliant_usr_gib: 40
+osbuild_kickstart_compliant_tmp_gib: 8
+osbuild_kickstart_compliant_var_tmp_gib: 8
+osbuild_kickstart_compliant_var_log_gib: 10
+osbuild_kickstart_compliant_audit_gib: 10
+osbuild_kickstart_compliant_var_percent: 15
+osbuild_kickstart_compliant_var_min_gib: 40
+osbuild_kickstart_compliant_var_max_gib: 200
+osbuild_kickstart_compliant_reserve_percent: 10
 
 # Disk layout for osbuild_kickstart_partitioning: auto. All logical volumes
 # are XFS in vg00 on the selected disk. Usable space = disk size - 4 GiB
@@ -375,7 +405,7 @@ osbuild_kickstart_home_min_gib: 100
 
 # Ship /etc/sudoers.d/90-wheel-nopasswd (%wheel ALL=(ALL) NOPASSWD: ALL) so the
 # admin user created in Anaconda runs sudo without a password.
-osbuild_kickstart_sudoers: true
+osbuild_kickstart_sudoers: false
 
 # [COMPATIBILITY] Retained for backward compatibility.
 # Deprecated: composer-era output naming convention carried over for backward compatibility.

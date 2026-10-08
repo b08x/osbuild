@@ -23,6 +23,7 @@ OUT=${SYNC_PRE_OUT:-/tmp/partitions.ks}
 TTY=${SYNC_PRE_TTY:-/dev/tty1}
 CMDLINE=${SYNC_PRE_CMDLINE:-/proc/cmdline}
 LAYOUT=${SYNC_PRE_LAYOUT:-/tmp/syncopated-layout.env}
+OUT_POST=${SYNC_PRE_POST_OUT:-/tmp/partitions-post.ks}
 
 # Layout parameters, in MiB and percent. These values equal the role
 # defaults; the role writes its osbuild_kickstart_* variables to $LAYOUT in an
@@ -36,8 +37,29 @@ USR_PCT=80          # /usr share of the space after / and the reserve
 USR_MAX_MIB=262144  # /usr cap
 VAR_MAX_MIB=131072  # /var cap
 HOME_MIN_MIB=102400 # /home is created only when at least this much is left
+
+# LAYOUT_MODE=compliant (role: osbuild_kickstart_partitioning: compliant) swaps
+# the layout below for one with the separate mounts that the CIS, PCI-DSS and
+# HIPAA profiles scan for. Sizes in MiB; the role overrides them through $LAYOUT.
+LAYOUT_MODE=auto
+C_ROOT_MIB=25600    # /
+C_USR_MIB=40960     # /usr
+C_TMP_MIB=8192      # /tmp (volume, or tmpfs size limit)
+C_VARTMP_MIB=8192   # /var/tmp
+C_VARLOG_MIB=10240  # /var/log
+C_AUDIT_MIB=10240   # /var/log/audit
+C_VAR_PCT=15        # /var share of the usable space ...
+C_VAR_MIN_MIB=40960 # ... at least
+C_VAR_MAX_MIB=204800 # ... at most
+C_HOME_FLOOR_MIB=10240 # /home must get at least this much
+TMP_MODE=tmpfs      # tmpfs | lv
+ENCRYPT=0           # 1: LUKS on the physical volume (Anaconda asks for a passphrase)
 # shellcheck source=/dev/null
 [ -r "$LAYOUT" ] && . "$LAYOUT"
+if [ "$LAYOUT_MODE" = compliant ] && [ "$MIN_MIB" -eq 40960 ]; then
+  MIN_MIB=163840    # compliant fixed volumes need a bigger disk (160 GiB)
+fi
+: >"$OUT_POST"
 
 die() {
   echo "ERROR: $*" >&2
@@ -103,13 +125,58 @@ done < <(lsblk -dbno NAME,TYPE,RM,RO,SIZE,TRAN)
 total=$((best_size / 1048576))
 [ "$total" -ge "$MIN_MIB" ] || die "target disk $best has $total MiB; at least $MIN_MIB MiB ($((MIN_MIB / 1024)) GiB) is required"
 
+avail=$((total - BUFFER_MIB))
+reserve=$((avail * RESERVE_PCT / 100))
+
+if [ "$LAYOUT_MODE" = compliant ]; then
+  # Fixed-size volumes first, /var as a clamped share, /home takes what is left
+  # after the unassigned reserve. Mount options are set here because Anaconda
+  # writes /etc/fstab at install time, after the build-time remediation.
+  var=$((avail * C_VAR_PCT / 100))
+  [ "$var" -ge "$C_VAR_MIN_MIB" ] || var=$C_VAR_MIN_MIB
+  [ "$var" -le "$C_VAR_MAX_MIB" ] || var=$C_VAR_MAX_MIB
+  tmplv=0
+  [ "$TMP_MODE" = lv ] && tmplv=$C_TMP_MIB
+  home=$((avail - reserve - C_ROOT_MIB - C_USR_MIB - tmplv - C_VARTMP_MIB - C_VARLOG_MIB - C_AUDIT_MIB - var))
+  [ "$home" -ge "$C_HOME_FLOOR_MIB" ] || die "compliant layout leaves $home MiB for /home on $best ($total MiB); need at least $C_HOME_FLOOR_MIB MiB"
+  enc=
+  [ "$ENCRYPT" = 1 ] && enc=" --encrypted"
+  cat >"$OUT" <<EOF
+ignoredisk --only-use=$best
+zerombr
+clearpart --all --initlabel --disklabel=gpt --drives=$best
+bootloader --boot-drive=$best
+reqpart
+part /boot --size=2048 --fstype=xfs --fsoptions="nodev,nosuid" --ondisk=$best
+part pv.00 --size=1 --grow --ondisk=$best$enc
+volgroup vg00 pv.00
+logvol / --vgname=vg00 --name=root --size=$C_ROOT_MIB --fstype=xfs --fsoptions="noatime"
+logvol /usr --vgname=vg00 --name=usr --size=$C_USR_MIB --fstype=xfs --fsoptions="nodev,noatime"
+logvol /var --vgname=vg00 --name=var --size=$var --fstype=xfs --fsoptions="nodev,nosuid,noatime"
+logvol /var/tmp --vgname=vg00 --name=var_tmp --size=$C_VARTMP_MIB --fstype=xfs --fsoptions="nodev,nosuid,noexec,noatime"
+logvol /var/log --vgname=vg00 --name=var_log --size=$C_VARLOG_MIB --fstype=xfs --fsoptions="nodev,nosuid,noexec,noatime"
+logvol /var/log/audit --vgname=vg00 --name=var_log_audit --size=$C_AUDIT_MIB --fstype=xfs --fsoptions="nodev,nosuid,noexec,noatime"
+logvol /home --vgname=vg00 --name=home --size=$home --fstype=xfs --fsoptions="nodev,nosuid,noatime"
+EOF
+  if [ "$TMP_MODE" = lv ]; then
+    echo "logvol /tmp --vgname=vg00 --name=tmp --size=$C_TMP_MIB --fstype=xfs --fsoptions=\"nodev,nosuid,noexec\"" >>"$OUT"
+  else
+    # printf keeps a line starting with %end out of this script: Anaconda would
+    # end the %pre section there.
+    printf '%s\n' \
+      '%post --interpreter=/usr/bin/bash' \
+      "echo 'tmpfs /tmp tmpfs defaults,nodev,nosuid,noexec,mode=1777,size=${C_TMP_MIB}M 0 0' >>/etc/fstab" \
+      '%end' >"$OUT_POST"
+  fi
+  echo "target disk $best: $total MiB, compliant layout (/tmp=$TMP_MODE, encrypt=$ENCRYPT); / $C_ROOT_MIB, /usr $C_USR_MIB, /var $var, /home $home MiB, unassigned $((avail - C_ROOT_MIB - C_USR_MIB - tmplv - C_VARTMP_MIB - C_VARLOG_MIB - C_AUDIT_MIB - var - home)) MiB"
+  exit 0
+fi
+
 # / gets ROOT_PCT of the usable space (at least ROOT_MIN_MIB) and RESERVE_PCT
 # stays unassigned in vg00 for lvextend. /usr gets USR_PCT of what is left,
 # up to its cap; /var gets the remainder, up to its cap. Space beyond the caps becomes
 # /home when it is at least HOME_MIN_MIB; otherwise it also stays unassigned
 # and /home is a directory on /.
-avail=$((total - BUFFER_MIB))
-reserve=$((avail * RESERVE_PCT / 100))
 root=$((avail * ROOT_PCT / 100))
 [ "$root" -ge "$ROOT_MIN_MIB" ] || root=$ROOT_MIN_MIB
 rest=$((avail - reserve - root))
@@ -143,6 +210,7 @@ echo "target disk $best: $total MiB; / $root MiB, /usr $usr MiB, /var $var MiB, 
 %end
 
 %include /tmp/partitions.ks
+%include /tmp/partitions-post.ks
 
 # Create the system flatpak repository so /etc/flatpak/remotes.d (the Flathub
 # remote) is applied at install time. flatpak imports remotes.d files only

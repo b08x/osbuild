@@ -74,6 +74,7 @@ packages:
   - "tuned-ppd"
   - "tuned-profiles-realtime"
   - "tuned"
+  - "udisks2-lvm2"
   - "uv"
   - "yq"
   - "zsh"

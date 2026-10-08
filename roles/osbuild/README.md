@@ -278,7 +278,7 @@ ISO image types only. Details in [Installer Kickstart](#installer-kickstart) and
 | Variable | Default | Description |
 |---|---|---|
 | `osbuild_kickstart_enabled` | `true` | Embed the installer kickstart in the blueprint |
-| `osbuild_kickstart_partitioning` | `auto` | `auto`: `%pre` picks a disk and applies the layout below. `interactive`: the user partitions in Anaconda's Installation Destination |
+| `osbuild_kickstart_partitioning` | `auto` | `auto`: `%pre` picks a disk and applies the layout below. `interactive`: the user partitions in Anaconda's Installation Destination. `compliant`: separate `/usr`, `/var`, `/var/tmp`, `/var/log`, `/var/log/audit`, `/home` (and `/tmp` as a volume or tmpfs) with `nodev,nosuid,noexec` set in the kickstart, for the OpenSCAP profiles; sizes in the `osbuild_kickstart_compliant_*` defaults, minimum disk 160 GiB, optional LUKS |
 | `osbuild_kickstart_sudoers` | `true` | Ship `/etc/sudoers.d/90-wheel-nopasswd` |
 | `osbuild_firstboot_enabled` | `true` | First-login yadm dotfiles splash (desktop images) |
 | `osbuild_kickstart_file` | derived from `osbuild_kickstart_partitioning` | Kickstart source under `files/`; set only to use your own file |
