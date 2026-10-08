@@ -28,12 +28,12 @@ OUT_POST=${SYNC_PRE_POST_OUT:-/tmp/partitions-post.ks}
 # Layout parameters, in MiB and percent. These values equal the role
 # defaults; the role writes its osbuild_kickstart_* variables to $LAYOUT in an
 # earlier %pre, which overrides them.
-MIN_MIB=40960       # smallest target disk accepted
+MIN_MIB=80960       # smallest target disk accepted
 BUFFER_MIB=4096     # held back for /boot, the EFI partition and LVM metadata
 ROOT_PCT=10         # / share of the usable space
-ROOT_MIN_MIB=16384  # / floor
+ROOT_MIN_MIB=25600  # / floor
 RESERVE_PCT=10      # share of the usable space left unassigned in vg00
-USR_PCT=80          # /usr share of the space after / and the reserve
+USR_PCT=40          # /usr share of the space after / and the reserve
 USR_MAX_MIB=262144  # /usr cap
 VAR_MAX_MIB=131072  # /var cap
 HOME_MIN_MIB=102400 # /home is created only when at least this much is left
@@ -42,8 +42,8 @@ HOME_MIN_MIB=102400 # /home is created only when at least this much is left
 # the layout below for one with the separate mounts that the CIS, PCI-DSS and
 # HIPAA profiles scan for. Sizes in MiB; the role overrides them through $LAYOUT.
 LAYOUT_MODE=auto
-C_ROOT_MIB=25600    # /
-C_USR_MIB=40960     # /usr
+C_ROOT_MIB=45600    # /
+C_USR_MIB=60960     # /usr
 C_TMP_MIB=8192      # /tmp (volume, or tmpfs size limit)
 C_VARTMP_MIB=8192   # /var/tmp
 C_VARLOG_MIB=10240  # /var/log
