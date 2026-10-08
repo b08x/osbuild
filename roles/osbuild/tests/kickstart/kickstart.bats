@@ -131,7 +131,7 @@ target() {
   run bash "$PRE"
   [ "$status" -eq 1 ]
   [ ! -e "$SYNC_PRE_OUT" ]
-  grep -q "target disk vda has 30720 MiB; at least 40960 MiB (40 GiB) is required" "$SYNC_PRE_TTY"
+  grep -q "target disk vda has 30720 MiB; at least 81920 MiB (80 GiB) is required" "$SYNC_PRE_TTY"
 }
 
 @test "F10: no candidate disk aborts with a readable error" {
@@ -146,12 +146,12 @@ lv() {
   sed -n "s|^logvol $1 --vgname=vg00 --name=[a-z]* --size=\([0-9]*\) --fstype=xfs\$|\1|p" "$SYNC_PRE_OUT"
 }
 
-@test "F11/F12: 60 GiB disk gets the / floor, a 4:1 /usr:/var split and no /home" {
-  disk nvme0n1 60 nvme
+@test "F11/F12: 100 GiB disk gets the / floor, a 2:3 /usr:/var split and no /home" {
+  disk nvme0n1 100 nvme
   disk vdb 30
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 57344; reserve 5734; / = max(5734, 16384); rest 35226 -> 80/20
+  # usable 98304; reserve 9830; / = max(9830, 25600); rest 62874 -> 40/60
   diff -u - "$SYNC_PRE_OUT" <<EOF
 ignoredisk --only-use=nvme0n1
 zerombr
@@ -161,23 +161,23 @@ reqpart
 part /boot --size=2048 --fstype=xfs --ondisk=nvme0n1
 part pv.00 --size=1 --grow --ondisk=nvme0n1
 volgroup vg00 pv.00
-logvol / --vgname=vg00 --name=root --size=16384 --fstype=xfs
-logvol /usr --vgname=vg00 --name=usr --size=28180 --fstype=xfs
-logvol /var --vgname=vg00 --name=var --size=7046 --fstype=xfs
+logvol / --vgname=vg00 --name=root --size=25600 --fstype=xfs
+logvol /usr --vgname=vg00 --name=usr --size=25149 --fstype=xfs
+logvol /var --vgname=vg00 --name=var --size=37725 --fstype=xfs
 EOF
-  [[ "$output" == *"unassigned 5734 MiB"* ]]
+  [[ "$output" == *"unassigned 9830 MiB"* ]]
 }
 
-@test "F12: 477 GiB disk caps /usr, /var takes the remainder and /home stays on /" {
+@test "F12: 477 GiB disk caps /var, /usr takes 40% of the rest and /home stays on /" {
   disk nvme0n1 477 nvme
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 484352; / 48435; reserve 48435; rest 387482; /usr cap 262144
+  # usable 484352; / 48435; reserve 48435; rest 387482; /usr 40% = 154992; /var cap 131072; 101418 left < home_min
   [ "$(lv /)" = 48435 ]
-  [ "$(lv /usr)" = 262144 ]
-  [ "$(lv /var)" = 125338 ]
+  [ "$(lv /usr)" = 154992 ]
+  [ "$(lv /var)" = 131072 ]
   [ -z "$(lv /home)" ]
-  [[ "$output" == *"unassigned 48435 MiB"* ]]
+  [[ "$output" == *"unassigned 149853 MiB"* ]]
 }
 
 @test "F12: 931 GiB disk caps /usr and /var and gives /home the rest except the reserve" {
@@ -194,22 +194,22 @@ EOF
 }
 
 @test "layout env written by the role overrides the built-in defaults" {
-  disk nvme0n1 60 nvme
+  disk nvme0n1 100 nvme
   export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/layout.env"
   printf '%s\n' RESERVE_PCT=0 USR_PCT=50 HOME_MIN_MIB=1024 >"$SYNC_PRE_LAYOUT"
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 57344; / 16384; rest 40960 -> 20480 / 20480; nothing left for /home
-  [ "$(lv /usr)" = 20480 ]
-  [ "$(lv /var)" = 20480 ]
+  # usable 98304; / 25600; rest 72704 -> 36352 / 36352; nothing left for /home
+  [ "$(lv /usr)" = 36352 ]
+  [ "$(lv /var)" = 36352 ]
   [ -z "$(lv /home)" ]
   [[ "$output" == *"unassigned 0 MiB"* ]]
 }
 
 @test "a layout that leaves no room for /usr and /var aborts" {
-  disk vda 40
+  disk vda 80
   export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/layout.env"
-  printf '%s\n' ROOT_MIN_MIB=36000 >"$SYNC_PRE_LAYOUT"
+  printf '%s\n' ROOT_MIN_MIB=76000 >"$SYNC_PRE_LAYOUT"
   run bash "$PRE"
   [ "$status" -eq 1 ]
   [ ! -e "$SYNC_PRE_OUT" ]
@@ -305,10 +305,36 @@ compliant() {
   [ "$home" -gt 500000 ]
 }
 
-@test "compliant: a 100 GiB disk aborts below the 160 GiB minimum" {
+@test "compliant: a 100 GiB disk aborts below the compliant minimum" {
   disk nvme0n1 100 nvme
   compliant ""
   run bash "$PRE"
   [ "$status" -ne 0 ]
   [[ "$output" == *"at least"* ]]
+}
+
+@test "compliant: a 180 GiB disk (the minimum) fits the default layout with /home >= 10 GiB" {
+  disk nvme0n1 180 nvme
+  compliant ""
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  home=$(sed -n 's/^logvol \/home --.*--size=\([0-9]*\).*/\1/p' "$SYNC_PRE_OUT")
+  [ "$home" -ge 10240 ]
+}
+
+@test "compliant: a 179 GiB disk aborts" {
+  disk nvme0n1 179 nvme
+  compliant ""
+  run bash "$PRE"
+  [ "$status" -ne 0 ]
+}
+
+@test "built-in compliant defaults in the .ks equal the role defaults" {
+  local defaults="$BATS_TEST_DIRNAME/../../defaults/main.yml"
+  def() { sed -n "s/^osbuild_kickstart_compliant_$1: *\([0-9]*\)\$/\1/p" "$defaults"; }
+  ks() { sed -n "s/^$1=\([0-9]*\) .*/\1/p" "$KS"; }
+  [ "$(ks C_ROOT_MIB)" = $(($(def root_gib) * 1024)) ]
+  [ "$(ks C_USR_MIB)" = $(($(def usr_gib) * 1024)) ]
+  [ "$(ks C_VAR_MIN_MIB)" = $(($(def var_min_gib) * 1024)) ]
+  [ "$(ks C_VAR_MAX_MIB)" = $(($(def var_max_gib) * 1024)) ]
 }

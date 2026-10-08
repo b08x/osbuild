@@ -367,9 +367,9 @@ osbuild_kickstart_file: "kickstart/{{ 'syncopated-interactive.ks' if osbuild_kic
 #                   passphrase at install.
 osbuild_kickstart_compliant_tmp: tmpfs
 osbuild_kickstart_compliant_encrypt: false
-osbuild_kickstart_compliant_disk_min_gib: 160
-osbuild_kickstart_compliant_root_gib: 45
-osbuild_kickstart_compliant_usr_gib: 60
+osbuild_kickstart_compliant_disk_min_gib: 180
+osbuild_kickstart_compliant_root_gib: 35
+osbuild_kickstart_compliant_usr_gib: 45
 osbuild_kickstart_compliant_tmp_gib: 8
 osbuild_kickstart_compliant_var_tmp_gib: 8
 osbuild_kickstart_compliant_var_log_gib: 10
@@ -393,11 +393,11 @@ osbuild_kickstart_compliant_reserve_percent: 10
 #             a directory on /
 # Disks smaller than disk_min_gib abort the install with a message on tty1.
 # XFS cannot shrink: prefer caps that are too small (grow later) over too large.
-osbuild_kickstart_disk_min_gib: 40
+osbuild_kickstart_disk_min_gib: 80
 osbuild_kickstart_root_percent: 10
-osbuild_kickstart_root_min_gib: 16
+osbuild_kickstart_root_min_gib: 25
 osbuild_kickstart_reserve_percent: 10
-osbuild_kickstart_usr_percent: 80
+osbuild_kickstart_usr_percent: 40
 osbuild_kickstart_usr_max_gib: 256
 osbuild_kickstart_var_max_gib: 128
 osbuild_kickstart_home_min_gib: 100

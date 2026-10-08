@@ -28,7 +28,7 @@ OUT_POST=${SYNC_PRE_POST_OUT:-/tmp/partitions-post.ks}
 # Layout parameters, in MiB and percent. These values equal the role
 # defaults; the role writes its osbuild_kickstart_* variables to $LAYOUT in an
 # earlier %pre, which overrides them.
-MIN_MIB=80960       # smallest target disk accepted
+MIN_MIB=81920       # smallest target disk accepted
 BUFFER_MIB=4096     # held back for /boot, the EFI partition and LVM metadata
 ROOT_PCT=10         # / share of the usable space
 ROOT_MIN_MIB=25600  # / floor
@@ -42,8 +42,8 @@ HOME_MIN_MIB=102400 # /home is created only when at least this much is left
 # the layout below for one with the separate mounts that the CIS, PCI-DSS and
 # HIPAA profiles scan for. Sizes in MiB; the role overrides them through $LAYOUT.
 LAYOUT_MODE=auto
-C_ROOT_MIB=45600    # /
-C_USR_MIB=60960     # /usr
+C_ROOT_MIB=35840    # /
+C_USR_MIB=46080     # /usr
 C_TMP_MIB=8192      # /tmp (volume, or tmpfs size limit)
 C_VARTMP_MIB=8192   # /var/tmp
 C_VARLOG_MIB=10240  # /var/log
@@ -56,8 +56,8 @@ TMP_MODE=tmpfs      # tmpfs | lv
 ENCRYPT=0           # 1: LUKS on the physical volume (Anaconda asks for a passphrase)
 # shellcheck source=/dev/null
 [ -r "$LAYOUT" ] && . "$LAYOUT"
-if [ "$LAYOUT_MODE" = compliant ] && [ "$MIN_MIB" -eq 40960 ]; then
-  MIN_MIB=163840    # compliant fixed volumes need a bigger disk (160 GiB)
+if [ "$LAYOUT_MODE" = compliant ] && [ "$MIN_MIB" -eq 81920 ]; then
+  MIN_MIB=184320    # compliant fixed volumes need a bigger disk (180 GiB)
 fi
 : >"$OUT_POST"
 

@@ -298,7 +298,7 @@ ISO image types only. Details in [Installer Kickstart](#installer-kickstart) and
 | Variable | Default | Description |
 |---|---|---|
 | `osbuild_kickstart_enabled` | `true` | Embed the installer kickstart in the blueprint |
-| `osbuild_kickstart_partitioning` | `auto` | `auto`: `%pre` picks a disk and applies the layout below. `interactive`: the user partitions in Anaconda's Installation Destination. `compliant`: separate `/usr`, `/var`, `/var/tmp`, `/var/log`, `/var/log/audit`, `/home` (and `/tmp` as a volume or tmpfs) with `nodev,nosuid,noexec` set in the kickstart, for the OpenSCAP profiles; sizes in the `osbuild_kickstart_compliant_*` defaults, minimum disk 160 GiB, optional LUKS |
+| `osbuild_kickstart_partitioning` | `auto` | `auto`: `%pre` picks a disk and applies the layout below. `interactive`: the user partitions in Anaconda's Installation Destination. `compliant`: separate `/usr`, `/var`, `/var/tmp`, `/var/log`, `/var/log/audit`, `/home` (and `/tmp` as a volume or tmpfs) with `nodev,nosuid,noexec` set in the kickstart, for the OpenSCAP profiles; sizes in the `osbuild_kickstart_compliant_*` defaults, minimum disk 180 GiB, optional LUKS |
 | `osbuild_kickstart_sudoers` | `false` | Ship `/etc/sudoers.d/90-wheel-nopasswd` (passwordless sudo for `wheel`). Off by default; the CIS and PCI-DSS profiles flag it |
 | `osbuild_firstboot_enabled` | `true` | First-login yadm dotfiles splash (desktop images) |
 | `osbuild_kickstart_file` | derived from `osbuild_kickstart_partitioning` | Kickstart source under `files/`; set only to use your own file |
@@ -322,7 +322,7 @@ Disk layout for `osbuild_kickstart_partitioning: compliant` (see [Compliant layo
 |---|---|---|
 | `osbuild_kickstart_compliant_tmp` | `tmpfs` | `tmpfs`: `/tmp` is an fstab line added in `%post`, limited to `compliant_tmp_gib`. `lv`: `/tmp` is a volume of that size |
 | `osbuild_kickstart_compliant_encrypt` | `false` | LUKS on the physical volume; Anaconda asks for a passphrase |
-| `osbuild_kickstart_compliant_disk_min_gib` | `160` | Smaller target disks abort the install |
+| `osbuild_kickstart_compliant_disk_min_gib` | `180` | Smaller target disks abort the install |
 | `osbuild_kickstart_compliant_root_gib` | `25` | `/` |
 | `osbuild_kickstart_compliant_usr_gib` | `40` | `/usr` |
 | `osbuild_kickstart_compliant_tmp_gib` | `8` | `/tmp` (volume or tmpfs limit) |
@@ -934,7 +934,7 @@ With `osbuild_kickstart_partitioning: auto` a short `%pre` follows that writes t
 1. Excludes the disk behind `/run/install/repo` or `/run/install/isodir`, and the disk carrying the `inst.stage2=hd:LABEL=...` label.
 2. Excludes removable, read-only and USB disks, plus `zram`, `loop` and optical devices.
 3. Prefers NVMe disks; among the remaining ones takes the largest.
-4. Aborts the install (message on tty1 and in `/tmp/syncopated-pre.log`) when no disk is left or the chosen disk is smaller than `osbuild_kickstart_disk_min_gib` (40 GiB). A small NVMe disk is not skipped in favour of a larger SATA disk: the install aborts.
+4. Aborts the install (message on tty1 and in `/tmp/syncopated-pre.log`) when no disk is left or the chosen disk is smaller than `osbuild_kickstart_disk_min_gib` (80 GiB). A small NVMe disk is not skipped in favour of a larger SATA disk: the install aborts.
 
 Only that disk is touched (`ignoredisk --only-use`, `clearpart --drives`). Other internal disks and the install USB keep their data.
 
@@ -951,8 +951,8 @@ With the defaults:
 
 | Disk | `/` | `/usr` | `/var` | `/home` | Unassigned in `vg00` |
 |---|---|---|---|---|---|
-| 60 GiB | 16 GiB | 27.5 GiB | 6.9 GiB | on `/` | 5.6 GiB |
-| 477 GiB | 47.3 GiB | 256 GiB | 122.4 GiB | on `/` | 47.3 GiB |
+| 100 GiB | 25 GiB | 24.6 GiB | 36.8 GiB | on `/` | 9.6 GiB |
+| 477 GiB | 47.3 GiB | 151.4 GiB | 128 GiB | on `/` | 146.3 GiB |
 | 931 GiB | 92.7 GiB | 256 GiB | 128 GiB | 357.6 GiB | 92.7 GiB |
 | 2000 GiB | 199.6 GiB | 256 GiB | 128 GiB | 1212.8 GiB | 199.6 GiB |
 
@@ -964,7 +964,7 @@ XFS can grow but not shrink. The caps and the reserve keep space available for w
 
 `osbuild_kickstart_partitioning: compliant` replaces the layout above with the separate mounts that the CIS, PCI-DSS and HIPAA OpenSCAP profiles scan for (see [OpenSCAP Profiles](#openscap-profiles)). Disk selection, the 2 GiB `/boot` and `vg00` are the same. Order of allocation, with *usable* = disk size − 4 GiB:
 
-1. Fixed volumes: `/` 25 GiB, `/usr` 40 GiB, `/var/tmp` 8 GiB, `/var/log` 10 GiB, `/var/log/audit` 10 GiB, and `/tmp` 8 GiB when `osbuild_kickstart_compliant_tmp: lv`.
+1. Fixed volumes: `/` 35 GiB, `/usr` 45 GiB, `/var/tmp` 8 GiB, `/var/log` 10 GiB, `/var/log/audit` 10 GiB, and `/tmp` 8 GiB when `osbuild_kickstart_compliant_tmp: lv`.
 2. **Reserve**: 10% of usable stays unassigned in `vg00`.
 3. **`/var`**: 15% of usable, clamped to 40–200 GiB. It holds podman images, flatpaks and libvirt disks.
 4. **`/home`**: everything that is left. The install aborts when that is under 10 GiB.
@@ -981,8 +981,8 @@ Mount options are set in the kickstart (`logvol --fsoptions`), not by the build-
 
 | Disk | `/` | `/usr` | `/var` | `/var/tmp` + `/var/log` + audit | `/home` | Unassigned |
 |---|---|---|---|---|---|---|
-| 477 GiB | 25 GiB | 40 GiB | 70.9 GiB | 28 GiB | 261.8 GiB | 47.3 GiB |
-| 932 GiB | 25 GiB | 40 GiB | 139.2 GiB | 28 GiB | 603 GiB | 92.8 GiB |
+| 477 GiB | 35 GiB | 45 GiB | 70.9 GiB | 28 GiB | 251.7 GiB | 47.3 GiB |
+| 932 GiB | 35 GiB | 45 GiB | 139.2 GiB | 28 GiB | 593 GiB | 92.8 GiB |
 
 `/tmp` as tmpfs may still fail a profile's `partition_for_tmp` rule, which asks for "its own partition or logical volume"; use `lv` to satisfy it. `noexec` on `/var/tmp` can break tools that run from there, so test the first `dnf update` on a new image. Installed-system `/tmp` content is lost on every boot with tmpfs.
 
