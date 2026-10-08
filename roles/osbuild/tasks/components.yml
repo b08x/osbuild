@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: MIT-0
 ---
 # Load blueprint component files (osbuild_blueprint_components) and derive the
-# merged package, service, kernel-argument, repo-URL and fragment lists that
-# templates/blueprint-components.toml.j2 renders.
+# merged package, service, kernel-argument, repo-URL, fragment, flatpak,
+# bootc-repo and COPR lists. templates/blueprint-components.toml.j2 renders the
+# blueprint from them; templates/build.sh.j2 (bootc) reads the flatpak, bootc
+# repo and COPR lists. The component files are the only package data.
 
 - name: Load blueprint component files
   ansible.builtin.set_fact:
@@ -35,6 +37,15 @@
     _osbuild_bp_fragments: >-
       {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
          | map(attribute='fragment', default='') | select | unique | list }}
+    _osbuild_bp_flatpaks: >-
+      {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+         | map(attribute='flatpaks', default=[]) | flatten | unique | list }}
+    _osbuild_bp_bootc_repos: >-
+      {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+         | map(attribute='bootc_repos', default=[]) | flatten | unique | list }}
+    _osbuild_bp_copr_repos: >-
+      {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+         | map(attribute='copr_repos', default=[]) | flatten | unique | list }}
     osbuild_extra_repo_urls: >-
       {{ ((osbuild_extra_repo_urls | default([]))
           + (osbuild_blueprint_components | map('extract', _osbuild_bp_components)

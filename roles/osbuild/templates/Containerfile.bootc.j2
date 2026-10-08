@@ -1,6 +1,6 @@
 # {{ ansible_managed }}
 # Containerfile for bootc-based {{ osbuild_blueprint_name }}
-# Components: {{ osbuild_components | join(', ') }}
+# Components: {{ osbuild_blueprint_components | join(', ') }}
 #
 # Architecture: Ansible Role Inversion Pattern
 # - Ansible runs AT BUILD TIME (not post-deployment)
@@ -30,15 +30,9 @@ COPY templates/ /tmp/ansible/templates/
 
 # Run Ansible playbook to compile build-time configuration
 # This targets /usr/etc (immutable vendor defaults) instead of /etc
-{% set filtered_defs = {} %}
-{% for c in osbuild_components %}
-{%   if c in osbuild_component_defs %}
-{%     set _ = filtered_defs.update({c: osbuild_component_defs[c]}) %}
-{%   endif %}
-{% endfor %}
 RUN cd /tmp/ansible && \
     ansible-playbook build.yml \
-      -e '{"osbuild_components":{{ osbuild_components | to_json }},"osbuild_blueprint_name":"{{ osbuild_blueprint_name }}"{% if osbuild_hostname is defined %},"osbuild_hostname":"{{ osbuild_hostname }}"{% endif %},"osbuild_component_defs":{{ filtered_defs | to_json }}}' \
+      -e '{"osbuild_blueprint_components":{{ osbuild_blueprint_components | to_json }},"osbuild_blueprint_name":"{{ osbuild_blueprint_name }}"{% if osbuild_hostname is defined %},"osbuild_hostname":"{{ osbuild_hostname }}"{% endif %}}' \
       -v
 
 # =============================================================================
@@ -82,7 +76,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=tmpfs,dst=/tmp \
     /ctx/build.sh
 
-{% if 'nvidia' in osbuild_components %}
+{% if 'nvidia' in osbuild_blueprint_components %}
 # =============================================================================
 # NVIDIA CDI (Container Device Interface) Setup
 # =============================================================================
@@ -100,7 +94,7 @@ RUN chmod +x /usr/local/bin/nvidia-cdi-generate.sh
 RUN systemctl enable nvidia-cdi-refresh.service
 
 {% endif %}
-{% if 'nvidia' in osbuild_components %}
+{% if 'nvidia' in osbuild_blueprint_components %}
 # =============================================================================
 # Kernel parameters (if customizations needed)
 # =============================================================================

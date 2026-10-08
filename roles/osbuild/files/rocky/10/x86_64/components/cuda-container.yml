@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "cuda-container" for Rocky Linux 10 (x86_64).
+# Split from container/rocky-10-2-cuda-container.toml. Use it with
+# frames/container.toml and image type "container", not with the workstation
+# components.
+#
+# cuda-toolkit comes from the CUDA rhel10 repo, which must be passed to
+# image-builder as --extra-repo (repo_urls does that);
+# [[customizations.repositories]] does not feed depsolve. The "cuda" meta
+# package is deliberately not used: it pulls in nvidia-driver and the kernel
+# module, which do not belong in a container. nvcc needs a host C/C++
+# compiler and make to build anything.
+# Versions are never pinned here; use osbuild_package_pins.
+label: "CUDA toolkit application container: cuda-toolkit, gcc-c++, make"
+# Rocky CRB, Plus and RT (BaseOS/AppStream are image-builder's base repos).
+repo_urls:
+  - "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64"
+  - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
+  - "https://dl.rockylinux.org/pub/rocky/10/plus/x86_64/os/"
+  - "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
+services: []
+kernel_args: []
+packages:
+  - "cuda-toolkit"
+  - "gcc-c++"
+  - "make"
+  - "git"
+  - "which"

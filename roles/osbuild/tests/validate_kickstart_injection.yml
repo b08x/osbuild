@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT-0
 ---
 # Validation playbook for the installer kickstart injection (tasks/blueprint.yml).
-# Prepares every static workstation blueprint plus one templated render twice
+# Prepares every static workstation blueprint plus one component-composed render twice
 # with osbuild_kickstart_enabled (idempotence: the second run must not add a
 # second block) and once with it disabled, then checks each output with
 # tests/kickstart/check_kickstart.py. A blueprint that still carries
@@ -16,6 +16,8 @@
   become: false
   vars:
     _role_dir: "{{ playbook_dir | dirname }}"
+    _composed_distro: "fedora-43"
+    _composed_components: [base, anaconda]
     _tmp: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}"
     _out_on: "{{ _tmp }}/osbuild-kickstart-validate/enabled"
     _out_off: "{{ _tmp }}/osbuild-kickstart-validate/disabled"
@@ -46,7 +48,6 @@
         tasks_from: blueprint.yml
       vars:
         osbuild_output_dir: "{{ _out_on }}"
-        osbuild_use_blueprint_template: false
         osbuild_static_blueprint_path: "{{ item.0 }}"
         osbuild_blueprint_name: "{{ item.0 | basename | splitext | first }}"
       loop: "{{ _static_paths | product([1, 2]) | list }}"
@@ -59,7 +60,6 @@
         tasks_from: blueprint.yml
       vars:
         osbuild_output_dir: "{{ _out_off }}"
-        osbuild_use_blueprint_template: false
         osbuild_kickstart_enabled: false
         osbuild_static_blueprint_path: "{{ item }}"
         osbuild_blueprint_name: "{{ item | basename | splitext | first }}"
@@ -71,31 +71,38 @@
       ansible.builtin.include_vars:
         file: "{{ _role_dir }}/vars/{{ ansible_distribution }}.yml"
 
-    - name: Load package taxonomy
-      ansible.builtin.include_vars:
-        file: "{{ _role_dir }}/../../vars/packages/{{ ansible_distribution }}.yml"
+    - name: Load the component files for the composed blueprint
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: components.yml
+        public: true
+      vars:
+        osbuild_distro: "{{ _composed_distro }}"
+        osbuild_blueprint_components: "{{ _composed_components }}"
 
-    - name: Prepare the templated blueprint twice with the kickstart enabled
+    - name: Prepare the composed blueprint twice with the kickstart enabled
       ansible.builtin.include_role:
         name: "{{ _role_dir }}"
         tasks_from: blueprint.yml
       vars:
         osbuild_output_dir: "{{ _out_on }}"
-        osbuild_use_blueprint_template: true
-        osbuild_blueprint_name: templated
+        osbuild_distro: "{{ _composed_distro }}"
+        osbuild_blueprint_components: "{{ _composed_components }}"
+        osbuild_blueprint_name: composed
       loop: [1, 2]
       loop_control:
-        label: "templated (run {{ item }})"
+        label: "composed (run {{ item }})"
 
-    - name: Prepare the templated blueprint with the kickstart disabled
+    - name: Prepare the composed blueprint with the kickstart disabled
       ansible.builtin.include_role:
         name: "{{ _role_dir }}"
         tasks_from: blueprint.yml
       vars:
         osbuild_output_dir: "{{ _out_off }}"
-        osbuild_use_blueprint_template: true
+        osbuild_distro: "{{ _composed_distro }}"
+        osbuild_blueprint_components: "{{ _composed_components }}"
         osbuild_kickstart_enabled: false
-        osbuild_blueprint_name: templated
+        osbuild_blueprint_name: composed
 
     - name: Check kickstart in enabled and disabled outputs
       ansible.builtin.command:
@@ -138,7 +145,6 @@
             tasks_from: blueprint.yml
           vars:
             osbuild_output_dir: "{{ _out_conflict }}"
-            osbuild_use_blueprint_template: false
             osbuild_static_blueprint_path: "{{ _out_conflict }}/conflict-src.toml"
             osbuild_blueprint_name: conflict
 

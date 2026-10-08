@@ -1,0 +1,10 @@
+# Appended verbatim by the osbuild role for the vscode component.
+# Array-of-tables only.
+
+[[customizations.repositories]]
+id = "code"
+name = "Visual Studio Code"
+baseurls = ["https://packages.microsoft.com/yumrepos/vscode"]
+gpgcheck = true
+gpgkeys = ["https://packages.microsoft.com/keys/microsoft.asc"]
+enabled = true

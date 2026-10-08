@@ -42,7 +42,7 @@
         dest: /usr/lib/systemd/system/nvidia-cdi-refresh.service
         mode: "0644"
         backup: true
-      when: "'nvidia' in osbuild_components"
+      when: "'nvidia' in osbuild_blueprint_components"
 
     # =========================================================================
     # /usr/etc Configuration (Immutable Vendor Defaults)
@@ -119,7 +119,7 @@
           rd.driver.blacklist=nouveau modprobe.blacklist=nouveau nvidia-drm.modeset=1
         mode: "0644"
         backup: true
-      when: "'nvidia' in osbuild_components"
+      when: "'nvidia' in osbuild_blueprint_components"
 
     # =========================================================================
     # Build Verification

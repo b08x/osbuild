@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "gnome-desktop" for Fedora 43 (x86_64).
+# Split from workstation/fedora-workstation-43-nvidia.toml and workstation/fedora-workstation-43.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "GNOME desktop on Wayland"
+repo_urls: []
+services:
+  - "gdm"
+  - "input-remapper"
+kernel_args: []
+flatpaks:
+  - "md.obsidian.Obsidian"
+  - "io.typora.Typora"
+  - "com.github.tchx84.Flatseal"
+  - "org.gnome.Extensions"
+  - "io.github.vikdevelop.SaveDesktop"
+  - "com.saivert.pwvucontrol"
+  - "com.mattjakeman.ExtensionManager"
+  - "page.tesk.Refine"
+  - "com.discordapp.Discord"
+packages:
+  - "NetworkManager-l2tp-gnome"
+  - "NetworkManager-libreswan-gnome"
+  - "NetworkManager-openconnect-gnome"
+  - "NetworkManager-openvpn-gnome"
+  - "bluez"
+  - "bolt"
+  - "fprintd-pam"
+  - "gdm"
+  - "gnome-keyring-pam"
+  - "gnome-online-accounts"
+  - "gnome-session-wayland-session"
+  - "gnome-software"
+  - "gnome-text-editor"
+  - "gnome-tweaks"
+  - "gvfs"
+  - "gvfs-smb"
+  - "kitty"
+  - "nautilus"
+  - "pinentry-gnome3"
+  - "wl-clipboard"
+  - "xdg-desktop-portal"
+  - "xdg-desktop-portal-gtk"
+  - "xorg-x11-server-Xwayland"
+  - "yad"
+  - "NetworkManager-sstp-gnome"
+  - "NetworkManager-vpnc-gnome"
+  - "blueman"
+  - "deja-dup"
+  - "gnome-software-rpm-ostree"
+  - "gnome-themes-extra"
+  - "input-remapper"
+  - "material-design-dark"
+  - "numix-icon-theme"
+  - "system-config-printer"
+  - "xarchiver"
+  - "yaru-icon-theme"

@@ -1,0 +1,82 @@
+# Appended verbatim by the osbuild role for the nvidia component.
+# Array-of-tables only: [customizations.kernel] and [customizations.services]
+# are merged and rendered by the role from the component's kernel_args/services.
+
+# Generate NVIDIA CDI specification for Podman container GPU access.
+# Waits for NVIDIA device nodes to appear before generating the CDI config.
+[[customizations.files]]
+path = "/usr/local/bin/nvidia-cdi-generate.sh"
+mode = "0755"
+data = """
+#!/bin/bash
+# Generate NVIDIA CDI specification for Podman container GPU access
+# This script waits for NVIDIA device nodes to appear before generating CDI config
+
+set -euo pipefail
+
+timeout=30
+echo "Waiting for NVIDIA device nodes..."
+
+while [ $timeout -gt 0 ]; do
+  if [ -e /dev/nvidia0 ]; then
+    echo "NVIDIA device found, generating CDI specification..."
+    mkdir -p /etc/cdi
+    nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    echo "CDI specification generated successfully at /etc/cdi/nvidia.yaml"
+    exit 0
+  fi
+  sleep 1
+  ((timeout--))
+done
+
+echo "ERROR: NVIDIA device not found after 30 seconds" >&2
+echo "This may indicate:" >&2
+echo "  - NVIDIA driver not loaded" >&2
+echo "  - No NVIDIA GPU present" >&2
+echo "  - Driver compilation failed" >&2
+exit 1
+"""
+
+# Systemd service to generate NVIDIA CDI spec at boot (after network is up).
+[[customizations.files]]
+path = "/etc/systemd/system/nvidia-cdi-refresh.service"
+data = """
+[Unit]
+Description=Generate NVIDIA CDI specification for Podman
+Documentation=https://github.com/NVIDIA/nvidia-container-toolkit
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/usr/bin/nvidia-ctk
+ConditionPathExists=/usr/local/bin/nvidia-cdi-generate.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nvidia-cdi-generate.sh
+RemainAfterExit=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+[[customizations.repositories]]
+id = "nvidia-container-toolkit"
+name = "NVIDIA Container Toolkit"
+baseurls = ["https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"]
+gpgcheck = true
+gpgkeys = ["https://nvidia.github.io/libnvidia-container/gpgkey"]
+enabled = true
+
+# CUDA toolkit and driver packages for EL 10
+[[customizations.repositories]]
+id = "cuda-el10-x86_64"
+name = "CUDA for EL 10"
+baseurls = [
+    "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64",
+]
+gpgcheck = true
+gpgkeys = [
+    "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/CDF6BA43.pub",
+]
+enabled = true

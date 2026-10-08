@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "development" for AlmaLinux 10 (x86_64).
+# Split from workstation/almalinux-10-2-workstation-nvidia.toml and workstation/almalinux-10-2-workstation.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "Compilers, language toolchains and -devel packages"
+repo_urls:
+  - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+services: []
+kernel_args: []
+packages:
+  - "@development"
+  - "@rpm-development-tools"
+  - "bats"
+  - "btrfs-progs-devel"
+  - "cargo"
+  - "chromium-headless"
+  - "gcc"
+  - "gcc-c++"
+  - "golang"
+  - "lm_sensors-devel"
+  - "postgresql-server"
+  - "postgresql-contrib"
+  - "pgvector"
+  - "ruby-devel"

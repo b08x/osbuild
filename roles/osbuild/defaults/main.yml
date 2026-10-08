@@ -13,8 +13,8 @@
 # default resolution per build host.
 osbuild_distro: "fedora-43"
 
-# Distribution whose package taxonomy (vars/packages/<Name>.yml) supplies
-# component package names. Derived from the TARGET (osbuild_distro), not the
+# Distribution whose component directory (files/<name>/<major>/<arch>/) supplies
+# component files and frames. Derived from the TARGET (osbuild_distro), not the
 # build host, so an EL 10 build on a Fedora host gets EL package names.
 # Unknown prefixes fall back to the host distribution.
 osbuild_target_distribution: >-
@@ -62,479 +62,40 @@ osbuild_only_generate: true
 osbuild_build_bootc: false
 
 # =============================================================================
-# Distro-Aware NVIDIA Helpers
+# Target Version Helpers
 # =============================================================================
-# Extracted from nvidia component to avoid repeating regex and distro logic.
-# Fedora: CUDA repo uses fedora-{ver} naming; RPM Fusion nonfree nvidia-driver.
-# AlmaLinux: CUDA repo uses rhel{ver} naming; RPM Fusion EL; ELRepo for kmod-nvidia.
 
-_is_fedora: "{{ ansible_distribution == 'Fedora' }}"
 _distro_version: "{{ osbuild_distro | regex_replace('^[a-z]+-', '') }}"
 # Major version only (e.g. "10"): distribution-gpg-keys, RPM Fusion EL,
 # NVIDIA CUDA (rhel*), and Docker CE publish per-major artifacts. AlmaLinux
 # metalinks and EPEL point-release paths use the full _distro_version.
 _distro_major_version: "{{ _distro_version | regex_replace('\\..*', '') }}"
 
-_nvidia_sources: >-
-  {{ _is_fedora | ternary(
-    [
-      'rpmfusion-nonfree-nvidia-driver',
-      'cuda-fedora' + _distro_version + '-' + osbuild_arch,
-      'nvidia-container-toolkit',
-    ],
-    [
-      'rpmfusion-nonfree-nvidia-driver',
-      'cuda-el' + _distro_major_version + '-x86_64',
-      'nvidia-container-toolkit',
-    ]
-  ) }}
-
-_nvidia_bootc_repos: "{{ _is_fedora | ternary(_nvidia_bootc_repos_fedora, _nvidia_bootc_repos_el) }}"
-
-_nvidia_bootc_repos_fedora:
-  - |
-    cat > /etc/yum.repos.d/rpmfusion-nonfree-nvidia-driver.repo << 'REPOEOF'
-    [rpmfusion-nonfree-nvidia-driver]
-    name=RPM Fusion for Fedora {{ _distro_version }} - Nonfree - NVIDIA Driver
-    baseurl=http://download1.rpmfusion.org/nonfree/fedora/nvidia-driver/{{ _distro_version }}/{{ osbuild_arch }}/
-    enabled=1
-    type=rpm-md
-    gpgcheck=1
-    gpgkey=https://rpmfusion.org/keys/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020
-    REPOEOF
-  - |
-    cat > /etc/yum.repos.d/nvidia-cuda.repo << 'REPOEOF'
-    [cuda-fedora{{ _distro_version }}-{{ osbuild_arch }}]
-    name=CUDA for Fedora {{ _distro_version }}
-    baseurl=https://developer.download.nvidia.com/compute/cuda/repos/fedora{{ _distro_version }}/{{ osbuild_arch }}/
-    enabled=1
-    gpgcheck=1
-    gpgkey=https://developer.download.nvidia.com/compute/cuda/repos/fedora{{ _distro_version }}/{{ osbuild_arch }}/1940C73E.pub
-    REPOEOF
-  - |
-    cat > /etc/yum.repos.d/nvidia-container-toolkit.repo << 'REPOEOF'
-    [nvidia-container-toolkit]
-    name=NVIDIA Container Toolkit
-    baseurl=https://nvidia.github.io/libnvidia-container/stable/rpm/{{ osbuild_arch }}/
-    enabled=1
-    gpgcheck=1
-    gpgkey=https://nvidia.github.io/libnvidia-container/gpgkey
-    REPOEOF
-
-# EL-family bootc NVIDIA repos (AlmaLinux and Rocky fall through to this
-# branch via the _is_fedora ternary above — same rhel-path CUDA and ELRepo
-# treatment for both). Name is `_el`, not `_almalinux`: the repo set is
-# identical for every EL-family distro. Rocky bootc builds remain
-# unverified and undocumented (deferred to a follow-up goal); only the
-# variable name was generalized here.
-_nvidia_bootc_repos_el:
-  - |
-    cat > /etc/yum.repos.d/rpmfusion-nonfree-nvidia-driver.repo << 'REPOEOF'
-    [rpmfusion-nonfree-nvidia-driver]
-    name=RPM Fusion for EL {{ _distro_version }} - Nonfree - NVIDIA Driver
-    baseurl=http://download1.rpmfusion.org/nonfree/el/nvidia-driver/{{ _distro_version }}/{{ osbuild_arch }}/
-    enabled=1
-    type=rpm-md
-    gpgcheck=1
-    gpgkey=https://rpmfusion.org/keys/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020
-    REPOEOF
-  - |
-    cat > /etc/yum.repos.d/nvidia-cuda.repo << 'REPOEOF'
-    [cuda-el{{ _distro_major_version }}-x86_64]
-    name=CUDA for EL {{ _distro_major_version }}
-    baseurl=https://developer.download.nvidia.com/compute/cuda/repos/rhel{{ _distro_major_version }}/x86_64/
-    enabled=1
-    gpgcheck=1
-    gpgkey=https://developer.download.nvidia.com/compute/cuda/repos/rhel{{ _distro_major_version }}/x86_64/CDF6BA43.pub
-    REPOEOF
-  - |
-    cat > /etc/yum.repos.d/nvidia-container-toolkit.repo << 'REPOEOF'
-    [nvidia-container-toolkit]
-    name=NVIDIA Container Toolkit
-    baseurl=https://nvidia.github.io/libnvidia-container/stable/rpm/{{ osbuild_arch }}/
-    enabled=1
-    gpgcheck=1
-    gpgkey=https://nvidia.github.io/libnvidia-container/gpgkey
-    REPOEOF
-
 # =============================================================================
-# Component Selection — Primary Interface
+# Component File Schema
 # =============================================================================
-# Selected components define which packages, services, sources, kernel args,
-# and files are included in both traditional ISO (OSBuild) and bootc images.
-# Add/remove components to customize the build output.
+# Component files are the only package data. A build selects them by name with
+# osbuild_blueprint_components (see Blueprint Configuration below); each name
+# is a file files/<distro>/<major>/<arch>/components/<name>.yml.
 #
-# Available components:
-#   base              — Core system (kernel, systemd, NetworkManager, etc.)
-#   anaconda          — Anaconda installer (ISO builds only, not bootc)
-#   gnome             — GNOME desktop environment + GDM
-#   sway              — Sway tiling window manager
-#   nvidia            — NVIDIA proprietary driver + CUDA stack
-#   development       — GCC, Python, Node.js, rbenv + ruby-build, CMake, Git
-#   container-tools   — Podman, Buildah, Skopeo, podman-compose
-#   oneapi            — Intel oneAPI BaseKit + HPCKit (adds ~15GB ISO)
-#   cli-tools         — Modern CLI utilities (fd, dust, zoxide, micro, etc.)
-#   cockpit           — Cockpit web-based system management
-#   docker            — Docker CE (experimental)
-
-osbuild_components:
-  - base
-  - anaconda
-  - gnome
-  - sway
-  - nvidia
-  - development
-  - container-tools
-
-# =============================================================================
-# Component Definitions
-# =============================================================================
-# Each component defines what gets included when it's selected.
+# Fields:
+#   label:        Human-readable name (string, required)
+#   packages:     Package names (list, required, non-empty). Names starting
+#                 with @ are comps groups. Never pin versions here; use
+#                 osbuild_package_pins.
+#   repo_urls:    Repository URLs passed to image-builder as --extra-repo
+#                 (list). image-builder depsolves only against its base repos
+#                 and these.
+#   services:     Systemd services to enable (list)
+#   kernel_args:  Kernel command-line arguments (list of strings)
+#   fragment:     Name of a TOML file in the same directory, appended verbatim
+#                 to the blueprint (string; array-of-tables only)
+#   flatpaks:     Flatpak application IDs installed by bootc builds (list)
+#   bootc_repos:  Shell snippets that add repositories in bootc builds (list)
+#   copr_repos:   COPR repositories enabled in bootc builds (list)
 #
-# Schema (all fields are lists; use [] when not applicable):
-#   label:                Human-readable name (string)
-#   packages:             Package name list or Jinja2 expression resolving to list
-#   blueprint_groups:     DNF group names (list)
-#   services:             Systemd services to enable (list)
-#   kernel_args:          Kernel command-line arguments (list of strings)
-#   sources:              Repository sources required (list)
-#   files:                Custom file payloads (list)
-#   flatpaks:             Flatpak application IDs (list)
-#   copr_repos:           COPR repository names (list)
-#   bootc_repos:          Shell commands to add repos in bootc builds (list)
-#   requires:             Component names this component depends on (list)
-#   conflicts:            Component names this component conflicts with (list)
-#   size_impact:          Estimated ISO size impact — "none", "small", "medium", "large"
-#   build_time_impact:    Estimated build time impact — "none", "low", "medium", "high"
-#   secure_boot_compatible: Boolean flag for Secure Boot support
-#   bootc_only:           If true, component only applies to bootc builds (bool)
-#   blueprint_only:       If true, component only applies to ISO builds (bool)
-
-osbuild_component_defs:
-  base:
-    label: "Base Workstation"
-    packages: "{{ system_packages.System.kernel + system_packages.System.base + system_packages.System.networking + system_packages.System.ansible }}"
-    blueprint_groups: "{{ system_groups.base }}"
-    services:
-      - chronyd
-      - firewalld
-      - NetworkManager
-      - sshd
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires: []
-    conflicts: []
-    size_impact: "small"
-    build_time_impact: "none"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  anaconda:
-    label: "Anaconda Installer"
-    packages: "{{ system_packages.System.installer }}"
-    blueprint_groups: []
-    services: []
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "medium"
-    build_time_impact: "low"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: true
-
-  gnome:
-    label: "GNOME Desktop"
-    packages: "{{ system_packages.Settings.gnome + system_packages.Utility.xdg }}"
-    blueprint_groups: []
-    services:
-      - gdm
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "medium"
-    build_time_impact: "low"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  nvidia:
-    label: "NVIDIA GPU Stack"
-    packages: "{{ system_packages.Graphics.nvidia }}"
-    blueprint_groups: []
-    services:
-      - nvidia-cdi-refresh
-      - nvidia-persistenced
-    kernel_args:
-      - "rd.driver.blacklist=nouveau"
-      - "modprobe.blacklist=nouveau"
-      - "nvidia-drm.modeset=1"
-      - "DRACUT_NO_XATTR=1"
-    sources: "{{ _nvidia_sources }}"
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: "{{ _nvidia_bootc_repos }}"
-    requires:
-      - base
-    conflicts: []
-    size_impact: "large"
-    build_time_impact: "medium"
-    secure_boot_compatible: false
-    bootc_only: false
-    blueprint_only: false
-
-  sway:
-    label: "Sway Window Manager"
-    packages: >-
-      {{
-        system_packages.Settings.sway_core +
-        system_packages.Settings.sway_integration +
-        system_packages.Settings.sway_wayland +
-        system_packages.Settings.sway_launchers +
-        system_packages.Settings.sway_ui +
-        system_packages.Settings.sway_utils +
-        system_packages.Settings.sway_python +
-        system_packages.Utility.shell
-      }}
-    blueprint_groups: []
-    services: []
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "small"
-    build_time_impact: "low"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  development:
-    label: "Development Tools"
-    packages: >-
-      {{ system_packages.Development.compilers + system_packages.Development.languages
-      + system_packages.Development.vcs + system_packages.Development.rpm_build }}
-    blueprint_groups:
-      - development-tools
-      - c-development
-    services: []
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: "{{ system_flatpaks.development }}"
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "medium"
-    build_time_impact: "medium"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  container-tools:
-    label: "Container Tools"
-    packages: "{{ system_packages.System.podman + system_packages.System.docker }}"
-    blueprint_groups:
-      - container-management
-    services: []
-    kernel_args: []
-    sources:
-      - docker-ce-stable
-    files: []
-    flatpaks: "{{ system_flatpaks.development }}"
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "small"
-    build_time_impact: "low"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  oneapi:
-    label: "Intel oneAPI"
-    packages: "{{ system_packages.Development.basekit + system_packages.Development.hpckit }}"
-    blueprint_groups: []
-    services: []
-    kernel_args: []
-    sources:
-      - intel-oneapi
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "large"
-    build_time_impact: "high"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  cli-tools:
-    label: "Modern CLI Tools"
-    packages: "{{ system_packages.Utility.cli_modern + system_packages.Utility.shell + system_packages.Utility.tools }}"
-    blueprint_groups: []
-    services: []
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: "{{ system_copr_repos.tools }}"
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "small"
-    build_time_impact: "none"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  cockpit:
-    label: "Cockpit Management"
-    packages: "{{ system_packages.System.cockpit }}"
-    blueprint_groups: []
-    services:
-      - cockpit.socket
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "small"
-    build_time_impact: "none"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  # =============================================================================
-  # Component Aliases (for backward compatibility with README examples)
-  # =============================================================================
-  # TODO: These aliases duplicate their target definitions and will drift.
-  # Refactor to use alias_of + combine() merge pattern. See:
-  #   - core → base (pure alias)
-  #   - desktop → gnome + overrides (preset pattern: conflicts, extra flatpaks)
-  #   - audio, virtualization (standalone components, not true aliases)
-
-  core:
-    label: "Base Workstation (alias for 'base')"
-    packages: "{{ system_packages.System.kernel + system_packages.System.base + system_packages.System.networking + system_packages.System.ansible }}"
-    blueprint_groups: "{{ system_groups.base }}"
-    services:
-      - chronyd
-      - firewalld
-      - NetworkManager
-      - sshd
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires: []
-    conflicts: []
-    size_impact: "small"
-    build_time_impact: "none"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  desktop:
-    label: "GNOME Desktop (alias for 'gnome')"
-    packages: "{{ system_packages.Settings.gnome + system_packages.Utility.xdg }}"
-    blueprint_groups: []
-    services:
-      - gdm
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: "{{ system_flatpaks.system + system_flatpaks.productivity }}"
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts:
-      - sway
-    size_impact: "medium"
-    build_time_impact: "low"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  audio:
-    label: "Audio Production Tools"
-    packages: >-
-      {{ system_packages.AudioVideo.tuning + system_packages.AudioVideo.pipewire
-         + system_packages.AudioVideo.applications + system_packages.AudioVideo.plugins }}
-    blueprint_groups: "{{ system_groups.audio }}"
-    services: []
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: "{{ system_flatpaks.media }}"
-    copr_repos: "{{ system_copr_repos.audio }}"
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "medium"
-    build_time_impact: "medium"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
-
-  virtualization:
-    label: "Virtualization Stack"
-    packages: "{{ system_packages.System.libvirt + system_packages.System.qemu + system_packages.System.tools + system_packages.System.network }}"
-    blueprint_groups: []
-    services:
-      - libvirtd
-    kernel_args: []
-    sources: []
-    files: []
-    flatpaks: []
-    copr_repos: []
-    bootc_repos: []
-    requires:
-      - base
-    conflicts: []
-    size_impact: "medium"
-    build_time_impact: "medium"
-    secure_boot_compatible: true
-    bootc_only: false
-    blueprint_only: false
+# All list fields except label and packages are optional. scripts/package_tracker.py
+# lists, searches, adds and removes packages in these files.
 
 # =============================================================================
 # Build Host Configuration
@@ -618,13 +179,13 @@ osbuild_distro_sources_el:
 osbuild_extra_repo_urls: []
 
 # Repository names (keys of vars/<build host distribution>.yml `repo`) turned
-# into --extra-repo URLs: the host distribution's common list plus the sources
-# of each selected component (osbuild_component_defs). Set [] when the target
-# distro differs from the build host's (e.g. a Rocky image built on Fedora)
-# and list the target's repos in osbuild_extra_repo_urls instead.
+# into --extra-repo URLs: the host distribution's common list. Selected
+# components add their own repo_urls (tasks/components.yml). Set [] when the
+# target distro differs from the build host's (e.g. a Rocky image built on
+# Fedora); the components' repo_urls then supply the target's repos.
 osbuild_sources: >-
   {{ (ansible_distribution == 'Fedora') | ternary(osbuild_distro_sources_fedora,
-  osbuild_distro_sources_el) + (osbuild_component_sources | default([])) }}
+  osbuild_distro_sources_el) }}
 
 # Optional sources (uncomment to add manually):
 # - docker-ce
@@ -635,41 +196,27 @@ osbuild_sources: >-
 # Blueprint Configuration
 # =============================================================================
 
-# Use dynamic Jinja2 template (true) or static blueprint file (false)
-# [COMPATIBILITY] Retained for backward compatibility.
-# Deprecated: composer blueprint templating retained to support both static and dynamic
-# blueprint workflows during migration.
-osbuild_use_blueprint_template: true
-
-# Path to static blueprint file (used when osbuild_use_blueprint_template: false)
-# [COMPATIBILITY] Retained for backward compatibility.
-# Deprecated: composer blueprint templating retained to support both static and dynamic
-# blueprint workflows during migration.
-osbuild_static_blueprint_path: >-
-  {{ 'files/' ~ (ansible_distribution | lower) ~ '/' ~
-  (osbuild_distro | regex_replace('^[a-z]+-', '')) ~ '/' ~ osbuild_arch ~
-  '/workstation/' ~ osbuild_distro ~ '-workstation-nvidia.toml' }}
-
-# Component-composed blueprint. When non-empty this takes precedence over both
-# osbuild_use_blueprint_template and osbuild_static_blueprint_path: the role
-# merges the named component files (packages, services, kernel args, repo URLs,
-# optional TOML fragment) with a static frame into one blueprint, and adds each
-# component's repo_urls to --extra-repo. Component files live in
-# files/<target distro>/<major>/<arch>/components/<name>.yml; paths below are
-# relative to the role's files/ directory and follow osbuild_distro (the
-# target), not the build host.
+# Component-composed blueprint. The role merges the named component files
+# (packages, services, kernel args, repo URLs, optional TOML fragment) with a
+# static frame into one blueprint, and adds each component's repo_urls to
+# --extra-repo. Component files live in
+# files/<target distro>/<major>/<arch>/components/<name>.yml (schema above);
+# paths below are relative to the role's files/ directory and follow
+# osbuild_distro (the target), not the build host. This is the only variable
+# that selects packages.
 osbuild_blueprint_components: []
 osbuild_components_dir: >-
   {{ osbuild_target_distribution | lower }}/{{ _distro_major_version }}/{{ osbuild_arch }}/components
 # Static, non-composable blueprint part (firewall, locale, timezone, files).
+# Playbooks that build another image kind point this at another frame, e.g.
+# frames/container.toml.
 osbuild_blueprint_frame_path: >-
   {{ osbuild_target_distribution | lower }}/{{ _distro_major_version }}/{{ osbuild_arch }}/frames/workstation.toml
 
-# Template path (used when osbuild_use_blueprint_template: true)
-# [COMPATIBILITY] Retained for backward compatibility.
-# Deprecated: composer blueprint templating retained to support both static and dynamic
-# blueprint workflows during migration.
-osbuild_blueprint_template: "blueprint.toml.j2"
+# Hand-written blueprint copied as is. Used only when
+# osbuild_blueprint_components is empty; the path is relative to the role's
+# files/ directory and has no default.
+osbuild_static_blueprint_path: ""
 
 # =============================================================================
 # User Customization
@@ -701,12 +248,9 @@ osbuild_locale: "en_US.UTF-8"
 # =============================================================================
 # Package Selection
 # =============================================================================
-# Package lists are defined in vars/packages/{Distribution}.yml for easier maintenance.
-# The legacy flat lists (osbuild_sway_packages, osbuild_nvidia_packages, etc.)
-# have been absorbed into the canonical taxonomy under osbuild_legacy.* in each
-# distribution file. Component definitions reference system_packages.* directly.
+# Package lists live in the component files (see "Component File Schema" above).
 
-# Additional packages to include beyond component defaults
+# Additional packages to include beyond the selected components
 osbuild_extra_packages:
   []
   # - vim-enhanced
@@ -717,20 +261,20 @@ osbuild_extra_packages:
 # resolves to "*" (latest available). Override in group_vars or host_vars to
 # pin for a class of machines (e.g. a VFX-standard workstation profile) —
 # Ansible variable precedence (defaults < group_vars < host_vars) does the
-# override work; blueprints and taxonomy never carry versions.
+# override work; component files never carry versions.
 # Value is an image-builder blueprint version expression, e.g.:
 #   osbuild_package_pins:
 #     python3: "3.11.*"
 #     cuda-toolkit: "13-4.*"
-# Only consumed by the Jinja2 blueprint templates (packages loop); static
-# blueprint files always build with "*".
+# Only consumed by templates/blueprint-components.toml.j2; static blueprint
+# files always build with "*".
 osbuild_package_pins: {}
 
 # =============================================================================
 # Service Configuration
 # =============================================================================
-# Services are derived from osbuild_component_defs[].services for each
-# component in osbuild_components. See build.sh.j2 and fedora-workstation.toml.j2.
+# Services come from the `services` field of each selected component file. See
+# tasks/components.yml and templates/build.sh.j2.
 
 # =============================================================================
 # Output Configuration

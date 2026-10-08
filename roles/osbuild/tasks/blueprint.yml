@@ -6,14 +6,6 @@
   ansible.builtin.set_fact:
     _osbuild_use_components: "{{ osbuild_blueprint_components | length > 0 }}"
 
-- name: Render blueprint from Jinja2 template
-  ansible.builtin.template:
-    src: "{{ osbuild_blueprint_template }}"
-    dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
-    mode: "0644"
-    backup: true
-  when: osbuild_use_blueprint_template | bool and not _osbuild_use_components
-
 - name: Render blueprint from components
   ansible.builtin.template:
     src: blueprint-components.toml.j2
@@ -28,15 +20,15 @@
     dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
     mode: "0644"
     backup: true
-  when: not osbuild_use_blueprint_template | bool and not _osbuild_use_components
+  when: not _osbuild_use_components
 
 - name: Set blueprint file path
   ansible.builtin.set_fact:
     blueprint_file_path: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
 
 # The first-login splash lives once in files/firstboot/ and is appended to
-# every blueprint here, after the copy/template step, so static and templated
-# blueprints carry identical bytes. TOML ''' literal strings need no escaping
+# every blueprint here, after the copy/template step, so static and
+# component-composed blueprints carry identical bytes. TOML ''' literal strings need no escaping
 # but cannot contain ''' themselves.
 - name: Inject first-login splash files
   when: osbuild_firstboot_enabled | bool

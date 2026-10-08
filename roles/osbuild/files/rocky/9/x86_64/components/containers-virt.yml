@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "containers-virt" for Rocky Linux 9 (x86_64).
+# Split from workstation/rocky-9-8-workstation-nvidia.toml and workstation/rocky-9-8-workstation.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "Podman, distrobox and libvirt/KVM"
+repo_urls: []
+services: []
+kernel_args: []
+packages:
+  - "@container-management"
+  - "distrobox"
+  - "ipxe-roms-qemu"
+  - "libvirt-daemon"
+  - "nbd"
+  - "podman"
+  - "podman-compose"
+  - "podman-docker"
+  - "qemu-kvm"
+  - "virt-install"
+  - "@virtualization-host-environment"
+  - "virt-viewer"

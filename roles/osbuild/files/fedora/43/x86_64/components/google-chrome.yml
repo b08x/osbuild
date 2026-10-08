@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "google-chrome" for Fedora 43 (x86_64).
+# google-chrome-stable comes from Google's yum repo (x86_64 only; verified
+# 2026-10-04, version 154.0.8037.97). The repo is a depsolve source through
+# repo_urls only. Do NOT add a [[customizations.repositories]] entry or
+# fragment for it: the RPM's %post writes /etc/yum.repos.d/google-chrome.repo
+# (same URL, gpgcheck=1, same signing key), and osbuild's org.osbuild.yum.repos
+# stage creates its file exclusively after the rpm stage, so a blueprint entry
+# with filename google-chrome.repo fails with FileExistsError.
+# Versions are never pinned here; use osbuild_package_pins.
+label: "Google Chrome browser (Google yum repo)"
+repo_urls:
+  - "http://dl.google.com/linux/chrome/rpm/stable/x86_64"
+services: []
+kernel_args: []
+packages:
+  - "google-chrome-stable"
