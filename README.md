@@ -1,4 +1,4 @@
-# OSBuild Image Builder & Package Taxonomy
+# OSBuild Image Builder & Package Tracker
 
 Dedicated repository for composing and building custom OS appliances, immutable bootc containers, and installer ISOs across **Fedora**, **AlmaLinux**, and **Rocky Linux** using Red Hat `image-builder` and `osbuild`.
 
@@ -15,10 +15,6 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 │   ├── composer_cli.yml         # Alternative daemon-driven builder playbook
 │   ├── osbuild-almalinux-iso.yml
 │   ├── osbuild-almalinux-iso-nvidia.yml
-│   ├── osbuild-rocky-iso.yml
-│   ├── osbuild-rocky-iso-nvidia.yml
-│   ├── osbuild-rocky-iso-nvidia-generate.yml
-│   ├── osbuild-rocky-iso-nvidia-interactive.yml
 │   ├── osbuild-rocky-iso-components.yml
 │   ├── osbuild-rocky-iso-nvidia-components.yml
 │   ├── osbuild-rocky-iso-intel-oneapi-components.yml
@@ -27,14 +23,8 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 │   ├── osbuild/                 # Primary osbuild image composer role (image-builder CLI)
 │   └── composer_cli/            # Alternative composer-cli role (osbuild-composer daemon)
 ├── scripts/
-│   └── package_tracker.py       # TUI and CLI tool for taxonomy maintenance & build tracking
-├── vars/
-│   └── packages/                # Canonical package taxonomy (authoritative package lists)
-│       ├── 00-distributions.yml # Cross-distribution package & repository mappings
-│       ├── Fedora.yml           # Fedora package taxonomy
-│       ├── AlmaLinux.yml        # AlmaLinux package taxonomy
-│       └── Rocky.yml            # Rocky Linux package taxonomy
-├── build-selections/            # Exported build selection manifests
+│   └── package_tracker.py       # TUI and CLI tool for the component files' package lists
+├── tests/                       # pytest suite (tracker, component parity) and the render harness
 ├── requirements.txt             # Python dependencies
 ├── .agents/
 │   └── skills/
@@ -46,68 +36,61 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 
 ---
 
-## Package Tracker TUI (`scripts/package_tracker.py`)
+## Package Tracker (`scripts/package_tracker.py`)
 
-The repository includes a Python TUI and CLI tool for managing the package taxonomy and selecting components for image builds.
+The component files are the only package data. A *target* is one `roles/osbuild/files/<distro>/<major>/<arch>/` directory: `rocky/10/x86_64`, `rocky/9/x86_64`, `almalinux/10/x86_64` or `fedora/43/x86_64`. The tracker lists, searches, adds and removes packages in `<target>/components/*.yml`. Edits touch only the `packages:` list of one file: comments, key order and the order of existing packages stay, and new packages are appended.
+
+### CLI
+
+```bash
+# Components of a target, with label and package count
+python3 scripts/package_tracker.py list --target rocky/10/x86_64
+
+# Every target/component that contains a matching package
+python3 scripts/package_tracker.py search nvidia
+
+# Add packages (--verify checks the target's repos first; @groups skip the check)
+python3 scripts/package_tracker.py add --target rocky/10/x86_64 base htop fastfetch --verify
+
+# Remove packages (the last package of a component cannot be removed)
+python3 scripts/package_tracker.py remove --target rocky/10/x86_64 base htop
+
+# Audit a component, or a whole target, against the repos
+python3 scripts/package_tracker.py verify --target rocky/10/x86_64 base
+```
+
+### Choosing a Playbook's Components
+
+`playbook` edits the `osbuild_blueprint_components` list of a playbook without touching anything else in the file. The target comes from the playbook's `osbuild_distro`.
+
+```bash
+python3 scripts/package_tracker.py playbook playbooks/osbuild-rocky-iso-nvidia-components.yml list
+python3 scripts/package_tracker.py playbook playbooks/osbuild-rocky-iso-nvidia-components.yml add gui-toolkit --after fonts
+python3 scripts/package_tracker.py playbook playbooks/osbuild-rocky-iso-nvidia-components.yml remove cockpit multimedia
+```
+
+`list` shows every component of the target with `[x]` for the selected ones. `add` refuses names that have no component file for that target, and `remove` refuses to empty the list. In the TUI, choose **Components in a playbook** for a checkbox list.
+
+`--target` is required for every command except `search`; without it the command exits with status 2 and lists the available targets. A unique prefix such as `rocky/10` works too.
+
+If another component of the same target already has a package, `add` prints a warning naming that component and refuses the package unless you pass `--force`.
 
 ### Interactive Mode (TUI)
 
-Launch the interactive interface with `questionary` and `rich`:
-
 ```bash
-python3 scripts/package_tracker.py
-# or explicitly
 python3 scripts/package_tracker.py tui
 ```
 
-Features:
-- **Select Packages & Create Build Manifest**: Interactively check off components/subcategories (base, kernel, networking, desktop, audio, nvidia) and export a build manifest (YAML, JSON, or TOML) to `build-selections/`.
-- **Search Packages**: Fast lookup across Fedora, AlmaLinux, and Rocky taxonomies showing category, subcategory, and cross-distribution mappings.
-- **List Taxonomy**: View categorized package lists and counts for any target distribution.
-- **Add Packages**: Interactively add packages to single or all distributions, translating names per distribution through `00-distributions.yml` mappings.
-- **Remove Packages**: Interactively select and remove packages with confirmation.
+The TUI asks for a target only when more than one exists, then lists the components (label and package count). Choosing one opens a submenu:
 
-### CLI Non-Interactive Mode
-
-The script can also be run from scripts or CI pipelines:
-
-```bash
-# List categories and package counts
-python3 scripts/package_tracker.py list --distro Fedora
-
-# Search for a package
-python3 scripts/package_tracker.py search nvidia
-
-# Add a package to taxonomy
-python3 scripts/package_tracker.py add --distro Fedora --category Utility --subcategory tools --package "htop"
-
-# Remove a package
-python3 scripts/package_tracker.py remove --distro Fedora --category Utility --subcategory tools --package "htop"
-
-# Generate a build manifest non-interactively
-python3 scripts/package_tracker.py build \
-  --distro Fedora \
-  --blueprint workstation \
-  --subcategories base,kernel,networking,gnome \
-  --format yaml
-```
-
-Notes:
-- `add` and `remove` rewrite the whole taxonomy file. Each save drops the leading `---` and reformats empty lists (`audio:\n    []` in `Rocky.yml` and `AlmaLinux.yml`). Review `git diff vars/packages` and revert those lines.
-- `add` appends to the end of the subcategory list. `remove` matches the exact name only, also with `--distro All`.
-- Build manifests in `build-selections/` are a record of a selection. The `osbuild` role does not read them.
+- **Edit packages**: a checkbox list with every package checked. Unchecked packages are removed after a confirmation that lists them.
+- **Add packages**: type names (space or comma separated), optionally verify them, and confirm when another component already has a name.
+- **Show details**: label, `repo_urls`, `services`, `kernel_args` and `fragment`.
+- **Back**: returns to the component list, whose own **Back** returns to the target list.
 
 ### Where Package Lists Are Defined
 
-A package name can appear in three places. Each feeds a different set of builds:
-
-| Layer | File | Used by |
-|---|---|---|
-| Taxonomy | `vars/packages/<Distro>.yml` (`system_packages.<Category>.<subcategory>`) | Jinja-template blueprints (`osbuild.yml`), through `osbuild_component_defs` |
-| Components | `roles/osbuild/files/rocky/10/x86_64/components/<name>.yml` (`packages:`) | The `osbuild-rocky-iso-*components.yml` playbooks |
-| Static blueprints | `roles/osbuild/files/<distro>/<major>/<arch>/<kind>/*.toml` (`packages = [ … ]`) | The other `playbooks/osbuild-*.yml` playbooks |
-
-To add a package to every workstation build, edit all three layers for each distribution that provides the name. In the static layer, edit every blueprint variant (`-workstation.toml` and `-workstation-nvidia.toml` are separate lists). Commit `3729a07` (`ruby-build-ruby`) is an example. Before adding a name, confirm the target repository provides it:
+Component files carry all package data; static blueprints (`osbuild_static_blueprint_path`) are hand-written and outside the tracker. To add a package to every workstation build, add it to the matching component in each target that provides the name (`search` shows where a name already lives). Before adding a name, confirm the target repository provides it, or use `add --verify`:
 
 ```bash
 dnf repoquery -q --repofrompath=r,<repo URL> --repo r --qf '%{name} %{repoid}\n' <package>
@@ -131,7 +114,7 @@ Each command writes `<name>.toml` and `build-<name>.sh` to `/var/tmp/osbuild-ima
 
 ```bash
 # Rocky Linux 10.2 Workstation ISO with NVIDIA drivers
-ansible-playbook playbooks/osbuild-rocky-iso-nvidia.yml
+ansible-playbook playbooks/osbuild-rocky-iso-nvidia-components.yml
 
 # Rocky Linux 10.2 Workstation ISO with Intel GPU compute runtime and oneAPI (DPC++, MKL),
 # interactive disk layout
@@ -152,9 +135,8 @@ ansible-playbook playbooks/osbuild-almalinux-iso.yml
 | `osbuild_image_type` | Auto-detected | `image-installer`, `minimal-installer`, `qcow2`, `container` |
 | `osbuild_only_generate` | `true` | Generates blueprint and build script without running image-builder |
 | `osbuild_build_bootc` | `false` | Set `true` to build a bootc container image |
-| `osbuild_components` | `[base, ...]` | Component definitions (`osbuild_component_defs`) for template blueprints; their `sources` select `--extra-repo` repositories. Not the `components/*.yml` files; see `osbuild_blueprint_components` |
-| `osbuild_blueprint_components` | `[]` | Non-empty: compose the blueprint from `files/<distro>/<major>/<arch>/components/*.yml` (Rocky 10 only) |
-| `osbuild_extra_packages` | `[]` | Additional packages for template and component blueprints; static blueprints ignore it |
+| `osbuild_blueprint_components` | per distro in `osbuild.yml` | Component files (`files/<distro>/<major>/<arch>/components/<name>.yml`) the blueprint is composed from. The only variable that selects packages |
+| `osbuild_extra_packages` | `[]` | Additional packages for component blueprints; static blueprints ignore it |
 
 ---
 
@@ -194,7 +176,7 @@ The skill turns a plain-language request into a playbook for the `osbuild` role,
 ### How a Request Is Handled
 
 1. **Clarify.** Up to three questions, asked only when the request leaves something open: image kind (installer ISO, application container, bootc image, qcow2), distro and version as `image-builder list` names it, hardware stack, and disk layout for ISOs.
-2. **Pick a template.** The closest playbook in `playbooks/` becomes the starting point, and the blueprint source is chosen from components, a static `.toml`, or the Jinja template.
+2. **Pick a template.** The closest playbook in `playbooks/` becomes the starting point, and the blueprint source is chosen from components or a static `.toml`.
 3. **Verify.** `ansible-playbook`, `shellcheck` on the build script, an `image-builder manifest` depsolve, and `ansible-lint`. The manifest RPM list is inspected, not just its exit code.
 4. **Report.** The build command, what was verified, and what was not (no image built, no VM install test).
 
@@ -208,7 +190,7 @@ Each prompt below is a starting point; the skill asks about anything the prompt 
 /syncopated Rocky Linux 10.2 workstation installer ISO with NVIDIA drivers, auto disk layout
 ```
 
-The closest match is `playbooks/osbuild-rocky-iso-nvidia.yml`. The result is a playbook that writes `<name>.toml` and `build-<name>.sh` to `/var/tmp/osbuild-images`, followed by the verification run.
+The closest match is `playbooks/osbuild-rocky-iso-nvidia-components.yml`. The result is a playbook that writes `<name>.toml` and `build-<name>.sh` to `/var/tmp/osbuild-images`, followed by the verification run.
 
 **A variant of an existing build**
 
@@ -216,7 +198,7 @@ The closest match is `playbooks/osbuild-rocky-iso-nvidia.yml`. The result is a p
 /syncopated same as the Rocky NVIDIA ISO, but with the Anaconda Installation Destination screen instead of the automatic layout
 ```
 
-This maps to `osbuild_kickstart_partitioning: interactive` (see `playbooks/osbuild-rocky-iso-nvidia-interactive.yml`). A variant gets its own `osbuild_blueprint_name` and `osbuild_output_filename`, so the original build's files stay untouched.
+This maps to `osbuild_kickstart_partitioning: interactive` (see `playbooks/osbuild-rocky-iso-intel-oneapi-components.yml`). A variant gets its own `osbuild_blueprint_name` and `osbuild_output_filename`, so the original build's files stay untouched.
 
 **A blueprint composed from components**
 
@@ -224,7 +206,7 @@ This maps to `osbuild_kickstart_partitioning: interactive` (see `playbooks/osbui
 /syncopated Rocky 10.2 ISO with Intel GPU compute runtime and oneAPI (DPC++, MKL), interactive disk layout
 ```
 
-Rocky 10 builds can be assembled from `roles/osbuild/files/rocky/10/x86_64/components/*.yml` through `osbuild_blueprint_components`. This request lands on `playbooks/osbuild-rocky-iso-intel-oneapi-components.yml`. Adding or dropping a component changes the package mix without copying a monolithic blueprint.
+Rocky 9/10, AlmaLinux 10 and Fedora 43 builds are assembled from `roles/osbuild/files/<distro>/<major>/x86_64/components/*.yml` through `osbuild_blueprint_components`. This request lands on `playbooks/osbuild-rocky-iso-intel-oneapi-components.yml`. Adding or dropping a component changes the package mix without copying a monolithic blueprint.
 
 **An application container**
 
@@ -244,7 +226,7 @@ podman run --device nvidia.com/gpu=all <image>
 /syncopated add perl-IPC-Cmd and perl-FindBin to the default workstation packages
 ```
 
-The skill searches `vars/packages` and `roles/osbuild/files` for each name, confirms the target repositories provide it, and edits the taxonomy, the components, and every static blueprint variant. Names that exist only on some distributions are left out of the others, with a comment saying so. The commit convention is `➕ chore(packages): …`.
+The skill searches the component files with `scripts/package_tracker.py search` for each name, confirms the target repositories provide it, and adds it to the matching component of every target that has the name. Names that exist only on some distributions are left out of the others, with a comment saying so. The commit convention is `➕ chore(packages): …`.
 
 **Removing a package**
 
@@ -252,15 +234,15 @@ The skill searches `vars/packages` and `roles/osbuild/files` for each name, conf
 /syncopated drop htop from the Rocky workstation builds
 ```
 
-Removal also covers what exists only for that package: component `services:` units, `kernel_args`, fragments, and `repo_urls`. An explicit removal does not exclude a package that another package requires, so the manifest RPM list is checked afterwards.
+Removal also covers what exists only for that package: component `services:` units, `kernel_args`, fragments, and `repo_urls`. An explicit removal does not exclude a package that another package requires, so the generated RPM list is checked afterwards.
 
-**Applying a build selection**
+**Applying edited components**
 
 ```text
-/syncopated I added packages to the taxonomy and exported build-selections/build-rocky-workstation-gx-<timestamp>.yaml; adjust the playbook to match and verify the names (no duplicates)
+/syncopated I added packages to the rocky/10 components with package_tracker.py; check the Rocky 10 NVIDIA playbook still composes what I expect
 ```
 
-Manifests in `build-selections/` are a record; the `osbuild` role does not read them. The skill reads the selection and carries it into the playbook and the layers above.
+The skill reads the component files, compares the playbook's `osbuild_blueprint_components` with them and verifies the names (no duplicates).
 
 **Keeping the skill current**
 
