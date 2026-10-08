@@ -13,7 +13,7 @@ packages:
   - "gitflow"
   - "input-remapper"
   - "inxi"
-  - "ocenaudio"
+  # - "ocenaudio"
   - "vips-devel"
   - "yadm"
   - "yaru-theme"
