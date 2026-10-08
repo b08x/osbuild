@@ -220,4 +220,9 @@ echo "target disk $best: $total MiB; / $root MiB, /usr $usr MiB, /var $var MiB, 
 if command -v flatpak >/dev/null 2>&1; then
   flatpak remotes --system --columns=name,url
 fi
+# The OpenSCAP remediation (CIS) can mask cockpit at build time. Unmask it here,
+# after the payload is installed, so the web console stays available.
+# Harmless when cockpit is not installed.
+systemctl unmask cockpit.socket cockpit.service || true
+systemctl enable cockpit.socket || true
 %end

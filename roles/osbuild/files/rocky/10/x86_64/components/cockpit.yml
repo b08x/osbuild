@@ -7,7 +7,7 @@
 # osbuild_package_pins.
 label: "Cockpit web console"
 repo_urls: []
-services: []
+services: ["cockpit.socket"]
 kernel_args: []
 packages:
   - "cockpit"

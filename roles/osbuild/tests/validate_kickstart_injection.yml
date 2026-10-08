@@ -23,6 +23,8 @@
     _out_off: "{{ _tmp }}/osbuild-kickstart-validate/disabled"
     _out_conflict: "{{ _tmp }}/osbuild-kickstart-validate/conflict"
     ksvalidator: ""
+    # check_kickstart.py requires the sudoers drop-in; the role default is off.
+    osbuild_kickstart_sudoers: true
   tasks:
     - name: Reset output dirs
       ansible.builtin.file:

@@ -261,8 +261,8 @@ compliant() {
     grep -q "^logvol $mp " "$SYNC_PRE_OUT"
   done
   ! grep -q "^logvol /tmp " "$SYNC_PRE_OUT"
-  grep -q '^logvol /var/tmp .*--fsoptions="nodev,nosuid,noexec"' "$SYNC_PRE_OUT"
-  grep -q '^logvol /home .*--fsoptions="nodev,nosuid"' "$SYNC_PRE_OUT"
+  grep -q '^logvol /var/tmp .*--fsoptions="nodev,nosuid,noexec[,"]' "$SYNC_PRE_OUT"
+  grep -q '^logvol /home .*--fsoptions="nodev,nosuid[,"]' "$SYNC_PRE_OUT"
   grep -q '^part /boot .*--fsoptions="nodev,nosuid"' "$SYNC_PRE_OUT"
   ! grep -q -- '--encrypted' "$SYNC_PRE_OUT"
 }
