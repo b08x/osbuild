@@ -132,7 +132,7 @@ This role supports two build modes:
 
 - **Operating System**: Fedora 43 Workstation (or compatible version)
 - **Disk Space**: Minimum 50GB free in build directory
-  - Add ~30GB more if `osbuild_components` includes `oneapi`
+  - Add ~30GB more if `osbuild_blueprint_components` includes `intel-oneapi`
 - **Memory**: 4GB RAM minimum, 8GB recommended
 - **Network**: Internet connectivity for repository access
 - **Privileges**: Sudo access for package installation and service management
@@ -203,30 +203,25 @@ These apply only with `osbuild_only_generate: false`:
 
 ### Blueprint
 
-The blueprint comes from one of three places. A non-empty `osbuild_blueprint_components` wins over the other two:
+The blueprint comes from one of two places:
 
-- **Components** (`osbuild_blueprint_components`): the role merges component files with a static frame into one blueprint. See [Composing a Blueprint from Components](#composing-a-blueprint-from-components).
-- **Static file** (`osbuild_use_blueprint_template: false`): `osbuild_static_blueprint_path` is copied as is. Most shipped playbooks use this; `osbuild-rocky-iso-nvidia-components.yml` uses components. Package and locale variables below do not apply.
-- **Jinja template** (`osbuild_use_blueprint_template: true`, the default): `templates/blueprint.toml.j2` renders packages, services, kernel arguments and installer modules from `osbuild_components`. Suited to workstation ISOs only.
+- **Components** (`osbuild_blueprint_components`): the role merges component files with a static frame into one blueprint. The component files in `files/<distro>/<major>/<arch>/components/` are the only package data. See [Composing a Blueprint from Components](#composing-a-blueprint-from-components).
+- **Static file** (`osbuild_static_blueprint_path`): copied as is when `osbuild_blueprint_components` is empty. Package and locale variables below do not apply. bootc builds always need components.
 
 | Variable | Default | Applies to | Description |
 |---|---|---|---|
-| `osbuild_use_blueprint_template` | `true` | both | Choose template (`true`) or static file (`false`) |
-| `osbuild_static_blueprint_path` | `files/<distro>/<ver>/<arch>/workstation/<distro>-workstation-nvidia.toml` | static | Blueprint to copy, relative to the role |
-| `osbuild_blueprint_components` | `[]` | components | Component files to merge, in order. Non-empty selects the components path |
+| `osbuild_blueprint_components` | `[]` | components, bootc | Component files to merge, in order. The only variable that selects packages |
 | `osbuild_components_dir` | `<distro>/<ver>/<arch>/components` | components | Directory of component files, relative to the role's `files/`. Follows `osbuild_distro` |
-| `osbuild_blueprint_frame_path` | `<distro>/<ver>/<arch>/frames/workstation.toml` | components | Static, non-composable part of the blueprint |
-| `osbuild_target_distribution` | from `osbuild_distro` | template, bootc | Picks `vars/packages/<Name>.yml`: `fedora-*` → Fedora, `rocky-*` → Rocky, `almalinux-*` → AlmaLinux; otherwise the build host's distribution |
-| `osbuild_components` | `base, anaconda, gnome, sway, nvidia, development, container-tools` | both | Template: what goes into the image. Both: whose `sources` become extra repos |
-| `osbuild_component_defs` | see `defaults/main.yml` | both | What each component adds: packages, groups, services, kernel args, sources. Components: `base`, `anaconda`, `gnome`, `nvidia`, `sway`, `development`, `container-tools`, `oneapi`, `cli-tools`, `cockpit`, `core`, `desktop`, `audio`, `virtualization` |
-| `osbuild_extra_packages` | a short list | template | Packages added on top of the components |
-| `osbuild_package_pins` | `{}` | template | `{package: version}`; unpinned packages get `*` |
-| `osbuild_blueprint_template` | `blueprint.toml.j2` | template | Template file |
-| `osbuild_blueprint_version` | `1.0.0` | template, components, bootc | Blueprint / image version label |
-| `osbuild_blueprint_description` | `Custom Workstation` | template, components | Blueprint description |
-| `osbuild_timezone` | `America/New_York` | template, installer | Also rendered into the kickstart |
-| `osbuild_locale` | `en_US.UTF-8` | template, installer | Also rendered into the kickstart |
-| `osbuild_keyboard` | `us` | template, installer | Also rendered into the kickstart |
+| `osbuild_blueprint_frame_path` | `<distro>/<ver>/<arch>/frames/workstation.toml` | components | Static, non-composable part of the blueprint. `frames/container.toml` serves the CUDA container |
+| `osbuild_static_blueprint_path` | `""` | static | Blueprint to copy, relative to the role's `files/` |
+| `osbuild_target_distribution` | from `osbuild_distro` | components, bootc | Picks the component directory: `fedora-*` → `fedora/`, `rocky-*` → `rocky/`, `almalinux-*` → `almalinux/`; otherwise the build host's distribution |
+| `osbuild_extra_packages` | `[]` | components | Packages added on top of the components |
+| `osbuild_package_pins` | `{}` | components | `{package: version}`; unpinned packages get `*` |
+| `osbuild_blueprint_version` | `1.0.0` | components, bootc | Blueprint / image version label |
+| `osbuild_blueprint_description` | `Custom Workstation` | components | Blueprint description |
+| `osbuild_timezone` | `America/New_York` | installer | Also rendered into the kickstart |
+| `osbuild_locale` | `en_US.UTF-8` | installer | Also rendered into the kickstart |
+| `osbuild_keyboard` | `us` | installer | Also rendered into the kickstart |
 | `osbuild_flathub_enabled` | `true` | both | Ship the Flathub system remote (see [Flathub Remote](#flathub-remote)) |
 
 ### Composing a Blueprint from Components
@@ -240,6 +235,9 @@ repo_urls:                 # become --extra-repo
 services: ["nvidia-cdi-refresh", "nvidia-persistenced"]
 kernel_args: ["rd.driver.blacklist=nouveau", "nvidia-drm.modeset=1"]
 fragment: nvidia.toml      # optional; [[customizations.files]] / [[customizations.repositories]] appended as is
+flatpaks: []               # optional; bootc builds install these from Flathub
+bootc_repos: []            # optional; shell snippets that add repos in bootc builds
+copr_repos: []             # optional; COPR repos enabled in bootc builds
 packages:                  # "@name" is a comps group
   - "nvidia-driver"
   - "cuda-toolkit"
@@ -247,7 +245,19 @@ packages:                  # "@name" is a comps group
 
 `packages`, `services` and `kernel_args` are merged across the selected components and de-duplicated; `osbuild_extra_packages` and `osbuild_package_pins` still apply. `templates/blueprint-components.toml.j2` renders the result after the blueprint header and `[customizations] hostname = osbuild_hostname`, followed by the frame and each fragment. Because `repo_urls` flow into `--extra-repo`, dropping a component drops its repositories. A fragment may contain only array-of-tables (`[[...]]`) entries: the role renders `[customizations.kernel]` and `[customizations.services]` itself.
 
-Rocky 10 ships `base`, `anaconda`, `gnome-desktop`, `fonts`, `audio`, `multimedia`, `intel-graphics`, `development`, `containers-virt`, `cockpit` and `nvidia`, split from `rocky-10-2-workstation-nvidia.toml`. image-builder depsolves the same 1715 RPMs from both. `playbooks/osbuild-rocky-iso-nvidia-components.yml` selects all eleven. These component files are separate from the `osbuild_component_defs` entries above, which still serve the template and bootc paths.
+Four targets ship component files and a `frames/workstation.toml`: `rocky/10`, `rocky/9`, `almalinux/10` and `fedora/43` (all `x86_64`). They share these names: `base`, `anaconda`, `gnome-desktop`, `fonts`, `audio`, `multimedia`, `google-chrome`, `vscode`, `intel-graphics`, `development`, `containers-virt`, `cockpit` and `nvidia`. Rocky 10 adds `gui-toolkit`, `selection-extras` and `intel-oneapi`; Fedora 43 adds `sway`; `rocky/10` also has `cuda-container` for `frames/container.toml`. The schema is documented in `defaults/main.yml`, and `tests/validate_schema.py` checks every component file.
+
+Edit component packages with `scripts/package_tracker.py`:
+
+```bash
+python3 scripts/package_tracker.py list --target rocky/10/x86_64
+python3 scripts/package_tracker.py search nvtop
+python3 scripts/package_tracker.py add --target rocky/10/x86_64 base htop --verify
+python3 scripts/package_tracker.py remove --target rocky/10/x86_64 base htop
+python3 scripts/package_tracker.py tui
+```
+
+`add` appends to the component's `packages:` list and keeps comments and order. A package that another component of the same target already has is refused unless `--force` is given. `remove` refuses to empty a component.
 
 ### Repositories
 
@@ -255,11 +265,11 @@ image-builder resolves packages only from the target distribution's base reposit
 
 | Variable | Default | Description |
 |---|---|---|
-| `osbuild_sources` | build host's common list + sources of the selected components | Repository *names*, looked up in `vars/<build host distribution>.yml` (`repo:`). Names missing there are skipped silently |
+| `osbuild_sources` | build host's common list | Repository *names*, looked up in `vars/<build host distribution>.yml` (`repo:`). Names missing there are skipped silently |
 | `osbuild_distro_sources_fedora` / `osbuild_distro_sources_el` | RPM Fusion, VS Code, Chrome, … | The common lists `osbuild_sources` starts from |
-| `osbuild_extra_repo_urls` | `[]` | Repository *URLs* passed through unchanged. The `repo_urls` of each selected blueprint component are added |
+| `osbuild_extra_repo_urls` | `[]` | Repository *URLs* passed through unchanged. The `repo_urls` of each selected component are added |
 
-The names are resolved against the **build host's** distribution, not the target's. To build an EL image on a Fedora host, set `osbuild_sources: []` and list every non-base repository in `osbuild_extra_repo_urls` (see `playbooks/osbuild-rocky-iso-nvidia.yml`). A blueprint's `[[customizations.repositories]]` only writes `.repo` files into the image; it does not feed package resolution.
+The names are resolved against the **build host's** distribution, not the target's. To build an EL image on a Fedora host, set `osbuild_sources: []`; the `repo_urls` of the selected components then supply the target's repositories (see `playbooks/osbuild-rocky-iso-nvidia-components.yml`). A blueprint's `[[customizations.repositories]]` only writes `.repo` files into the image; it does not feed package resolution.
 
 ### Installer
 
@@ -317,7 +327,7 @@ Used only with `osbuild_build_bootc: true`. ISO installers create no user at bui
 
 ## Usage Examples
 
-### NVIDIA Workstation (template)
+### NVIDIA Workstation
 
 ```yaml
 - hosts: builder
@@ -325,7 +335,7 @@ Used only with `osbuild_build_bootc: true`. ISO installers create no user at bui
     - role: osbuild
       vars:
         osbuild_blueprint_name: "my-nvidia-workstation"
-        osbuild_components: [base, anaconda, gnome, sway, nvidia, development, container-tools]
+        osbuild_blueprint_components: [base, anaconda, gnome-desktop, fonts, audio, development, containers-virt, nvidia]
 ```
 
 ### Minimal Workstation (No NVIDIA)
@@ -336,7 +346,7 @@ Used only with `osbuild_build_bootc: true`. ISO installers create no user at bui
     - role: osbuild
       vars:
         osbuild_blueprint_name: "minimal-workstation"
-        osbuild_components: [base, anaconda, gnome]
+        osbuild_blueprint_components: [base, anaconda, gnome-desktop]
 ```
 
 ### Intel oneAPI in Image (Large ISO)
@@ -347,7 +357,8 @@ Used only with `osbuild_build_bootc: true`. ISO installers create no user at bui
     - role: osbuild
       vars:
         osbuild_blueprint_name: "hpc-workstation"
-        osbuild_components: [base, anaconda, gnome, development, oneapi]
+        osbuild_distro: rocky-10.2
+        osbuild_blueprint_components: [base, anaconda, gnome-desktop, development, intel-oneapi]
         osbuild_only_generate: false
         osbuild_build_timeout: 21600  # 6 hours for large build
 ```
@@ -372,7 +383,6 @@ Used only with `osbuild_build_bootc: true`. ISO installers create no user at bui
     - role: osbuild
       vars:
         osbuild_distro: rocky-10.2
-        osbuild_use_blueprint_template: false
         osbuild_sources: []          # EL target on a Fedora host
         osbuild_blueprint_components: [base, anaconda, gnome-desktop, fonts, development]
 ```
@@ -384,8 +394,7 @@ Used only with `osbuild_build_bootc: true`. ISO installers create no user at bui
   roles:
     - role: osbuild
       vars:
-        osbuild_use_blueprint_template: false
-        osbuild_static_blueprint_path: "files/fedora-43/x86_64/workstation/custom.toml"
+        osbuild_static_blueprint_path: "fedora/43/x86_64/workstation/custom.toml"
 ```
 
 ### Custom Package List
@@ -529,7 +538,7 @@ The role now supports building **bootc container images** for atomic OS updates,
         osbuild_build_bootc: true
         osbuild_bootc_base_image: "quay.io/fedora/fedora-bootc:43"
         osbuild_blueprint_name: "my-workstation"
-        osbuild_components: [base, gnome, sway, nvidia]
+        osbuild_blueprint_components: [base, gnome-desktop, sway, nvidia]
 ```
 
 **Output**: Container image `quay.io/syncopated/my-workstation:latest`
@@ -643,7 +652,7 @@ osbuild_bootc_output_dir: "{{ osbuild_output_dir }}/bootc"
         
         # Features (reused from verified blueprint)
         osbuild_blueprint_name: "silverblue-nvidia-custom"
-        osbuild_components: [base, gnome, sway, nvidia, development, container-tools]
+        osbuild_blueprint_components: [base, gnome-desktop, sway, nvidia, development, containers-virt]
 ```
 
 **This creates**:
@@ -712,16 +721,15 @@ Containerfile → Podman build → OCI image → bootc-image-builder → Disk/IS
 
 ## Blueprint Customization
 
-### Using Dynamic Templates (Recommended)
+### Using Components (Recommended)
 
-The role includes a comprehensive Jinja2 template (`templates/fedora-workstation.toml.j2`) that generates blueprints based on role variables. This is the default mode (`osbuild_use_blueprint_template: true`).
+`osbuild_blueprint_components` selects component files; the role merges them with the frame into the blueprint (see [Composing a Blueprint from Components](#composing-a-blueprint-from-components)).
 
 **Advantages**:
 
-- No blueprint file editing required
-- Consistent configuration via Ansible variables
-- Easy version control and sharing
-- Automatic integration of feature flags
+- Packages live in small reviewable files, one concern per file
+- Each component brings the repositories its packages need
+- `scripts/package_tracker.py` edits them safely
 
 ### Using Static Blueprints
 
@@ -729,7 +737,7 @@ For advanced customization, create your own blueprint TOML file:
 
 ```bash
 # Create custom blueprint
-cp roles/osbuild/files/fedora-43/x86_64/workstation/fedora-43-workstation-nvidia.toml \
+cp roles/osbuild/files/fedora/43/x86_64/workstation/fedora-workstation-43-igx.toml \
    my-custom-blueprint.toml
 
 # Edit as needed
@@ -740,7 +748,6 @@ Then reference it in your playbook:
 
 ```yaml
 vars:
-  osbuild_use_blueprint_template: false
   osbuild_static_blueprint_path: "path/to/my-custom-blueprint.toml"
 ```
 
@@ -791,9 +798,9 @@ vars:
 
 ### First-Login Splash (yadm dotfiles)
 
-One plain bash script, `files/firstboot/syncopated-firstboot`, runs at the first graphical login of each user. It shows a splash, updates the system with `dnf`, and prints the `yadm clone` and `yadm bootstrap` commands for the dotfiles repository (`https://github.com/b08x/dots.git`). It does not run them; the user runs them when ready. The script contains no build-time substitutions; it reads `NAME` and `VERSION_ID` from `/etc/os-release` when it runs, so the same bytes go into every distro's image.
+One plain bash script, `files/firstboot/syncopated-firstboot`, runs at the first graphical login of each user. It shows a splash, updates the system with `dnf`, downloads `yadm` when it is missing, and prints the `yadm clone` and `yadm bootstrap` commands for the dotfiles repository (`https://github.com/b08x/dots.git`). It does not run the clone or bootstrap; the user runs them when ready. The script contains no build-time substitutions; it reads `NAME` and `VERSION_ID` from `/etc/os-release` when it runs, so the same bytes go into every distro's image.
 
-`tasks/blueprint.yml` appends the three files to every prepared blueprint, static or templated, inside one `blockinfile` block (`# BEGIN/END syncopated-firstboot`). The blueprints in `files/` and `templates/blueprint.toml.j2` do not contain copies. Edit only `files/firstboot/`.
+`tasks/blueprint.yml` appends the three files to every prepared blueprint, static or composed, inside one `blockinfile` block (`# BEGIN/END syncopated-firstboot`). The blueprints in `files/` and `templates/blueprint-components.toml.j2` do not contain copies. Edit only `files/firstboot/`.
 
 | Installed path | Mode | Purpose |
 |---|---|---|
@@ -815,7 +822,7 @@ The script runs these steps in order:
    yadm bootstrap
    ```
 
-   When `yadm` is not on `PATH`, a download line is printed first: `mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/yadm <yadm URL> && chmod 0755 ~/.local/bin/yadm`. `SYNCOPATED_DOTFILES_URL` and `SYNCOPATED_YADM_URL` change the printed URLs.
+   When `yadm` is not on `PATH`, the script downloads it to `~/.local/bin/yadm` (`curl -fsSL`, mode 0755) before printing the commands. If the download fails, the equivalent `mkdir -p ~/.local/bin && curl … && chmod 0755 …` line is printed instead. `SYNCOPATED_DOTFILES_URL` and `SYNCOPATED_YADM_URL` change the clone and download URLs.
 7. Writes the marker.
 
 Without `gum`, the script uses plain-text prompts and output. The launcher sets `SYNCOPATED_PAUSE_ON_EXIT=1`, so the window waits for Enter and the printed commands stay on screen.
@@ -841,7 +848,7 @@ osbuild_ansible_pull_args: ["-C", "main", "-i", "localhost,", "local.yml"]
 
 ```bash
 shellcheck -x roles/osbuild/files/firstboot/syncopated-firstboot{,-launcher}
-bats roles/osbuild/tests/firstboot/                                  # stubbed yadm/gum/sudo/systemctl/dnf; asserts yadm, git and curl are never run
+bats roles/osbuild/tests/firstboot/                                  # stubbed yadm/gum/sudo/systemctl/dnf; asserts yadm and git are never run; curl runs only to download a missing yadm
 ansible-playbook roles/osbuild/tests/validate_firstboot_injection.yml  # all blueprints, run twice
 ```
 
@@ -1011,7 +1018,7 @@ ansible-playbook roles/osbuild/tests/validate_kickstart_injection.yml \
 **Solutions**:
 
 1. Increase timeout: `osbuild_build_timeout: 21600`
-2. Consider removing `oneapi` from `osbuild_components` for faster builds
+2. Consider removing `intel-oneapi` from `osbuild_blueprint_components` for faster builds
 3. Check network speed for repository downloads
 4. Monitor build progress in the console output
 

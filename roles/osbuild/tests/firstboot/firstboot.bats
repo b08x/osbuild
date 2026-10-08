@@ -160,12 +160,11 @@ printed() {
   [[ $output == *"  yadm clone --no-bootstrap $DOTS"$'\n'"  yadm bootstrap"* ]]
 }
 
-@test "dotfiles: the script runs no yadm, git or curl command" {
+@test "dotfiles: the script runs no yadm or git command" {
   rm "$BIN/yadm"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
-  ! grep -qE '^(yadm|git|curl|sudo yadm) ' "$STUB_LOG"
-  [ ! -e "$HOME/.local/bin/yadm" ]
+  ! grep -qE '^(yadm|git|sudo yadm) ' "$STUB_LOG"
   [ ! -e "$HOME/.local/share/yadm" ]
 }
 
@@ -175,12 +174,23 @@ printed() {
   ! grep -qE '^gum (choose|input)' "$STUB_LOG"
 }
 
-@test "fact 10: missing yadm adds the download command before the clone" {
+@test "fact 10: missing yadm is downloaded to ~/.local/bin before the clone is printed" {
   rm "$BIN/yadm"
   run "$SCRIPT" </dev/null
   [ "$status" -eq 0 ]
+  logged "curl -fsSL -o $HOME/.local/bin/yadm https://github.com/yadm-dev/yadm/raw/master/yadm"
+  [ -x "$HOME/.local/bin/yadm" ]
+  [[ $output == *"yadm installed"*"yadm clone --no-bootstrap $DOTS"* ]]
+}
+
+@test "fact 10: a failed yadm download prints the manual download command" {
+  rm "$BIN/yadm"
+  echo 6 >"$CURL_QUEUE"
+  run "$SCRIPT" </dev/null
+  [ "$status" -eq 0 ]
+  [ ! -e "$HOME/.local/bin/yadm" ]
   printed "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/yadm https://github.com/yadm-dev/yadm/raw/master/yadm && chmod 0755 ~/.local/bin/yadm"
-  [[ $output == *"~/.local/bin/yadm"*"yadm clone --no-bootstrap $DOTS"* ]]
+  printed "yadm clone --no-bootstrap $DOTS"
 }
 
 @test "fact 10: an installed yadm prints no download command" {

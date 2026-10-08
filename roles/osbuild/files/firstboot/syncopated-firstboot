@@ -4,9 +4,10 @@
 #             carries an ansible-pull configuration, offer a reboot when
 #             updates were installed, set the default boot target, report
 #             installed tools.
-#   Dotfiles: print the commands that clone a dotfiles repository with yadm
-#             and run `yadm bootstrap`. The script does not run them; the user
-#             runs them when ready.
+#   Dotfiles: download yadm to ~/.local/bin when it is missing, then print the
+#             commands that clone a dotfiles repository and run
+#             `yadm bootstrap`. The script does not run those; the user runs
+#             them when ready.
 # After the commands are printed the marker is written and setup is complete.
 #
 # The autostart launcher (syncopated-firstboot-launcher) stops opening this
@@ -318,15 +319,29 @@ wait_for_network() {
   nm-online -q -t 30 || warn "The network is not online yet."
 }
 
-# Print the commands that install the dotfiles with yadm. Nothing is run.
-# The yadm download line is printed only when yadm is not installed. The
-# commands go to stdout without styling so they can be copied as they are.
-print_dotfiles_commands() {
-  info "Dotfiles (yadm): run these commands in a terminal to install your dotfiles."
-  if ! command -v yadm >/dev/null 2>&1; then
-    printf '  %s\n' \
-      "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/yadm $YADM_URL && chmod 0755 ~/.local/bin/yadm"
+# Install yadm to ~/.local/bin when it is not on PATH. Returns 0 when yadm is
+# available afterwards. On failure the manual download command is printed.
+install_yadm() {
+  command -v yadm >/dev/null 2>&1 && return 0
+  local dest=$HOME/.local/bin/yadm
+  info "Installing yadm to $dest"
+  if mkdir -p "${dest%/*}" && curl -fsSL -o "$dest" "$YADM_URL" && chmod 0755 "$dest"; then
+    ok "yadm installed"
+    return 0
   fi
+  rm -f "$dest"
+  warn "Could not download yadm from $YADM_URL. Run later:"
+  printf '  %s\n' \
+    "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/yadm $YADM_URL && chmod 0755 ~/.local/bin/yadm"
+  return 1
+}
+
+# Install yadm when missing, then print the commands that install the
+# dotfiles. Only the yadm download is run; the clone and bootstrap commands
+# go to stdout without styling so they can be copied as they are.
+print_dotfiles_commands() {
+  install_yadm
+  info "Dotfiles (yadm): run these commands in a terminal to install your dotfiles."
   printf '  %s\n' \
     "yadm clone --no-bootstrap $DOTFILES_URL" \
     "yadm bootstrap"
