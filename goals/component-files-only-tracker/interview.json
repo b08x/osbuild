@@ -1,0 +1,162 @@
+{
+  "stage": "interview",
+  "title": "Remove legacy osbuild_component vars; component-file package tracker with submenu",
+  "goalSlug": "component-files-only-tracker",
+  "questions": [
+    {
+      "id": "vars-to-remove",
+      "prompt": "Which variables and data should be removed?",
+      "description": "Legacy pair: osbuild_components (name list) + osbuild_component_defs (inline catalog in roles/osbuild/defaults/main.yml). The catalog is built from vars/packages/<Distro>.yml via system_packages/system_groups. Consumers: validate_components.yml, osbuild_component_sources in tasks/main.yml, blueprint.toml.j2, build.sh.j2, files/bootc/build.yml ('nvidia' in osbuild_components).",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Remove osbuild_components, osbuild_component_defs, validate_components.yml, osbuild_component_sources and the vars/packages taxonomy load. osbuild_blueprint_components + component files become the only package source.",
+      "recommendedOptionIds": ["components", "defs", "validate", "sources", "taxonomy"],
+      "options": [
+        { "id": "components", "label": "osbuild_components (list) in defaults and all 12 playbooks + osbuild.yml" },
+        { "id": "defs", "label": "osbuild_component_defs catalog in defaults/main.yml" },
+        { "id": "validate", "label": "tasks/validate_components.yml" },
+        { "id": "sources", "label": "osbuild_component_sources fact in tasks/main.yml" },
+        { "id": "taxonomy", "label": "vars/packages/{Fedora,AlmaLinux,Rocky}.yml + 'Load package taxonomy' task + roles/osbuild/vars/packages.yml" }
+      ],
+      "required": true
+    },
+    {
+      "id": "rename",
+      "prompt": "Should osbuild_blueprint_components keep its name, or be renamed to osbuild_components after the legacy var is gone?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Keep osbuild_blueprint_components. A rename reuses a name with a different meaning, so old playbooks would fail in confusing ways instead of plainly.",
+      "recommendedOptionIds": ["keep"],
+      "options": [
+        { "id": "keep", "label": "Keep osbuild_blueprint_components" },
+        { "id": "rename", "label": "Rename to osbuild_components" }
+      ],
+      "required": true
+    },
+    {
+      "id": "template-mode",
+      "prompt": "What happens to blueprint.toml.j2 (osbuild_use_blueprint_template mode)? Every playbook sets it to false.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Delete blueprint.toml.j2, osbuild_use_blueprint_template and osbuild_blueprint_template. Builds use either a static blueprint or component composition.",
+      "recommendedOptionIds": ["delete"],
+      "options": [
+        { "id": "delete", "label": "Delete template mode" },
+        { "id": "port", "label": "Port it to read component files" },
+        { "id": "leave", "label": "Leave it (broken) and mark deprecated" }
+      ],
+      "required": true
+    },
+    {
+      "id": "bootc",
+      "prompt": "The bootc path (tasks/bootc.yml -> build.sh.j2, files/bootc/build.yml) reads osbuild_component_defs, including flatpaks, bootc_repos, copr_repos and blueprint_only. How should it change?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Port build.sh.j2 to the loaded component files (_osbuild_bp_components). Add optional fields flatpaks, bootc_repos and copr_repos to the component file schema, and replace 'nvidia' in osbuild_components with 'nvidia' in osbuild_blueprint_components.",
+      "recommendedOptionIds": ["port"],
+      "options": [
+        { "id": "port", "label": "Port bootc to component files (extend schema with optional fields)" },
+        { "id": "remove", "label": "Remove the bootc path entirely" },
+        { "id": "defer", "label": "Out of scope: keep a minimal bootc-only var, follow up later" }
+      ],
+      "required": true
+    },
+    {
+      "id": "static-playbooks",
+      "prompt": "Static-blueprint playbooks (osbuild-rocky-iso*, almalinux-iso*, rocky-cuda-container, osbuild.yml) set osbuild_components only for validation, sources and the nvidia check. What should happen to them?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Delete the osbuild_components block from them and keep them working on their static blueprint. Repos they need move to osbuild_extra_repo_urls or are already in the static TOML. No new component files for AlmaLinux in this goal.",
+      "recommendedOptionIds": ["strip"],
+      "options": [
+        { "id": "strip", "label": "Delete the var; keep the static blueprints" },
+        { "id": "convert", "label": "Convert them to component composition (create almalinux/10 component files)" },
+        { "id": "delete", "label": "Delete playbooks superseded by *-components.yml variants" }
+      ],
+      "required": true
+    },
+    {
+      "id": "tracker-scope",
+      "prompt": "Which tracker capabilities must work against component files?",
+      "description": "Component files live at roles/osbuild/files/<distro>/<major>/<arch>/components/<name>.yml. Today only rocky/10/x86_64 exists. Edits must preserve comments and key order (ruamel.yaml round-trip).",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "list, search, add, remove, verify (repo lookup before add) and the TUI. The 'build' manifest export is dropped, because the playbook's osbuild_blueprint_components list is now the build selection.",
+      "recommendedOptionIds": ["list", "search", "add", "remove", "verify", "tui"],
+      "options": [
+        { "id": "list", "label": "list: components and package counts per distro/major/arch" },
+        { "id": "search", "label": "search: find which component(s) contain a package" },
+        { "id": "add", "label": "add: add package(s) to a component file" },
+        { "id": "remove", "label": "remove: remove package(s) from a component file" },
+        { "id": "verify", "label": "verify: check the package exists in repos before adding" },
+        { "id": "new-component", "label": "create a new component file (label + packages)" },
+        { "id": "build", "label": "keep 'build' manifest export (rewritten for components)" },
+        { "id": "tui", "label": "interactive TUI" }
+      ],
+      "required": true
+    },
+    {
+      "id": "target-selection",
+      "prompt": "How does the tracker choose which component directory to operate on?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Discover every files/<distro>/<major>/<arch>/components directory. CLI uses --target rocky/10/x86_64, which defaults to the only one when there is a single directory. The TUI asks first only when more than one exists.",
+      "recommendedOptionIds": ["discover"],
+      "options": [
+        { "id": "discover", "label": "Discover dirs; --target flag; TUI prompts only if >1" },
+        { "id": "flags", "label": "Separate --distro/--major/--arch flags" },
+        { "id": "hardcode", "label": "Hard-code rocky/10/x86_64" }
+      ],
+      "required": true
+    },
+    {
+      "id": "submenu",
+      "prompt": "What should the component submenu do?",
+      "description": "Flow: main menu -> pick component -> package submenu.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "In the submenu: a checkbox list of the component's packages, all pre-checked. Unchecking removes, after confirmation. Actions in the submenu: add packages (with optional repo verify), remove selected, show details (label, repo_urls, services), back.",
+      "recommendedOptionIds": ["checkbox-toggle", "add", "details", "back"],
+      "options": [
+        { "id": "checkbox-toggle", "label": "Checkbox of packages (pre-checked); unchecked ones removed after confirm" },
+        { "id": "add", "label": "Add packages from inside the submenu" },
+        { "id": "details", "label": "Show component details (label, repo_urls, services, fragment)" },
+        { "id": "move", "label": "Move selected packages to another component" },
+        { "id": "back", "label": "Back to component list / main menu" }
+      ],
+      "required": true
+    },
+    {
+      "id": "groups",
+      "prompt": "How should '@group' entries (comps groups) in packages lists be handled?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Treat them as ordinary entries that can be listed, added and removed. Skip repo verification for names starting with @.",
+      "recommendedOptionIds": ["plain"],
+      "options": [
+        { "id": "plain", "label": "Plain entries; skip verify for @ names" },
+        { "id": "separate", "label": "Show them in a separate section of the submenu" }
+      ],
+      "required": true
+    },
+    {
+      "id": "duplicates",
+      "prompt": "When adding a package that already exists in another component of the same target, what should happen?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Warn and name the other component, then ask in the TUI or require --force in the CLI. Adding a duplicate within the same component is a no-op.",
+      "recommendedOptionIds": ["warn"],
+      "options": [
+        { "id": "warn", "label": "Warn + confirm/--force" },
+        { "id": "block", "label": "Refuse" },
+        { "id": "allow", "label": "Allow silently" }
+      ],
+      "required": true
+    },
+    {
+      "id": "verification",
+      "prompt": "What verification counts as done?",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Rewrite tests/test_package_tracker.py against temp component dirs (round-trip preserves comments). Add a grep check that no osbuild_component_defs or osbuild_components remains in roles/playbooks. Run ansible-playbook --syntax-check on all playbooks, plus a generate-only run of osbuild-rocky-iso-components.yml whose blueprint package list matches the pre-change snapshot.",
+      "recommendedOptionIds": ["pytest", "grep", "syntax", "snapshot"],
+      "options": [
+        { "id": "pytest", "label": "pytest tracker tests against fixture component dirs" },
+        { "id": "grep", "label": "grep: no legacy var references left" },
+        { "id": "syntax", "label": "ansible-playbook --syntax-check on all playbooks" },
+        { "id": "snapshot", "label": "generate-only blueprint output identical before/after for component playbooks" },
+        { "id": "lint", "label": "ansible-lint + yamllint clean" }
+      ],
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+# Facts
+
+- Component .yml and .toml files live at infra.osbuild roles/image_builder/vars/<distro>/<ver>/components/, and frames at vars/<distro>/<ver>/frames/; no components/ or frames/ directories remain under files/.
+- Directories exist for rocky/9, rocky/10, almalinux/9, almalinux/10 and fedora/43, each with components and frames.
+- The rocky/10 component files are content-identical to today's, apart from the move.
+- The other distros get generated components: one per role package group (about 15) plus one for each of the six unreferenced subcategories. Each generated file's header says it is seeded from the taxonomy and not repodata-verified.
+- vars/packages/<Distro>.yml is deleted, and image_builder_system_packages is referenced nowhere in either repo.
+- A new early task loads every *.yml in image_builder_components_dir into image_builder_component_defs; the catalog is no longer defined in defaults/main.yml, and a playbook-level override of image_builder_component_defs still wins.
+- Per-component flatpaks, copr_repos and comps blueprint_groups live in the component files; vars/<distro>/<ver>/main.yml keeps only build_host_packages, legacy and any flatpaks/COPR repos no component owns; 00-distributions.yml moves to vars/distributions.yml with its mappings intact.
+- image_builder_components_dir and the frame path default to the new vars location and can still be overridden.
+- For fedora-43, almalinux-9/10 and rocky-9/10, every role package group resolves to the same sorted package list before and after the migration; the diff is empty except for intended differences listed in the plan.
+- package_tracker.py takes --distro <name>-<ver> (for example rocky-10); a bare distro name with several versions fails with an error listing the choices, and fedora resolves to fedora-43.
+- add and remove take --component <name>; add --create makes a new component and requires --label.
+- --distro All applies add/remove to every distro/version that has the component, translating names through image_builder_package_mappings.
+- --repo-url, --service and --kernel-arg edit those fields of a component.
+- list shows components with package counts, and verify checks each target against its own repo_urls.
+- build-manifest --components a,b,c writes image_builder_blueprint_components into the manifest ansible_vars.
+- The interactive TUI offers a distro, then version, then component picker.
+- Editing a component through the tracker preserves its header comments and key order.
+- Tracker unit tests cover add, remove, verify, All fan-out with name mapping, and build-manifest --components, using a temporary copy of the vars tree.
+- ansible-test sanity and units, ansible-lint, yamllint and the role_image_builder integration target all pass in infra.osbuild.
+- The osbuild repo's playbooks and build-selections manifests use the new variables; its pytest and playbook syntax checks pass.
+- The breaking change is folded into the unreleased 2.4.0 (existing changelog fragment amended, galaxy.yml version unchanged) with no compatibility shim.
+- The plan lists the tinybot playbook commands for you to run; none are run by Claude.
+- Component files accept the former catalog fields as optional keys (blueprint_groups, requires, conflicts, size_impact, build_time_impact, secure_boot_compatible, sources, files, flatpaks, copr_repos, bootc_repos, bootc_only, blueprint_only) with the catalog's current defaults; the file-composed path (image_builder_blueprint_components) reads the same files.
+- For every migrated distro, each former image_builder_component_defs entry (name and every key, not only packages) is identical before and after, and template-path, file-composed and bootc rendering use the loaded catalog unchanged.
+- Component and frame files are read with role_path-based paths, so they load regardless of the playbook's working directory.

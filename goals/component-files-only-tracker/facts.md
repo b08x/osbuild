@@ -1,0 +1,34 @@
+# Facts: component-files-only-tracker
+
+- **fact-1** No file under roles/, playbooks/ or osbuild.yml references osbuild_components or osbuild_component_defs (grep returns nothing).
+- **fact-2** roles/osbuild/tasks/validate_components.yml is deleted, and tasks/main.yml no longer imports it or sets osbuild_component_sources.
+- **fact-3** vars/packages/{Fedora,AlmaLinux,Rocky}.yml, roles/osbuild/vars/packages.yml and the 'Load package taxonomy' task are deleted. No system_packages or system_groups reference remains.
+- **fact-4** Template mode is gone: blueprint.toml.j2, osbuild_use_blueprint_template and osbuild_blueprint_template no longer exist in the role or the playbooks.
+- **fact-5** osbuild_blueprint_components keeps its name and is the only variable that selects packages for a build.
+- **fact-6** Component files accept optional fields flatpaks, bootc_repos and copr_repos, and the schema comment in defaults/main.yml documents every component field.
+- **fact-7** The bootc path (build.sh.j2, files/bootc/build.yml) reads packages, services, flatpaks and repos from the loaded component files. Its nvidia checks test 'nvidia' in osbuild_blueprint_components.
+- **fact-8** Component files and a frames/workstation.toml exist for rocky/10, rocky/9, almalinux/10 and fedora/43 (x86_64).
+- **fact-9** For almalinux/10, rocky/9 and fedora/43, each former static workstation blueprint (plain and -nvidia variants) has a component list whose merged package set equals the package set of that static TOML.
+- **fact-10** The static workstation TOMLs that were split into component files are deleted.
+- **fact-11** osbuild-almalinux-iso.yml and osbuild-almalinux-iso-nvidia.yml build from osbuild_blueprint_components instead of a static blueprint.
+- **fact-12** osbuild.yml and playbooks/osbuild.yml pick osbuild_blueprint_components from the target distro and work on Fedora 43, Rocky 9/10 and AlmaLinux 10 hosts.
+- **fact-13** osbuild-rocky-iso.yml, osbuild-rocky-iso-nvidia.yml, osbuild-rocky-iso-nvidia-generate.yml and osbuild-rocky-iso-nvidia-interactive.yml are deleted. The *-components.yml playbooks remain.
+- **fact-14** osbuild-rocky-cuda-container.yml uses a cuda-container component plus frames/container.toml (set through osbuild_blueprint_frame_path), and its generated blueprint has the same packages as the old static container TOML.
+- **fact-15** A generate-only run of osbuild-rocky-iso-components.yml, -nvidia-components.yml and -intel-oneapi-components.yml writes a blueprint identical to the one written before the change.
+- **fact-16** ansible-playbook --syntax-check passes for every remaining playbook.
+- **fact-17** scripts/package_tracker.py reads and writes only roles/osbuild/files/<distro>/<major>/<arch>/components/*.yml and never touches vars/packages.
+- **fact-18** The tracker finds every components directory. --target <distro>/<major>/<arch> selects one; without it the CLI exits with an error that lists the available targets.
+- **fact-19** 'package_tracker.py list --target T' prints every component in T with its label and package count.
+- **fact-20** 'package_tracker.py search NAME' prints every target/component that contains a matching package.
+- **fact-21** 'package_tracker.py add --target T COMPONENT PKG...' appends the packages to that component file, keeps comments, key order and sorted order unchanged, and does nothing for a package already in the component.
+- **fact-22** Adding a package that already exists in another component of the same target prints a warning naming that component and is refused unless --force is given. The TUI asks for confirmation instead.
+- **fact-23** 'package_tracker.py remove --target T COMPONENT PKG...' removes the packages from that component file and keeps comments. Removing the last package is refused, because a component needs a non-empty packages list.
+- **fact-24** 'add --verify' checks each package against the target's repos before writing. Names starting with @ skip the check.
+- **fact-25** The 'build' manifest subcommand and the TaxonomyManager class are removed from the tracker.
+- **fact-26** The TUI asks for a target only when more than one exists, then shows a list of components (label + count).
+- **fact-27** Choosing a component opens a submenu with these actions: Edit packages, Add packages, Show details, Back.
+- **fact-28** 'Edit packages' shows a checkbox list of the component's packages with all items checked. Unchecked items are removed from the file after a confirmation that lists them.
+- **fact-29** 'Show details' prints the component's label, repo_urls, services, kernel_args and fragment.
+- **fact-30** 'Back' returns to the component list, and the component list has a Back option that returns to the main menu.
+- **fact-31** tests/test_package_tracker.py is rewritten against temporary fixture component directories and passes under pytest, covering list, search, add, remove, the duplicate warning and comment preservation.
+- **fact-32** The README and the syncopated skill docs no longer mention osbuild_components, osbuild_component_defs or vars/packages, and they describe the new tracker commands.
