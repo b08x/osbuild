@@ -154,6 +154,7 @@ osbuild_distro_sources_fedora:
   - rpmfusion-nonfree-updates
   - vscode
   - google-chrome
+  - syncopated
 
 # EL-family (AlmaLinux, Rocky) common sources. Both distros share the EL
 # repo topology — EPEL, RPM Fusion EL updates-only channels, VS Code,
@@ -170,6 +171,7 @@ osbuild_distro_sources_el:
   - rpmfusion-nonfree-updates
   - vscode
   - google-chrome
+  - syncopated
 
 # Extra repository URLs passed to image-builder as --extra-repo, in addition
 # to the URLs derived from osbuild_sources (tasks/sources.yml merges both).

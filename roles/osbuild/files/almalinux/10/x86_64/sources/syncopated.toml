@@ -1,0 +1,7 @@
+id = "copr:copr.fedorainfracloud.org:b08x:syncopated"
+name = "Copr repo for syncopated owned by b08x"
+type = "yum-baseurl"
+url = "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["https://download.copr.fedorainfracloud.org/results/b08x/syncopated/pubkey.gpg"]

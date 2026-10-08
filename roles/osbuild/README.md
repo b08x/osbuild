@@ -266,7 +266,7 @@ image-builder resolves packages only from the target distribution's base reposit
 | Variable | Default | Description |
 |---|---|---|
 | `osbuild_sources` | build host's common list | Repository *names*, looked up in `vars/<build host distribution>.yml` (`repo:`). Names missing there are skipped silently |
-| `osbuild_distro_sources_fedora` / `osbuild_distro_sources_el` | RPM Fusion, VS Code, Chrome, … | The common lists `osbuild_sources` starts from |
+| `osbuild_distro_sources_fedora` / `osbuild_distro_sources_el` | RPM Fusion, VS Code, Chrome, COPR `b08x/syncopated` (Fedora and EL 10), … | The common lists `osbuild_sources` starts from |
 | `osbuild_extra_repo_urls` | `[]` | Repository *URLs* passed through unchanged. The `repo_urls` of each selected component are added |
 
 The names are resolved against the **build host's** distribution, not the target's. To build an EL image on a Fedora host, set `osbuild_sources: []`; the `repo_urls` of the selected components then supply the target's repositories (see `playbooks/osbuild-rocky-iso-nvidia-components.yml`). A blueprint's `[[customizations.repositories]]` only writes `.repo` files into the image; it does not feed package resolution.
