@@ -18,6 +18,7 @@ Dedicated repository for composing and building custom OS appliances, immutable 
 │   ├── osbuild-rocky-iso-components.yml
 │   ├── osbuild-rocky-iso-nvidia-components.yml
 │   ├── osbuild-rocky-iso-intel-oneapi-components.yml
+│   ├── osbuild-rocky-iso-openscap-components.yml
 │   └── osbuild-rocky-cuda-container.yml
 ├── roles/                       # Standalone Ansible roles
 │   ├── osbuild/                 # Primary osbuild image composer role (image-builder CLI)
@@ -119,6 +120,10 @@ ansible-playbook playbooks/osbuild-rocky-iso-nvidia-components.yml
 # Rocky Linux 10.2 Workstation ISO with Intel GPU compute runtime and oneAPI (DPC++, MKL),
 # interactive disk layout
 ansible-playbook playbooks/osbuild-rocky-iso-intel-oneapi-components.yml
+
+# Rocky Linux 10.2 Workstation ISO hardened with one OpenSCAP profile
+# (cis-l2-workstation, hipaa or pci-dss); needs a disk of at least 160 GiB
+ansible-playbook playbooks/osbuild-rocky-iso-openscap-components.yml -e osbuild_openscap_profile=hipaa
 
 # Rocky Linux 10.2 CUDA Application Container
 ansible-playbook playbooks/osbuild-rocky-cuda-container.yml

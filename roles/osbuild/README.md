@@ -245,7 +245,7 @@ packages:                  # "@name" is a comps group
 
 `packages`, `services` and `kernel_args` are merged across the selected components and de-duplicated; `osbuild_extra_packages` and `osbuild_package_pins` still apply. `templates/blueprint-components.toml.j2` renders the result after the blueprint header and `[customizations] hostname = osbuild_hostname`, followed by the frame and each fragment. Because `repo_urls` flow into `--extra-repo`, dropping a component drops its repositories. A fragment may contain only array-of-tables (`[[...]]`) entries: the role renders `[customizations.kernel]` and `[customizations.services]` itself.
 
-Four targets ship component files and a `frames/workstation.toml`: `rocky/10`, `rocky/9`, `almalinux/10` and `fedora/43` (all `x86_64`). They share these names: `base`, `anaconda`, `gnome-desktop`, `fonts`, `audio`, `multimedia`, `google-chrome`, `vscode`, `intel-graphics`, `development`, `containers-virt`, `cockpit` and `nvidia`. Rocky 10 adds `gui-toolkit`, `selection-extras` and `intel-oneapi`; Fedora 43 adds `sway`; `rocky/10` also has `cuda-container` for `frames/container.toml`. The schema is documented in `defaults/main.yml`, and `tests/validate_schema.py` checks every component file.
+Four targets ship component files and a `frames/workstation.toml`: `rocky/10`, `rocky/9`, `almalinux/10` and `fedora/43` (all `x86_64`). They share these names: `base`, `anaconda`, `gnome-desktop`, `fonts`, `audio`, `multimedia`, `google-chrome`, `vscode`, `intel-graphics`, `development`, `containers-virt`, `cockpit` and `nvidia`. Rocky 10 adds `gui-toolkit`, `intel-oneapi`; `rocky/10` and `almalinux/10` add `syncopated` (the b08x/syncopated COPR), `rocky/10` also has `openscap-cis-l2-workstation`, `openscap-hipaa` and `openscap-pci-dss` ([OpenSCAP Profiles](#openscap-profiles)); Fedora 43 adds `sway`; `rocky/10` also has `cuda-container` for `frames/container.toml`. The schema is documented in `defaults/main.yml`, and `tests/validate_schema.py` checks every component file.
 
 Edit component packages with `scripts/package_tracker.py`:
 
@@ -258,6 +258,26 @@ python3 scripts/package_tracker.py tui
 ```
 
 `add` appends to the component's `packages:` list and keeps comments and order. A package that another component of the same target already has is refused unless `--force` is given. `remove` refuses to empty a component.
+
+### OpenSCAP Profiles
+
+Rocky 10 ships one component per OpenSCAP profile. Each one adds the profile's packages, services and `audit=1 audit_backlog_limit=8192` kernel arguments, and a fragment with `[customizations.openscap]` (profile ID and the `ssg-rhel10-ds.xml` datastream). image-builder then runs the profile's remediation against the installed-OS tree at build time (`org.osbuild.oscap.remediation` in the `os` pipeline) and adds `scap-security-guide` and `openscap-scanner` itself.
+
+| Component | Profile |
+|---|---|
+| `openscap-cis-l2-workstation` | CIS Red Hat Enterprise Linux 10 Benchmark, Level 2 - Workstation |
+| `openscap-hipaa` | HIPAA |
+| `openscap-pci-dss` | PCI-DSS v4.0.1 |
+
+Select at most one: image-builder accepts a single profile per blueprint, and `tasks/components.yml` fails when more than one `openscap-*` component is listed. `playbooks/osbuild-rocky-iso-openscap-components.yml` is the standard Rocky workstation plus one profile:
+
+```bash
+ansible-playbook playbooks/osbuild-rocky-iso-openscap-components.yml -e osbuild_openscap_profile=hipaa
+```
+
+`osbuild_openscap_profile` is `cis-l2-workstation` (default), `hipaa` or `pci-dss`; it is part of the blueprint and ISO names. The playbook uses the [compliant layout](#compliant-layout) and enables LUKS for `hipaa` and `pci-dss` only. The component files record the `oscap xccdf generate fix` command they came from, and `build-selections/` keeps the generated blueprints.
+
+Known gaps after remediation: `sudo_remove_nopasswd` fails when `osbuild_kickstart_sudoers` is `true`, and the CIS rules for GNOME, USB and Bluetooth can change desktop behaviour. The kickstart `%post` unmasks and enables `cockpit.socket`, because the CIS remediation can mask it; `9090/tcp` is open in the workstation frame. Nothing here was installed or scanned (`oscap xccdf eval`) on a booted image.
 
 ### Repositories
 
@@ -279,7 +299,7 @@ ISO image types only. Details in [Installer Kickstart](#installer-kickstart) and
 |---|---|---|
 | `osbuild_kickstart_enabled` | `true` | Embed the installer kickstart in the blueprint |
 | `osbuild_kickstart_partitioning` | `auto` | `auto`: `%pre` picks a disk and applies the layout below. `interactive`: the user partitions in Anaconda's Installation Destination. `compliant`: separate `/usr`, `/var`, `/var/tmp`, `/var/log`, `/var/log/audit`, `/home` (and `/tmp` as a volume or tmpfs) with `nodev,nosuid,noexec` set in the kickstart, for the OpenSCAP profiles; sizes in the `osbuild_kickstart_compliant_*` defaults, minimum disk 160 GiB, optional LUKS |
-| `osbuild_kickstart_sudoers` | `true` | Ship `/etc/sudoers.d/90-wheel-nopasswd` |
+| `osbuild_kickstart_sudoers` | `false` | Ship `/etc/sudoers.d/90-wheel-nopasswd` (passwordless sudo for `wheel`). Off by default; the CIS and PCI-DSS profiles flag it |
 | `osbuild_firstboot_enabled` | `true` | First-login yadm dotfiles splash (desktop images) |
 | `osbuild_kickstart_file` | derived from `osbuild_kickstart_partitioning` | Kickstart source under `files/`; set only to use your own file |
 
@@ -295,6 +315,23 @@ Disk layout for `osbuild_kickstart_partitioning: auto` (see [Layout](#layout) fo
 | `osbuild_kickstart_usr_max_gib` | `256` | `/usr` cap |
 | `osbuild_kickstart_var_max_gib` | `128` | `/var` cap |
 | `osbuild_kickstart_home_min_gib` | `100` | `/home` is a volume only when at least this much is left above the caps |
+
+Disk layout for `osbuild_kickstart_partitioning: compliant` (see [Compliant layout](#compliant-layout)):
+
+| Variable | Default | Description |
+|---|---|---|
+| `osbuild_kickstart_compliant_tmp` | `tmpfs` | `tmpfs`: `/tmp` is an fstab line added in `%post`, limited to `compliant_tmp_gib`. `lv`: `/tmp` is a volume of that size |
+| `osbuild_kickstart_compliant_encrypt` | `false` | LUKS on the physical volume; Anaconda asks for a passphrase |
+| `osbuild_kickstart_compliant_disk_min_gib` | `160` | Smaller target disks abort the install |
+| `osbuild_kickstart_compliant_root_gib` | `25` | `/` |
+| `osbuild_kickstart_compliant_usr_gib` | `40` | `/usr` |
+| `osbuild_kickstart_compliant_tmp_gib` | `8` | `/tmp` (volume or tmpfs limit) |
+| `osbuild_kickstart_compliant_var_tmp_gib` | `8` | `/var/tmp` |
+| `osbuild_kickstart_compliant_var_log_gib` | `10` | `/var/log` |
+| `osbuild_kickstart_compliant_audit_gib` | `10` | `/var/log/audit` |
+| `osbuild_kickstart_compliant_var_percent` | `15` | `/var` share of the usable space, clamped to the next two values |
+| `osbuild_kickstart_compliant_var_min_gib` / `_var_max_gib` | `40` / `200` | `/var` lower and upper bound |
+| `osbuild_kickstart_compliant_reserve_percent` | `10` | Share of the usable space left unassigned in `vg00` |
 
 ### Build host
 
@@ -890,7 +927,7 @@ With `osbuild_kickstart_partitioning: auto` a short `%pre` follows that writes t
 
 **Blueprint restrictions.** image-builder rejects a user kickstart next to `[[customizations.user]]`, `[[customizations.group]]`, `installer.unattended` or `installer.sudo-nopasswd`. No blueprint in this role carries them, and the role fails before the build if a prepared blueprint does. Every blueprint enables `org.fedoraproject.Anaconda.Modules.Users`, because image-builder only enables the user screen on its own when the blueprint defines users.
 
-**Sudo.** `/etc/sudoers.d/90-wheel-nopasswd` (mode 0440, `%wheel ALL=(ALL) NOPASSWD: ALL`) is appended as a `[[customizations.files]]` entry (`# BEGIN/END syncopated-sudoers`).
+**Sudo.** With `osbuild_kickstart_sudoers: true` (default `false`), `/etc/sudoers.d/90-wheel-nopasswd` (mode 0440, `%wheel ALL=(ALL) NOPASSWD: ALL`) is appended as a `[[customizations.files]]` entry (`# BEGIN/END syncopated-sudoers`).
 
 **Target disk.** A `%pre` script picks one disk and writes `/tmp/partitions.ks`, which the kickstart includes:
 
@@ -922,6 +959,32 @@ With the defaults:
 The role writes the variables to `/tmp/syncopated-layout.env` in a `%pre` placed before the one in `syncopated.ks`; the source file carries the same values as built-in defaults for the bats tests, which also check that both agree. During installation, `/tmp/syncopated-pre.log` (shell on tty2) records the chosen disk and the sizes.
 
 XFS can grow but not shrink. The caps and the reserve keep space available for whichever volume fills first; a volume that is too large cannot give space back.
+
+#### Compliant layout
+
+`osbuild_kickstart_partitioning: compliant` replaces the layout above with the separate mounts that the CIS, PCI-DSS and HIPAA OpenSCAP profiles scan for (see [OpenSCAP Profiles](#openscap-profiles)). Disk selection, the 2 GiB `/boot` and `vg00` are the same. Order of allocation, with *usable* = disk size − 4 GiB:
+
+1. Fixed volumes: `/` 25 GiB, `/usr` 40 GiB, `/var/tmp` 8 GiB, `/var/log` 10 GiB, `/var/log/audit` 10 GiB, and `/tmp` 8 GiB when `osbuild_kickstart_compliant_tmp: lv`.
+2. **Reserve**: 10% of usable stays unassigned in `vg00`.
+3. **`/var`**: 15% of usable, clamped to 40–200 GiB. It holds podman images, flatpaks and libvirt disks.
+4. **`/home`**: everything that is left. The install aborts when that is under 10 GiB.
+
+Mount options are set in the kickstart (`logvol --fsoptions`), not by the build-time remediation, because Anaconda writes `/etc/fstab` at install time:
+
+| Mount | Options |
+|---|---|
+| `/boot` | `nodev,nosuid` |
+| `/home`, `/var` | `nodev,nosuid,noatime` |
+| `/usr` | `nodev,noatime` |
+| `/var/tmp`, `/var/log`, `/var/log/audit` | `nodev,nosuid,noexec,noatime` |
+| `/tmp` (tmpfs or volume) | `nodev,nosuid,noexec` |
+
+| Disk | `/` | `/usr` | `/var` | `/var/tmp` + `/var/log` + audit | `/home` | Unassigned |
+|---|---|---|---|---|---|---|
+| 477 GiB | 25 GiB | 40 GiB | 70.9 GiB | 28 GiB | 261.8 GiB | 47.3 GiB |
+| 932 GiB | 25 GiB | 40 GiB | 139.2 GiB | 28 GiB | 603 GiB | 92.8 GiB |
+
+`/tmp` as tmpfs may still fail a profile's `partition_for_tmp` rule, which asks for "its own partition or logical volume"; use `lv` to satisfy it. `noexec` on `/var/tmp` can break tools that run from there, so test the first `dnf update` on a new image. Installed-system `/tmp` content is lost on every boot with tmpfs.
 
 #### When a volume fills up
 
