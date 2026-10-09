@@ -32,8 +32,11 @@ ksvalidator = sys.argv[8] if len(sys.argv) > 8 else ""
 header = f"lang {locale}\nkeyboard {keyboard}\ntimezone {timezone} --utc\n"
 want = header + ks_src.read_text(encoding="utf-8")
 flathub_src = (ks_src.parent.parent / "flatpak" / "flathub.flatpakrepo").read_text(encoding="utf-8")
-LAYOUT_KEYS = ["MIN_MIB", "ROOT_PCT", "ROOT_MIN_MIB", "RESERVE_PCT", "USR_PCT",
-               "USR_MAX_MIB", "VAR_MAX_MIB", "HOME_MIN_MIB"]
+LAYOUT_KEYS = ["MIN_MIB", "RESERVE_PCT", "RESERVE_MAX_MIB",
+               "ROOT_MIN_MIB", "ROOT_MAX_MIB", "ROOT_W",
+               "USR_MIN_MIB", "USR_MAX_MIB", "USR_W",
+               "VAR_MIN_MIB", "VAR_MAX_MIB", "VAR_W",
+               "HOME_MIN_MIB", "HOME_W"]
 LAYOUT_RE = re.compile(
     r"%pre --interpreter=/usr/bin/bash --erroronfail\n"
     r"cat >/tmp/syncopated-layout\.env <<'EOF'\n((?:[A-Z_]+=[0-9]+\n)+)EOF\n%end\n")

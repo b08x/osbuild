@@ -303,18 +303,22 @@ ISO image types only. Details in [Installer Kickstart](#installer-kickstart) and
 | `osbuild_firstboot_enabled` | `true` | First-login yadm dotfiles splash (desktop images) |
 | `osbuild_kickstart_file` | derived from `osbuild_kickstart_partitioning` | Kickstart source under `files/`; set only to use your own file |
 
-Disk layout for `osbuild_kickstart_partitioning: auto` (see [Layout](#layout) for how they combine):
+Volume sizing for both layouts (see [Layout](#layout) for how they combine):
 
 | Variable | Default | Description |
 |---|---|---|
-| `osbuild_kickstart_disk_min_gib` | `40` | Smaller target disks abort the install |
-| `osbuild_kickstart_root_percent` | `12` | `/` share of the usable space |
-| `osbuild_kickstart_root_min_gib` | `16` | `/` minimum |
+| `osbuild_kickstart_reserve_max_gib` | `64` | Upper bound of the unassigned reserve (both layouts) |
+
+Disk layout for `osbuild_kickstart_partitioning: auto`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `osbuild_kickstart_disk_min_gib` | `100` | Smaller target disks abort the install |
 | `osbuild_kickstart_reserve_percent` | `8` | Share of the usable space left unassigned in `vg00` for growing volumes later; `0` disables |
-| `osbuild_kickstart_usr_percent` | `80` | `/usr` share of the space after `/` and the reserve; `/var` gets the rest |
-| `osbuild_kickstart_usr_max_gib` | `110` | `/usr` cap |
-| `osbuild_kickstart_var_max_gib` | `110` | `/var` cap |
-| `osbuild_kickstart_home_min_gib` | `20` | `/home` is a volume only when at least this much is left above the caps; a smaller remainder is added to `/var` |
+| `osbuild_kickstart_root_min_gib` / `_root_max_gib` / `_root_weight` | `20` / `64` / `1` | `/` minimum, maximum and share of the shared space |
+| `osbuild_kickstart_usr_min_gib` / `_usr_max_gib` / `_usr_weight` | `30` / `110` / `3` | `/usr` |
+| `osbuild_kickstart_var_min_gib` / `_var_max_gib` / `_var_weight` | `30` / `110` / `3` | `/var` |
+| `osbuild_kickstart_home_min_gib` / `_home_weight` | `20` / `5` | `/home` has no maximum; it is dropped (a directory on `/`) when the minimums do not fit with it |
 
 Disk layout for `osbuild_kickstart_partitioning: compliant` (see [Compliant layout](#compliant-layout)):
 
@@ -323,15 +327,15 @@ Disk layout for `osbuild_kickstart_partitioning: compliant` (see [Compliant layo
 | `osbuild_kickstart_compliant_tmp` | `tmpfs` | `tmpfs`: `/tmp` is an fstab line added in `%post`, limited to `compliant_tmp_gib`. `lv`: `/tmp` is a volume of that size |
 | `osbuild_kickstart_compliant_encrypt` | `false` | LUKS on the physical volume; Anaconda asks for a passphrase |
 | `osbuild_kickstart_compliant_disk_min_gib` | `180` | Smaller target disks abort the install |
-| `osbuild_kickstart_compliant_root_gib` | `25` | `/` |
-| `osbuild_kickstart_compliant_usr_gib` | `40` | `/usr` |
+| `osbuild_kickstart_compliant_root_gib` | `35` | `/` |
+| `osbuild_kickstart_compliant_usr_gib` | `45` | `/usr` |
 | `osbuild_kickstart_compliant_tmp_gib` | `8` | `/tmp` (volume or tmpfs limit) |
 | `osbuild_kickstart_compliant_var_tmp_gib` | `8` | `/var/tmp` |
 | `osbuild_kickstart_compliant_var_log_gib` | `10` | `/var/log` |
 | `osbuild_kickstart_compliant_audit_gib` | `10` | `/var/log/audit` |
-| `osbuild_kickstart_compliant_var_percent` | `15` | `/var` share of the usable space, clamped to the next two values |
-| `osbuild_kickstart_compliant_var_min_gib` / `_var_max_gib` | `40` / `200` | `/var` lower and upper bound |
-| `osbuild_kickstart_compliant_reserve_percent` | `10` | Share of the usable space left unassigned in `vg00` |
+| `osbuild_kickstart_compliant_var_min_gib` / `_var_max_gib` / `_var_weight` | `40` / `200` / `2` | `/var` minimum, maximum and share of the shared space |
+| `osbuild_kickstart_compliant_home_min_gib` / `_home_weight` | `10` / `5` | `/home` minimum (the install aborts when it does not fit) and share; no maximum |
+| `osbuild_kickstart_compliant_reserve_percent` | `8` | Share of the usable space left unassigned in `vg00` |
 
 ### Build host
 
@@ -409,6 +413,7 @@ Used only with `osbuild_build_bootc: true`. ISO installers create no user at bui
       vars:
         osbuild_kickstart_usr_max_gib: 128
         osbuild_kickstart_var_max_gib: 512    # VM images and containers
+        osbuild_kickstart_var_weight: 6       # /var grows twice as fast as /usr
         osbuild_kickstart_home_min_gib: 50
 ```
 
@@ -934,40 +939,44 @@ With `osbuild_kickstart_partitioning: auto` a short `%pre` follows that writes t
 1. Excludes the disk behind `/run/install/repo` or `/run/install/isodir`, and the disk carrying the `inst.stage2=hd:LABEL=...` label.
 2. Excludes removable, read-only and USB disks, plus `zram`, `loop` and optical devices.
 3. Prefers NVMe disks; among the remaining ones takes the largest.
-4. Aborts the install (message on tty1 and in `/tmp/syncopated-pre.log`) when no disk is left or the chosen disk is smaller than `osbuild_kickstart_disk_min_gib` (80 GiB). A small NVMe disk is not skipped in favour of a larger SATA disk: the install aborts.
+4. Aborts the install (message on tty1 and in `/tmp/syncopated-pre.log`) when no disk is left or the chosen disk is smaller than `osbuild_kickstart_disk_min_gib` (100 GiB). A small NVMe disk is not skipped in favour of a larger SATA disk: the install aborts.
 
 Only that disk is touched (`ignoredisk --only-use`, `clearpart --drives`). Other internal disks and the install USB keep their data.
 
 #### Layout
 
-GPT on the chosen disk: an EFI System Partition or biosboot (whatever `reqpart` creates for the platform), a 2 GiB xfs `/boot`, and one LVM physical volume holding volume group `vg00`. All logical volumes are xfs. With *usable* = disk size − 4 GiB, the `%pre` allocates in this order (variable names without the `osbuild_kickstart_` prefix):
+GPT on the chosen disk: an EFI System Partition or biosboot (whatever `reqpart` creates for the platform), a 2 GiB xfs `/boot`, and one LVM physical volume holding volume group `vg00`. All logical volumes are xfs. Sizing works like Anaconda's `default_partitioning` (`min`/`max`) and systemd-repart (`Weight=`): with *usable* = disk size − 4 GiB, the `%pre` does this (variable names without the `osbuild_kickstart_` prefix):
 
-1. **`/`** (`vg00/root`): `root_percent` of usable, at least `root_min_gib`.
-2. **Reserve**: `reserve_percent` of usable stays unassigned in `vg00`.
-3. **`/usr`** (`vg00/usr`): `usr_percent` of what is left, at most `usr_max_gib`. **`/var`** (`vg00/var`): the rest of it, at most `var_max_gib`. `/var` therefore also receives whatever `/usr`'s cap leaves.
-4. **`/home`** (`vg00/home`): everything above the two caps, if that is at least `home_min_gib`. Otherwise that space is added to `/var` and `/home` is a directory on `/`.
+1. **Reserve**: `reserve_percent` of usable, at most `reserve_max_gib`, stays unassigned in `vg00`.
+2. **Minimums**: `/`, `/usr`, `/var` and `/home` each get their `*_min_gib`. When that does not fit, `/home` is dropped (it becomes a directory on `/`); when it still does not fit, the install aborts.
+3. **Shared space**: what is left is divided in proportion to the `*_weight` values. A volume that reaches its `*_max_gib` stops growing and the others share its surplus (`/home` has no maximum). Space no volume can take stays unassigned.
+
+The minimums come from a measured install of the NVIDIA workstation image: `/` 5 GiB, `/usr` 17 GiB and `/var` 5 GiB used right after installation. The minimums leave headroom for `dnf` updates, flatpaks and containers.
 
 With the defaults:
 
 | Disk | `/` | `/usr` | `/var` | `/home` | Unassigned in `vg00` |
 |---|---|---|---|---|---|
-| 100 GiB | 25 GiB | 25.3 GiB | 38.0 GiB | on `/` | 7.7 GiB |
-| 477 GiB | 56.8 GiB | 110 GiB | 110 GiB | 158.4 GiB | 37.8 GiB |
-| 931 GiB | 111.2 GiB | 110 GiB | 110 GiB | 521.6 GiB | 74.2 GiB |
-| 2000 GiB | 239.5 GiB | 110 GiB | 110 GiB | 1376.8 GiB | 159.7 GiB |
+| 100 GiB | 21.2 GiB | 33.6 GiB | 33.6 GiB | on `/` | 7.7 GiB |
+| 119 GiB | 20.5 GiB | 31.5 GiB | 31.5 GiB | 22.4 GiB | 9.2 GiB |
+| 233 GiB | 29.2 GiB | 57.7 GiB | 57.7 GiB | 66.1 GiB | 18.3 GiB |
+| 477 GiB | 49.2 GiB | 110 GiB | 110 GiB | 166 GiB | 37.8 GiB |
+| 931 GiB | 64 GiB | 110 GiB | 110 GiB | 579 GiB | 64 GiB |
+| 2000 GiB | 64 GiB | 110 GiB | 110 GiB | 1648 GiB | 64 GiB |
+
+**NVIDIA and Intel oneAPI workstations** carry the CUDA toolkit or the oneAPI runtime and need more room in `/usr`. The NVIDIA playbooks (`osbuild-rocky-iso-nvidia-components.yml`, `osbuild-almalinux-iso-nvidia.yml`) set `osbuild_kickstart_usr_min_gib: 80` and `osbuild_kickstart_disk_min_gib: 150`; the compliant NVIDIA playbook (`osbuild-rocky-iso-nvidia-openscap-components.yml`) sets `osbuild_kickstart_compliant_usr_gib: 80` and `osbuild_kickstart_compliant_disk_min_gib: 215` (80 GiB `/usr` + the other fixed volumes + `/var` and `/home` minimums + the reserve). With `/usr` at 80 GiB, a 150 GiB disk gets `/` 20.6, `/usr` 81.9, `/var` 31.9 GiB and no `/home` volume; the smallest disk with a `/home` volume is about 167 GiB. The Intel oneAPI playbook partitions interactively and is not affected.
 
 The role writes the variables to `/tmp/syncopated-layout.env` in a `%pre` placed before the one in `syncopated.ks`; the source file carries the same values as built-in defaults for the bats tests, which also check that both agree. During installation, `/tmp/syncopated-pre.log` (shell on tty2) records the chosen disk and the sizes.
 
-XFS can grow but not shrink. The caps and the reserve keep space available for whichever volume fills first; a volume that is too large cannot give space back.
+XFS can grow but not shrink. The maxima and the reserve keep space available for whichever volume fills first; a volume that is too large cannot give space back.
 
 #### Compliant layout
 
 `osbuild_kickstart_partitioning: compliant` replaces the layout above with the separate mounts that the CIS, PCI-DSS and HIPAA OpenSCAP profiles scan for (see [OpenSCAP Profiles](#openscap-profiles)). Disk selection, the 2 GiB `/boot` and `vg00` are the same. Order of allocation, with *usable* = disk size − 4 GiB:
 
-1. Fixed volumes: `/` 35 GiB, `/usr` 45 GiB, `/var/tmp` 8 GiB, `/var/log` 10 GiB, `/var/log/audit` 10 GiB, and `/tmp` 8 GiB when `osbuild_kickstart_compliant_tmp: lv`.
-2. **Reserve**: 10% of usable stays unassigned in `vg00`.
-3. **`/var`**: 15% of usable, clamped to 40–200 GiB. It holds podman images, flatpaks and libvirt disks.
-4. **`/home`**: everything that is left. The install aborts when that is under 10 GiB.
+1. **Reserve**: `compliant_reserve_percent` (8%) of usable, at most `reserve_max_gib` (64 GiB), stays unassigned in `vg00`.
+2. Fixed volumes: `/` 35 GiB, `/usr` 45 GiB, `/var/tmp` 8 GiB, `/var/log` 10 GiB, `/var/log/audit` 10 GiB, and `/tmp` 8 GiB when `osbuild_kickstart_compliant_tmp: lv`.
+3. **`/var`** (at least 40 GiB, at most 200 GiB; it holds podman images, flatpaks and libvirt disks) and **`/home`** (at least 10 GiB, no maximum) get their minimums, then share the rest 2:5 (`var_weight` : `home_weight`). The install aborts when the minimums do not fit.
 
 Mount options are set in the kickstart (`logvol --fsoptions`), not by the build-time remediation, because Anaconda writes `/etc/fstab` at install time:
 
@@ -981,8 +990,9 @@ Mount options are set in the kickstart (`logvol --fsoptions`), not by the build-
 
 | Disk | `/` | `/usr` | `/var` | `/var/tmp` + `/var/log` + audit | `/home` | Unassigned |
 |---|---|---|---|---|---|---|
-| 477 GiB | 35 GiB | 45 GiB | 70.9 GiB | 28 GiB | 251.7 GiB | 47.3 GiB |
-| 932 GiB | 35 GiB | 45 GiB | 139.2 GiB | 28 GiB | 593 GiB | 92.8 GiB |
+| 180 GiB | 35 GiB | 45 GiB | 41.1 GiB | 28 GiB | 12.8 GiB | 14.1 GiB |
+| 477 GiB | 35 GiB | 45 GiB | 119.2 GiB | 28 GiB | 208 GiB | 37.8 GiB |
+| 932 GiB | 35 GiB | 45 GiB | 200 GiB | 28 GiB | 556 GiB | 64 GiB |
 
 `/tmp` as tmpfs may still fail a profile's `partition_for_tmp` rule, which asks for "its own partition or logical volume"; use `lv` to satisfy it. `noexec` on `/var/tmp` can break tools that run from there, so test the first `dnf update` on a new image. Installed-system `/tmp` content is lost on every boot with tmpfs.
 

@@ -25,22 +25,34 @@ CMDLINE=${SYNC_PRE_CMDLINE:-/proc/cmdline}
 LAYOUT=${SYNC_PRE_LAYOUT:-/tmp/syncopated-layout.env}
 OUT_POST=${SYNC_PRE_POST_OUT:-/tmp/partitions-post.ks}
 
-# Layout parameters, in MiB and percent. These values equal the role
+# Layout parameters, in MiB, percent and weights. These values equal the role
 # defaults; the role writes its osbuild_kickstart_* variables to $LAYOUT in an
 # earlier %pre, which overrides them.
-MIN_MIB=81920       # smallest target disk accepted
+#
+# Both layouts size volumes the way Anaconda's default_partitioning and
+# systemd-repart do: every volume starts at its minimum, and the space that is
+# left (usable - reserve - the minimums) is shared in proportion to the weights
+# until a volume reaches its maximum. Space no volume can take stays unassigned.
+MIN_MIB=102400      # smallest target disk accepted
 BUFFER_MIB=4096     # held back for /boot, the EFI partition and LVM metadata
-ROOT_PCT=12         # / share of the usable space
-ROOT_MIN_MIB=25600  # / floor
-RESERVE_PCT=8       # share of the usable space left unassigned in vg00
-USR_PCT=40          # /usr share of the space after / and the reserve
-USR_MAX_MIB=112640  # /usr cap
-VAR_MAX_MIB=112640  # /var cap
-HOME_MIN_MIB=20480  # /home is created only when at least this much is left; a smaller remainder goes to /var
+RESERVE_PCT=8       # share of the usable space left unassigned in vg00 ...
+RESERVE_MAX_MIB=65536 # ... at most this much
+ROOT_MIN_MIB=20480  # /
+ROOT_MAX_MIB=65536
+ROOT_W=1
+USR_MIN_MIB=30720   # /usr
+USR_MAX_MIB=112640
+USR_W=3
+VAR_MIN_MIB=30720   # /var
+VAR_MAX_MIB=112640
+VAR_W=3
+HOME_MIN_MIB=20480  # /home is dropped (a directory on /) when the minimums do not fit with it
+HOME_W=5            # /home has no maximum
 
 # LAYOUT_MODE=compliant (role: osbuild_kickstart_partitioning: compliant) swaps
 # the layout below for one with the separate mounts that the CIS, PCI-DSS and
 # HIPAA profiles scan for. Sizes in MiB; the role overrides them through $LAYOUT.
+# The fixed volumes have equal minimum and maximum; /var and /home share the rest.
 LAYOUT_MODE=auto
 C_ROOT_MIB=35840    # /
 C_USR_MIB=46080     # /usr
@@ -48,15 +60,16 @@ C_TMP_MIB=8192      # /tmp (volume, or tmpfs size limit)
 C_VARTMP_MIB=8192   # /var/tmp
 C_VARLOG_MIB=10240  # /var/log
 C_AUDIT_MIB=10240   # /var/log/audit
-C_VAR_PCT=15        # /var share of the usable space ...
-C_VAR_MIN_MIB=40960 # ... at least
-C_VAR_MAX_MIB=204800 # ... at most
-C_HOME_FLOOR_MIB=10240 # /home must get at least this much
+C_VAR_MIN_MIB=40960 # /var
+C_VAR_MAX_MIB=204800
+C_VAR_W=2
+C_HOME_MIN_MIB=10240 # /home must get at least this much
+C_HOME_W=5
 TMP_MODE=tmpfs      # tmpfs | lv
 ENCRYPT=0           # 1: LUKS on the physical volume (Anaconda asks for a passphrase)
 # shellcheck source=/dev/null
 [ -r "$LAYOUT" ] && . "$LAYOUT"
-if [ "$LAYOUT_MODE" = compliant ] && [ "$MIN_MIB" -eq 81920 ]; then
+if [ "$LAYOUT_MODE" = compliant ] && [ "$MIN_MIB" -eq 102400 ]; then
   MIN_MIB=184320    # compliant fixed volumes need a bigger disk (180 GiB)
 fi
 : >"$OUT_POST"
@@ -127,18 +140,71 @@ total=$((best_size / 1048576))
 
 avail=$((total - BUFFER_MIB))
 reserve=$((avail * RESERVE_PCT / 100))
+[ "$reserve" -le "$RESERVE_MAX_MIB" ] || reserve=$RESERVE_MAX_MIB
+pool=$((avail - reserve))
+
+declare -A vmin vmax vwt size
+vols=()
+left=0
+NO_MAX=$((1 << 50))
+
+# add_vol NAME MIN MAX WEIGHT
+add_vol() {
+  vols+=("$1")
+  vmin[$1]=$2
+  vmax[$1]=$3
+  vwt[$1]=$4
+}
+
+# allocate: size[] = minimums, then the remaining pool shared by weight in
+# rounds, each volume capped at its maximum; what no volume can take stays in
+# $left (unassigned).
+allocate() {
+  local v tw add cap round used
+  left=$pool
+  for v in "${vols[@]}"; do
+    size[$v]=${vmin[$v]}
+    left=$((left - vmin[$v]))
+  done
+  [ "$left" -ge 0 ] || return 1
+  while [ "$left" -gt 0 ]; do
+    tw=0
+    for v in "${vols[@]}"; do
+      [ "${size[$v]}" -lt "${vmax[$v]}" ] && tw=$((tw + vwt[$v]))
+    done
+    [ "$tw" -gt 0 ] || break
+    round=$left
+    used=0
+    for v in "${vols[@]}"; do
+      [ "${size[$v]}" -lt "${vmax[$v]}" ] || continue
+      add=$((round * vwt[$v] / tw))
+      cap=$((vmax[$v] - size[$v]))
+      [ "$add" -le "$cap" ] || add=$cap
+      size[$v]=$((size[$v] + add))
+      used=$((used + add))
+    done
+    [ "$used" -gt 0 ] || break
+    left=$((left - used))
+  done
+}
 
 if [ "$LAYOUT_MODE" = compliant ]; then
-  # Fixed-size volumes first, /var as a clamped share, /home takes what is left
-  # after the unassigned reserve. Mount options are set here because Anaconda
+  # Fixed volumes (minimum = maximum), then /var and /home share the rest after
+  # the unassigned reserve. Mount options are set here because Anaconda
   # writes /etc/fstab at install time, after the build-time remediation.
-  var=$((avail * C_VAR_PCT / 100))
-  [ "$var" -ge "$C_VAR_MIN_MIB" ] || var=$C_VAR_MIN_MIB
-  [ "$var" -le "$C_VAR_MAX_MIB" ] || var=$C_VAR_MAX_MIB
   tmplv=0
   [ "$TMP_MODE" = lv ] && tmplv=$C_TMP_MIB
-  home=$((avail - reserve - C_ROOT_MIB - C_USR_MIB - tmplv - C_VARTMP_MIB - C_VARLOG_MIB - C_AUDIT_MIB - var))
-  [ "$home" -ge "$C_HOME_FLOOR_MIB" ] || die "compliant layout leaves $home MiB for /home on $best ($total MiB); need at least $C_HOME_FLOOR_MIB MiB"
+  add_vol root "$C_ROOT_MIB" "$C_ROOT_MIB" 0
+  add_vol usr "$C_USR_MIB" "$C_USR_MIB" 0
+  add_vol vartmp "$C_VARTMP_MIB" "$C_VARTMP_MIB" 0
+  add_vol varlog "$C_VARLOG_MIB" "$C_VARLOG_MIB" 0
+  add_vol audit "$C_AUDIT_MIB" "$C_AUDIT_MIB" 0
+  [ "$tmplv" -eq 0 ] || add_vol tmp "$tmplv" "$tmplv" 0
+  add_vol var "$C_VAR_MIN_MIB" "$C_VAR_MAX_MIB" "$C_VAR_W"
+  add_vol home "$C_HOME_MIN_MIB" "$NO_MAX" "$C_HOME_W"
+  allocate || die "compliant layout needs more than the $((pool)) MiB available on $best ($total MiB) for its fixed volumes plus at least $C_VAR_MIN_MIB MiB /var and $C_HOME_MIN_MIB MiB /home"
+  var=${size[var]}
+  home=${size[home]}
   enc=
   [ "$ENCRYPT" = 1 ] && enc=" --encrypted"
   cat >"$OUT" <<EOF
@@ -168,30 +234,28 @@ EOF
       "echo 'tmpfs /tmp tmpfs defaults,nodev,nosuid,noexec,mode=1777,size=${C_TMP_MIB}M 0 0' >>/etc/fstab" \
       '%end' >"$OUT_POST"
   fi
-  echo "target disk $best: $total MiB, compliant layout (/tmp=$TMP_MODE, encrypt=$ENCRYPT); / $C_ROOT_MIB, /usr $C_USR_MIB, /var $var, /home $home MiB, unassigned $((avail - C_ROOT_MIB - C_USR_MIB - tmplv - C_VARTMP_MIB - C_VARLOG_MIB - C_AUDIT_MIB - var - home)) MiB"
+  echo "target disk $best: $total MiB, compliant layout (/tmp=$TMP_MODE, encrypt=$ENCRYPT); / $C_ROOT_MIB, /usr $C_USR_MIB, /var $var, /home $home MiB, unassigned $((reserve + left)) MiB"
   exit 0
 fi
 
-# / gets ROOT_PCT of the usable space (at least ROOT_MIN_MIB) and RESERVE_PCT
-# stays unassigned in vg00 for lvextend. /usr gets USR_PCT of what is left,
-# up to its cap; /var gets the remainder, up to its cap. Space beyond the caps becomes
-# /home when it is at least HOME_MIN_MIB; a smaller remainder is added to /var
-# (above its cap) and /home is a directory on /.
-root=$((avail * ROOT_PCT / 100))
-[ "$root" -ge "$ROOT_MIN_MIB" ] || root=$ROOT_MIN_MIB
-rest=$((avail - reserve - root))
-usr=$((rest * USR_PCT / 100))
-[ "$usr" -le "$USR_MAX_MIB" ] || usr=$USR_MAX_MIB
-var=$((rest - usr))
-[ "$var" -le "$VAR_MAX_MIB" ] || var=$VAR_MAX_MIB
-if [ "$usr" -lt 1024 ] || [ "$var" -lt 1024 ]; then
-  die "layout leaves less than 1 GiB for /usr or /var on $best ($total MiB); lower the / or reserve share"
+# Every volume starts at its minimum; the space left after the reserve is shared
+# by weight up to each maximum (see the parameters above). /home is optional:
+# when the minimums do not fit with it, it is dropped and /home is a directory
+# on /; the other volumes then share its space.
+add_vol root "$ROOT_MIN_MIB" "$ROOT_MAX_MIB" "$ROOT_W"
+add_vol usr "$USR_MIN_MIB" "$USR_MAX_MIB" "$USR_W"
+add_vol var "$VAR_MIN_MIB" "$VAR_MAX_MIB" "$VAR_W"
+add_vol home "$HOME_MIN_MIB" "$NO_MAX" "$HOME_W"
+if ! allocate; then
+  unset 'vols[3]'
+  vols=("${vols[@]}")
+  allocate || die "the minimum / ($ROOT_MIN_MIB), /usr ($USR_MIN_MIB) and /var ($VAR_MIN_MIB) MiB do not fit in the $pool MiB available on $best ($total MiB)"
+  size[home]=0
 fi
-home=$((rest - usr - var))
-if [ "$home" -lt "$HOME_MIN_MIB" ]; then
-  var=$((var + home))
-  home=0
-fi
+root=${size[root]}
+usr=${size[usr]}
+var=${size[var]}
+home=${size[home]}
 
 cat >"$OUT" <<EOF
 ignoredisk --only-use=$best
@@ -209,7 +273,7 @@ EOF
 if [ "$home" -gt 0 ]; then
   echo "logvol /home --vgname=vg00 --name=home --size=$home --fstype=xfs" >>"$OUT"
 fi
-echo "target disk $best: $total MiB; / $root MiB, /usr $usr MiB, /var $var MiB, /home $home MiB (0: on /), unassigned $((avail - root - usr - var - home)) MiB"
+echo "target disk $best: $total MiB; / $root MiB, /usr $usr MiB, /var $var MiB, /home $home MiB (0: on /), unassigned $((reserve + left)) MiB"
 %end
 
 %include /tmp/partitions.ks

@@ -160,12 +160,14 @@
           - _layout | map('string') | select('match', '^[0-9]+$') | list | length == _layout | length
           - osbuild_kickstart_compliant_tmp in ['tmpfs', 'lv']
           - osbuild_kickstart_compliant_var_min_gib | int <= osbuild_kickstart_compliant_var_max_gib | int
-          - osbuild_kickstart_compliant_reserve_percent | int + osbuild_kickstart_compliant_var_percent | int < 100
+          - osbuild_kickstart_compliant_reserve_percent | int < 100
+          - osbuild_kickstart_compliant_var_weight | int + osbuild_kickstart_compliant_home_weight | int > 0
           - osbuild_kickstart_compliant_disk_min_gib | int > 0
         fail_msg: >-
           osbuild_kickstart_compliant_* sizes must be non-negative integers,
-          _tmp must be tmpfs or lv, var_min_gib at most var_max_gib, and
-          reserve_percent + var_percent below 100. Got {{ _layout }}.
+          _tmp must be tmpfs or lv, var_min_gib at most var_max_gib,
+          reserve_percent below 100, and var_weight + home_weight above 0.
+          Got {{ _layout }}.
         quiet: true
       vars:
         _layout:
@@ -176,9 +178,12 @@
           - "{{ osbuild_kickstart_compliant_var_tmp_gib }}"
           - "{{ osbuild_kickstart_compliant_var_log_gib }}"
           - "{{ osbuild_kickstart_compliant_audit_gib }}"
-          - "{{ osbuild_kickstart_compliant_var_percent }}"
           - "{{ osbuild_kickstart_compliant_var_min_gib }}"
           - "{{ osbuild_kickstart_compliant_var_max_gib }}"
+          - "{{ osbuild_kickstart_compliant_var_weight }}"
+          - "{{ osbuild_kickstart_compliant_home_min_gib }}"
+          - "{{ osbuild_kickstart_compliant_home_weight }}"
+          - "{{ osbuild_kickstart_reserve_max_gib }}"
           - "{{ osbuild_kickstart_compliant_reserve_percent }}"
 
     - name: Assert kickstart disk layout variables are sane
@@ -186,26 +191,33 @@
       ansible.builtin.assert:
         that:
           - _layout | map('string') | select('match', '^[0-9]+$') | list | length == _layout | length
-          - osbuild_kickstart_root_percent | int + osbuild_kickstart_reserve_percent | int < 100
-          - osbuild_kickstart_usr_percent | int > 0
-          - osbuild_kickstart_usr_percent | int < 100
-          - osbuild_kickstart_root_min_gib | int > 0
-          - osbuild_kickstart_disk_min_gib | int > osbuild_kickstart_root_min_gib | int
+          - osbuild_kickstart_reserve_percent | int < 100
+          - osbuild_kickstart_root_min_gib | int <= osbuild_kickstart_root_max_gib | int
+          - osbuild_kickstart_usr_min_gib | int <= osbuild_kickstart_usr_max_gib | int
+          - osbuild_kickstart_var_min_gib | int <= osbuild_kickstart_var_max_gib | int
+          - osbuild_kickstart_root_weight | int + osbuild_kickstart_usr_weight | int + osbuild_kickstart_var_weight | int + osbuild_kickstart_home_weight | int > 0
+          - osbuild_kickstart_disk_min_gib | int > 0
         fail_msg: >-
           osbuild_kickstart_* layout values must be non-negative integers,
-          root_percent + reserve_percent below 100, usr_percent between 1 and 99,
-          and disk_min_gib above root_min_gib. Got {{ _layout }}.
+          reserve_percent below 100, every *_min_gib at most its *_max_gib, and
+          at least one weight above 0. Got {{ _layout }}.
         quiet: true
       vars:
         _layout:
           - "{{ osbuild_kickstart_disk_min_gib }}"
-          - "{{ osbuild_kickstart_root_percent }}"
-          - "{{ osbuild_kickstart_root_min_gib }}"
           - "{{ osbuild_kickstart_reserve_percent }}"
-          - "{{ osbuild_kickstart_usr_percent }}"
+          - "{{ osbuild_kickstart_reserve_max_gib }}"
+          - "{{ osbuild_kickstart_root_min_gib }}"
+          - "{{ osbuild_kickstart_root_max_gib }}"
+          - "{{ osbuild_kickstart_root_weight }}"
+          - "{{ osbuild_kickstart_usr_min_gib }}"
           - "{{ osbuild_kickstart_usr_max_gib }}"
+          - "{{ osbuild_kickstart_usr_weight }}"
+          - "{{ osbuild_kickstart_var_min_gib }}"
           - "{{ osbuild_kickstart_var_max_gib }}"
+          - "{{ osbuild_kickstart_var_weight }}"
           - "{{ osbuild_kickstart_home_min_gib }}"
+          - "{{ osbuild_kickstart_home_weight }}"
 
     - name: Assert kickstart fits in a TOML literal string
       ansible.builtin.assert:

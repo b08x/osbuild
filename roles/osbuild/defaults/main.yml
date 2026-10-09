@@ -353,13 +353,25 @@ osbuild_kickstart_enabled: true
 osbuild_kickstart_partitioning: auto
 osbuild_kickstart_file: "kickstart/{{ 'syncopated-interactive.ks' if osbuild_kickstart_partitioning == 'interactive' else 'syncopated.ks' }}"
 
-# Layout for osbuild_kickstart_partitioning: compliant. Usable space = disk
-# size - 4 GiB. Fixed volumes first (/, /usr, /var/tmp, /var/log,
-# /var/log/audit, and /tmp when compliant_tmp is lv); /var gets var_percent of
-# the usable space clamped to var_min_gib..var_max_gib; reserve_percent stays
-# unassigned in vg00 for `lvextend -r`; /home takes the rest. Mount options
-# live in the kickstart because Anaconda writes /etc/fstab after the build-time
-# remediation. Disks smaller than disk_min_gib abort the install.
+# Sizing for both layouts (the same method as Anaconda's default_partitioning
+# and systemd-repart). Usable space = disk size - 4 GiB (/boot, EFI partition,
+# LVM metadata). All logical volumes are XFS in vg00 on the selected disk.
+#   1. reserve  reserve_percent of the usable space, at most reserve_max_gib,
+#               stays unassigned in vg00 so a full volume can be grown with
+#               `lvextend -r` (README: "When a volume fills up")
+#   2. minimums every volume gets its *_min_gib
+#   3. the rest is shared in proportion to the *_weight values until a volume
+#      reaches its *_max_gib; space no volume can take stays unassigned
+# XFS cannot shrink: prefer maxima that are too small (grow later) over too large.
+osbuild_kickstart_reserve_max_gib: 64
+
+# Layout for osbuild_kickstart_partitioning: compliant. Fixed volumes (/, /usr,
+# /var/tmp, /var/log, /var/log/audit, and /tmp when compliant_tmp is lv); /var
+# and /home share the rest (var_min_gib..var_max_gib by var_weight, home_min_gib
+# and up by home_weight). Mount options live in the kickstart because Anaconda
+# writes /etc/fstab after the build-time remediation. Disks smaller than
+# disk_min_gib, or too small for the fixed volumes plus the /var and /home
+# minimums, abort the install.
 #   compliant_tmp   tmpfs: fstab line added in %post (size = tmp_gib); a
 #                   partition_for_tmp rule may still flag it.
 #                   lv: a tmp_gib volume.
@@ -374,33 +386,31 @@ osbuild_kickstart_compliant_tmp_gib: 8
 osbuild_kickstart_compliant_var_tmp_gib: 8
 osbuild_kickstart_compliant_var_log_gib: 10
 osbuild_kickstart_compliant_audit_gib: 10
-osbuild_kickstart_compliant_var_percent: 15
 osbuild_kickstart_compliant_var_min_gib: 40
 osbuild_kickstart_compliant_var_max_gib: 200
-osbuild_kickstart_compliant_reserve_percent: 10
+osbuild_kickstart_compliant_var_weight: 2
+osbuild_kickstart_compliant_home_min_gib: 10
+osbuild_kickstart_compliant_home_weight: 5
+osbuild_kickstart_compliant_reserve_percent: 8
 
-# Disk layout for osbuild_kickstart_partitioning: auto. All logical volumes
-# are XFS in vg00 on the selected disk. Usable space = disk size - 4 GiB
-# (/boot, EFI partition, LVM metadata). Order of allocation:
-#   1. /      root_percent of the usable space, at least root_min_gib
-#   2. spare  reserve_percent of the usable space stays unassigned in vg00,
-#             so a full volume can be grown with `lvextend -r` (README:
-#             "When a volume fills up")
-#   3. /usr   usr_percent of what is left, at most usr_max_gib
-#      /var   the rest of it (what /usr's cap leaves over), at most var_max_gib
-#   4. /home  everything above the two caps, if that is at least
-#             home_min_gib; a smaller remainder is added to /var and /home is
-#             a directory on /
-# Disks smaller than disk_min_gib abort the install with a message on tty1.
-# XFS cannot shrink: prefer caps that are too small (grow later) over too large.
-osbuild_kickstart_disk_min_gib: 80
-osbuild_kickstart_root_percent: 12
-osbuild_kickstart_root_min_gib: 25
+# Layout for osbuild_kickstart_partitioning: auto (workstation sizes; measured
+# install footprint of the NVIDIA CIS build: / 5 GiB, /usr 17 GiB, /var 5 GiB).
+# /home is optional: when the minimums do not fit with it, it is dropped and
+# /home is a directory on /. /home has no maximum. Disks smaller than
+# disk_min_gib abort the install with a message on tty1.
+osbuild_kickstart_disk_min_gib: 100
 osbuild_kickstart_reserve_percent: 8
-osbuild_kickstart_usr_percent: 40
+osbuild_kickstart_root_min_gib: 20
+osbuild_kickstart_root_max_gib: 64
+osbuild_kickstart_root_weight: 1
+osbuild_kickstart_usr_min_gib: 30
 osbuild_kickstart_usr_max_gib: 110
+osbuild_kickstart_usr_weight: 3
+osbuild_kickstart_var_min_gib: 30
 osbuild_kickstart_var_max_gib: 110
+osbuild_kickstart_var_weight: 3
 osbuild_kickstart_home_min_gib: 20
+osbuild_kickstart_home_weight: 5
 
 # Ship /etc/sudoers.d/90-wheel-nopasswd (%wheel ALL=(ALL) NOPASSWD: ALL) so the
 # admin user created in Anaconda runs sudo without a password.
