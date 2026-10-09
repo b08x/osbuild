@@ -157,7 +157,7 @@ copr_repos: ["owner/project"]         # optional, bootc builds only
 | `osbuild_package_pins` | `{}` | `{pkg: "ver.*"}`; component blueprints only, static files build with `*` |
 | `osbuild_kickstart_enabled` | `true` | Embed `files/kickstart/*.ks` as `[customizations.installer.kickstart]` |
 | `osbuild_kickstart_partitioning` | `auto` | `interactive` → `syncopated-interactive.ks`, no storage commands |
-| `osbuild_kickstart_{root_percent,root_min_gib,reserve_percent,usr_percent,usr_max_gib,var_max_gib,home_min_gib,disk_min_gib}` | `10,16,10,80,256,128,100,40` | `auto` layout: `/`, unassigned vg00 reserve, `/usr` (capped), `/var` (rest, capped), `/home` only if ≥ home_min_gib is left. Built-in defaults in `syncopated.ks` must match `defaults/main.yml` (bats checks) |
+| `osbuild_kickstart_{root_percent,root_min_gib,reserve_percent,usr_percent,usr_max_gib,var_max_gib,home_min_gib,disk_min_gib}` | `12,25,8,40,110,110,20,80` | `auto` layout: `/`, unassigned vg00 reserve, `/usr` (capped), `/var` (rest, capped), `/home` only if ≥ home_min_gib is left (a smaller remainder goes to `/var`). Built-in defaults in `syncopated.ks` must match `defaults/main.yml` (bats checks) |
 | `osbuild_kickstart_partitioning` `compliant` | `auto` | Separate `/usr`, `/var`, `/var/tmp`, `/var/log`, `/var/log/audit`, `/home` (+ `/tmp` as tmpfs or `lv`) with hardening mount options, for OpenSCAP profiles; `osbuild_kickstart_compliant_*` sizes, 160 GiB minimum, `_encrypt` for LUKS |
 | `osbuild_kickstart_sudoers` | `false` | `/etc/sudoers.d/90-wheel-nopasswd` |
 | `osbuild_firstboot_enabled` | `true` | First-login splash (desktop images only): system setup (dnf update, reboot offer, graphical.target), then optional yadm dotfiles; `yadm bootstrap` runs in a new terminal |

@@ -30,13 +30,13 @@ OUT_POST=${SYNC_PRE_POST_OUT:-/tmp/partitions-post.ks}
 # earlier %pre, which overrides them.
 MIN_MIB=81920       # smallest target disk accepted
 BUFFER_MIB=4096     # held back for /boot, the EFI partition and LVM metadata
-ROOT_PCT=10         # / share of the usable space
+ROOT_PCT=12         # / share of the usable space
 ROOT_MIN_MIB=25600  # / floor
-RESERVE_PCT=10      # share of the usable space left unassigned in vg00
+RESERVE_PCT=8       # share of the usable space left unassigned in vg00
 USR_PCT=40          # /usr share of the space after / and the reserve
-USR_MAX_MIB=262144  # /usr cap
-VAR_MAX_MIB=131072  # /var cap
-HOME_MIN_MIB=102400 # /home is created only when at least this much is left
+USR_MAX_MIB=112640  # /usr cap
+VAR_MAX_MIB=112640  # /var cap
+HOME_MIN_MIB=20480  # /home is created only when at least this much is left; a smaller remainder goes to /var
 
 # LAYOUT_MODE=compliant (role: osbuild_kickstart_partitioning: compliant) swaps
 # the layout below for one with the separate mounts that the CIS, PCI-DSS and
@@ -175,8 +175,8 @@ fi
 # / gets ROOT_PCT of the usable space (at least ROOT_MIN_MIB) and RESERVE_PCT
 # stays unassigned in vg00 for lvextend. /usr gets USR_PCT of what is left,
 # up to its cap; /var gets the remainder, up to its cap. Space beyond the caps becomes
-# /home when it is at least HOME_MIN_MIB; otherwise it also stays unassigned
-# and /home is a directory on /.
+# /home when it is at least HOME_MIN_MIB; a smaller remainder is added to /var
+# (above its cap) and /home is a directory on /.
 root=$((avail * ROOT_PCT / 100))
 [ "$root" -ge "$ROOT_MIN_MIB" ] || root=$ROOT_MIN_MIB
 rest=$((avail - reserve - root))
@@ -188,7 +188,10 @@ if [ "$usr" -lt 1024 ] || [ "$var" -lt 1024 ]; then
   die "layout leaves less than 1 GiB for /usr or /var on $best ($total MiB); lower the / or reserve share"
 fi
 home=$((rest - usr - var))
-[ "$home" -ge "$HOME_MIN_MIB" ] || home=0
+if [ "$home" -lt "$HOME_MIN_MIB" ]; then
+  var=$((var + home))
+  home=0
+fi
 
 cat >"$OUT" <<EOF
 ignoredisk --only-use=$best

@@ -389,18 +389,18 @@ osbuild_kickstart_compliant_reserve_percent: 10
 #   3. /usr   usr_percent of what is left, at most usr_max_gib
 #      /var   the rest of it (what /usr's cap leaves over), at most var_max_gib
 #   4. /home  everything above the two caps, if that is at least
-#             home_min_gib; otherwise it also stays unassigned and /home is
+#             home_min_gib; a smaller remainder is added to /var and /home is
 #             a directory on /
 # Disks smaller than disk_min_gib abort the install with a message on tty1.
 # XFS cannot shrink: prefer caps that are too small (grow later) over too large.
 osbuild_kickstart_disk_min_gib: 80
-osbuild_kickstart_root_percent: 10
+osbuild_kickstart_root_percent: 12
 osbuild_kickstart_root_min_gib: 25
-osbuild_kickstart_reserve_percent: 10
+osbuild_kickstart_reserve_percent: 8
 osbuild_kickstart_usr_percent: 40
-osbuild_kickstart_usr_max_gib: 256
-osbuild_kickstart_var_max_gib: 128
-osbuild_kickstart_home_min_gib: 100
+osbuild_kickstart_usr_max_gib: 110
+osbuild_kickstart_var_max_gib: 110
+osbuild_kickstart_home_min_gib: 20
 
 # Ship /etc/sudoers.d/90-wheel-nopasswd (%wheel ALL=(ALL) NOPASSWD: ALL) so the
 # admin user created in Anaconda runs sudo without a password.

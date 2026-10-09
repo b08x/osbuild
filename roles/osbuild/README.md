@@ -308,13 +308,13 @@ Disk layout for `osbuild_kickstart_partitioning: auto` (see [Layout](#layout) fo
 | Variable | Default | Description |
 |---|---|---|
 | `osbuild_kickstart_disk_min_gib` | `40` | Smaller target disks abort the install |
-| `osbuild_kickstart_root_percent` | `10` | `/` share of the usable space |
+| `osbuild_kickstart_root_percent` | `12` | `/` share of the usable space |
 | `osbuild_kickstart_root_min_gib` | `16` | `/` minimum |
-| `osbuild_kickstart_reserve_percent` | `10` | Share of the usable space left unassigned in `vg00` for growing volumes later; `0` disables |
+| `osbuild_kickstart_reserve_percent` | `8` | Share of the usable space left unassigned in `vg00` for growing volumes later; `0` disables |
 | `osbuild_kickstart_usr_percent` | `80` | `/usr` share of the space after `/` and the reserve; `/var` gets the rest |
-| `osbuild_kickstart_usr_max_gib` | `256` | `/usr` cap |
-| `osbuild_kickstart_var_max_gib` | `128` | `/var` cap |
-| `osbuild_kickstart_home_min_gib` | `100` | `/home` is a volume only when at least this much is left above the caps |
+| `osbuild_kickstart_usr_max_gib` | `110` | `/usr` cap |
+| `osbuild_kickstart_var_max_gib` | `110` | `/var` cap |
+| `osbuild_kickstart_home_min_gib` | `20` | `/home` is a volume only when at least this much is left above the caps; a smaller remainder is added to `/var` |
 
 Disk layout for `osbuild_kickstart_partitioning: compliant` (see [Compliant layout](#compliant-layout)):
 
@@ -945,16 +945,16 @@ GPT on the chosen disk: an EFI System Partition or biosboot (whatever `reqpart` 
 1. **`/`** (`vg00/root`): `root_percent` of usable, at least `root_min_gib`.
 2. **Reserve**: `reserve_percent` of usable stays unassigned in `vg00`.
 3. **`/usr`** (`vg00/usr`): `usr_percent` of what is left, at most `usr_max_gib`. **`/var`** (`vg00/var`): the rest of it, at most `var_max_gib`. `/var` therefore also receives whatever `/usr`'s cap leaves.
-4. **`/home`** (`vg00/home`): everything above the two caps, if that is at least `home_min_gib`. Otherwise that space also stays unassigned and `/home` is a directory on `/`.
+4. **`/home`** (`vg00/home`): everything above the two caps, if that is at least `home_min_gib`. Otherwise that space is added to `/var` and `/home` is a directory on `/`.
 
 With the defaults:
 
 | Disk | `/` | `/usr` | `/var` | `/home` | Unassigned in `vg00` |
 |---|---|---|---|---|---|
-| 100 GiB | 25 GiB | 24.6 GiB | 36.8 GiB | on `/` | 9.6 GiB |
-| 477 GiB | 47.3 GiB | 151.4 GiB | 128 GiB | on `/` | 146.3 GiB |
-| 931 GiB | 92.7 GiB | 256 GiB | 128 GiB | 357.6 GiB | 92.7 GiB |
-| 2000 GiB | 199.6 GiB | 256 GiB | 128 GiB | 1212.8 GiB | 199.6 GiB |
+| 100 GiB | 25 GiB | 25.3 GiB | 38.0 GiB | on `/` | 7.7 GiB |
+| 477 GiB | 56.8 GiB | 110 GiB | 110 GiB | 158.4 GiB | 37.8 GiB |
+| 931 GiB | 111.2 GiB | 110 GiB | 110 GiB | 521.6 GiB | 74.2 GiB |
+| 2000 GiB | 239.5 GiB | 110 GiB | 110 GiB | 1376.8 GiB | 159.7 GiB |
 
 The role writes the variables to `/tmp/syncopated-layout.env` in a `%pre` placed before the one in `syncopated.ks`; the source file carries the same values as built-in defaults for the bats tests, which also check that both agree. During installation, `/tmp/syncopated-pre.log` (shell on tty2) records the chosen disk and the sizes.
 

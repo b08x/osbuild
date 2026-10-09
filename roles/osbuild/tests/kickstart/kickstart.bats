@@ -151,7 +151,7 @@ lv() {
   disk vdb 30
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 98304; reserve 9830; / = max(9830, 25600); rest 62874 -> 40/60
+  # usable 98304; reserve 7864; / = max(11796, 25600); rest 64840 -> 40/60
   diff -u - "$SYNC_PRE_OUT" <<EOF
 ignoredisk --only-use=nvme0n1
 zerombr
@@ -162,35 +162,35 @@ part /boot --size=2048 --fstype=xfs --ondisk=nvme0n1
 part pv.00 --size=1 --grow --ondisk=nvme0n1
 volgroup vg00 pv.00
 logvol / --vgname=vg00 --name=root --size=25600 --fstype=xfs
-logvol /usr --vgname=vg00 --name=usr --size=25149 --fstype=xfs
-logvol /var --vgname=vg00 --name=var --size=37725 --fstype=xfs
+logvol /usr --vgname=vg00 --name=usr --size=25936 --fstype=xfs
+logvol /var --vgname=vg00 --name=var --size=38904 --fstype=xfs
 EOF
-  [[ "$output" == *"unassigned 9830 MiB"* ]]
+  [[ "$output" == *"unassigned 7864 MiB"* ]]
 }
 
-@test "F12: 477 GiB disk caps /var, /usr takes 40% of the rest and /home stays on /" {
+@test "F12: 477 GiB disk caps /usr and /var at 110 GiB and /home gets the remainder" {
   disk nvme0n1 477 nvme
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 484352; / 48435; reserve 48435; rest 387482; /usr 40% = 154992; /var cap 131072; 101418 left < home_min
-  [ "$(lv /)" = 48435 ]
-  [ "$(lv /usr)" = 154992 ]
-  [ "$(lv /var)" = 131072 ]
-  [ -z "$(lv /home)" ]
-  [[ "$output" == *"unassigned 149853 MiB"* ]]
+  # usable 484352; / 58122; reserve 38748; rest 387482; /usr cap 112640; /var cap 112640; 162202 left
+  [ "$(lv /)" = 58122 ]
+  [ "$(lv /usr)" = 112640 ]
+  [ "$(lv /var)" = 112640 ]
+  [ "$(lv /home)" = 162202 ]
+  [[ "$output" == *"unassigned 38748 MiB"* ]]
 }
 
 @test "F12: 931 GiB disk caps /usr and /var and gives /home the rest except the reserve" {
   disk nvme0n1 931 nvme
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 949248; / 94924; reserve 94924; rest 759400 -> 262144 + 131072 + 366184
-  [ "$(lv /)" = 94924 ]
-  [ "$(lv /usr)" = 262144 ]
-  [ "$(lv /var)" = 131072 ]
-  [ "$(lv /home)" = 366184 ]
+  # usable 949248; / 113909; reserve 75939; rest 759400 -> 112640 + 112640 + 534120
+  [ "$(lv /)" = 113909 ]
+  [ "$(lv /usr)" = 112640 ]
+  [ "$(lv /var)" = 112640 ]
+  [ "$(lv /home)" = 534120 ]
   ! grep "^logvol" "$SYNC_PRE_OUT" | grep -q -- --grow
-  [[ "$output" == *"unassigned 94924 MiB"* ]]
+  [[ "$output" == *"unassigned 75939 MiB"* ]]
 }
 
 @test "layout env written by the role overrides the built-in defaults" {
