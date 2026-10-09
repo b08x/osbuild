@@ -502,3 +502,10 @@ osbuild_include_fstab: false
 #   - name: "custom"
 #     cmdline: "custom.param=value"
 osbuild_kernel_cmdline_snippets: []
+
+# Check every extra repository before generating or building: its repomd.xml
+# must be downloadable and every file it lists must be served (NVIDIA's CUDA
+# repo has published a repomd.xml whose files returned 404, which aborts
+# depsolve). Metalink URLs (containing "?") are skipped. The generated build
+# script repeats the check when it runs. Set false to skip the play-time check.
+osbuild_repo_preflight: true

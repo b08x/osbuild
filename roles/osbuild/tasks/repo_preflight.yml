@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Fail before any file is written when an extra repository is unusable for
+# depsolve: repomd.xml missing, or listing files the server does not serve.
+# Metalink URLs (containing "?") have no repodata directory and are skipped.
+
+- name: Select repositories that can be checked
+  ansible.builtin.set_fact:
+    _osbuild_preflight_repos: >-
+      {{ osbuild_extra_repo_urls | reject('search', '[?]')
+         | map('regex_replace', '/+$', '') | unique | list }}
+
+- name: Fetch repomd.xml of each extra repository
+  ansible.builtin.uri:
+    url: "{{ item }}/repodata/repomd.xml"
+    return_content: true
+    timeout: 60
+  loop: "{{ _osbuild_preflight_repos }}"
+  register: _osbuild_preflight_repomd
+  until: _osbuild_preflight_repomd.status == 200
+  retries: 3
+  delay: 2
+  failed_when: false
+  check_mode: false
+
+- name: List the files each repomd.xml references
+  ansible.builtin.set_fact:
+    _osbuild_preflight_files: >-
+      {%- set ns = namespace(files=[]) -%}
+      {%- for r in _osbuild_preflight_repomd.results if r.status == 200 -%}
+      {%-   for loc in r.content | regex_findall('<location href="([^"]+)"') -%}
+      {%-     set ns.files = ns.files + [{'base': r.item, 'loc': loc}] -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ ns.files }}
+
+- name: Request one byte of each referenced file
+  ansible.builtin.uri:
+    url: "{{ item.base }}/{{ item.loc }}"
+    headers:
+      Range: "bytes=0-0"
+    status_code: [200, 206]
+    timeout: 60
+  loop: "{{ _osbuild_preflight_files }}"
+  loop_control:
+    label: "{{ item.base }}/{{ item.loc }}"
+  register: _osbuild_preflight_served
+  until: _osbuild_preflight_served.status in [200, 206]
+  retries: 3
+  delay: 2
+  failed_when: false
+  check_mode: false
+
+- name: Assert every extra repository is consistent
+  ansible.builtin.assert:
+    that:
+      - _osbuild_preflight_bad_repomd | length == 0
+      - _osbuild_preflight_bad_files | length == 0
+    fail_msg: |-
+      An extra repository is unusable for depsolve. Retry later, or set
+      osbuild_repo_preflight: false to skip this check.
+      {% for r in _osbuild_preflight_bad_repomd %}
+      - {{ r }}/repodata/repomd.xml is not downloadable
+      {% endfor %}
+      {% for f in _osbuild_preflight_bad_files %}
+      - {{ f }} is listed in repomd.xml but not served
+      {% endfor %}
+    success_msg: "{{ _osbuild_preflight_repos | length }} extra repositories checked"
+  vars:
+    _osbuild_preflight_bad_repomd: >-
+      {{ _osbuild_preflight_repomd.results | rejectattr('status', 'eq', 200)
+         | map(attribute='item') | list }}
+    _osbuild_preflight_bad_files: >-
+      {%- set ns = namespace(bad=[]) -%}
+      {%- for r in _osbuild_preflight_served.results if r.status not in [200, 206] -%}
+      {%-   set ns.bad = ns.bad + [r.item.base ~ '/' ~ r.item.loc] -%}
+      {%- endfor -%}
+      {{ ns.bad }}

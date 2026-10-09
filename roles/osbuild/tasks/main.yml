@@ -117,6 +117,14 @@
         - sources
         - repos
 
+- name: Check extra repositories are consistent
+  ansible.builtin.import_tasks: repo_preflight.yml
+  when:
+    - osbuild_repo_preflight | bool
+    - osbuild_resolved_build_mode != 'bootc_image'
+  tags:
+    - always
+
 - name: MODE bootc_image
   when: osbuild_resolved_build_mode == 'bootc_image'
   tags:
