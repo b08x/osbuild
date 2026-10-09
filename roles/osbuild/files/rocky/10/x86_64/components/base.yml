@@ -78,3 +78,4 @@ packages:
   - "uv"
   - "yq"
   - "zsh"
+  - "lld"

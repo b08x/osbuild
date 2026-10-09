@@ -64,3 +64,4 @@ packages:
   - "uv"
   - "zsh"
   - "yq"
+  - "lld"

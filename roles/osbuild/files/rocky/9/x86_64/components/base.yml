@@ -64,3 +64,4 @@ packages:
   - "zsh"
   - "yq"
   - "linux-firmware"
+  - "lld"
