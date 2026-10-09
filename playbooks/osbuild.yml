@@ -75,6 +75,13 @@
       Rocky: *components_el
     osbuild_blueprint_components: "{{ osbuild_blueprint_components_default[ansible_distribution] }}"
 
+    # Disk layout (auto): the nvidia component (CUDA toolkit) needs a larger
+    # /usr than the role default of 30 GiB, as in the NVIDIA playbooks
+    # (measured install: 17 GiB used right after installation). Disks under
+    # 150 GiB abort when nvidia is selected. See the role README, "Layout".
+    osbuild_kickstart_usr_min_gib: "{{ 80 if 'nvidia' in osbuild_blueprint_components else 30 }}"
+    osbuild_kickstart_disk_min_gib: "{{ 150 if 'nvidia' in osbuild_blueprint_components else 100 }}"
+
     # Output
     osbuild_output_dir: "/var/tmp/osbuild-images"
 

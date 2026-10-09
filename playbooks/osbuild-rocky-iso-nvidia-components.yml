@@ -38,6 +38,12 @@
     osbuild_hostname: "syncopated-dx-nvidia"
     osbuild_blueprint_description: "Rocky Linux Workstation 10.2 (NVIDIA, components)"
 
+    # The CUDA toolkit needs a larger /usr than the default 30 GiB minimum
+    # (measured install: 17 GiB used right after installation). Disks under
+    # 150 GiB abort; see the role README, "Layout".
+    osbuild_kickstart_usr_min_gib: 80
+    osbuild_kickstart_disk_min_gib: 150
+
     # Composed from component files; see header.
     osbuild_blueprint_components:
       - base

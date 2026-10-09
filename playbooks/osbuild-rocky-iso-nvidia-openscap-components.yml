@@ -70,6 +70,10 @@
     osbuild_kickstart_partitioning: compliant
     osbuild_kickstart_compliant_tmp: tmpfs
     osbuild_kickstart_compliant_encrypt: "{{ osbuild_openscap_profile in ['hipaa', 'pci-dss'] }}"
+    # CUDA toolkit: 80 GiB /usr (default 45) and the 215 GiB disk minimum that
+    # follows from it (fixed volumes + /var and /home minimums + reserve).
+    osbuild_kickstart_compliant_usr_gib: 80
+    osbuild_kickstart_compliant_disk_min_gib: 215
 
     # Suppress the host-derived (Fedora) common source list. See header.
     osbuild_sources: []
