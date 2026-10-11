@@ -1,0 +1,40 @@
+# Facts
+
+- CIS and PCI builds set auditd.conf max_log_file_action = rotate, max_log_file = 32, num_logs = 16 (512 MB cap).
+- HIPAA builds set auditd.conf max_log_file_action = rotate, max_log_file = 64, num_logs = 32 (2 GiB cap).
+- No build sets any auditd space/disk action to single, halt or suspend: admin_space_left_action = rotate, disk_full_action = rotate, disk_error_action = syslog, space_left_action = exec (warning script).
+- CIS and PCI builds do not load the file_deletion_events_* and dac_modification_* audit rules; HIPAA builds load every audit rule of the stock profile.
+- All audit deviations are applied through an OpenSCAP tailoring on top of the stock profile, not a %post override; a scan with the tailored profile shows them as tailored/not selected, not as failures.
+- /var/log/audit stays a separate nodev,nosuid,noexec volume: 4 GiB for CIS and PCI, 10 GiB for HIPAA.
+- When /var/log/audit falls below 25% free, the system logs a warning-priority journal entry, shows a motd/Cockpit line, and shows wheel users a persistent GNOME critical notification that reappears at each login while the condition holds.
+- On the test laptop, after 48 h of uptime with normal desktop use, /var/log/audit usage stays at or under its rotation cap and the system has not halted or entered single-user mode.
+- remote_logging.enabled defaults to false; then systemd-journal-upload is disabled and its CIS rule is unselected in the tailoring.
+- Setting remote_logging.enabled: true with url, ca_cert, client_cert and client_key is the only change needed to ship journald (including audit events) to a log host over mTLS via systemd-journal-upload.
+- A throwaway systemd-journal-remote container receives journal and audit entries from a VM built with remote_logging enabled.
+- If the log host is unreachable, the workstation keeps running normally and only logs the upload failure.
+- Hardened images include `syncopated-scan`, which evaluates the host against both the stock and the tailored profile and writes HTML and ARF reports to /var/lib/syncopated/scans/<timestamp>/.
+- schema/intent.schema.json defines the intent; playbooks/build.yml validates the intent with ansible.utils.validate before any other task and fails naming the offending field.
+- Intent v1 fields: distro + arch, hostname, hardware/components, hardening (none | cis-l2-workstation | pci-dss | hipaa), disk (size_gib, encrypt, tmp, optional serial), users (name, gecos, groups, optional uid, optional ssh_pubkey), locale/keyboard/timezone, remote_logging, extra_packages, package_pins.
+- `ansible-playbook playbooks/build.yml -e @profiles/<name>.yml` generates the blueprint and build-<name>.sh for any supported ISO; no per-variant playbook is needed.
+- profiles/ is gitignored except profiles/examples/, which holds committed example intents.
+- The former skill hard rules are enforced or derived by the role (EL target on Fedora host empties osbuild_sources; Rocky CRB/Plus/RT extra repos; no blueprint user next to the kickstart; NVIDIA+CUDA raises /usr sizing); an intent file never sets them.
+- Every current ISO playbook has a profiles/examples/<variant>.yml whose generated blueprint matches today's output apart from the intended audit, disk and user changes; those ISO playbooks are deleted, container and bootc playbooks are untouched.
+- Every example intent passes `image-builder manifest` depsolve.
+- The syncopated skill tells the agent to write an intent file under profiles/, not a playbook.
+- Volume sizes are computed at generation time from disk.size_gib and appear as fixed logvol sizes in the generated kickstart; %pre no longer runs the min/max/weight sizing.
+- On a disk larger than declared the extra space goes to /home (reserve stays unassigned in vg00); on a smaller disk the install aborts with a tty1 message naming both sizes.
+- hardening: none uses the simple layout (/, /usr, /var, /home); any hardening profile uses the compliant layout.
+- Target disk selection is unchanged: skip install media, removable, read-only and USB disks; prefer NVMe, then the largest.
+- Before partitioning, a 30-second tty countdown names the target disk's model and size; any key aborts the install, timeout proceeds.
+- If disk.serial is set and the selected disk's serial differs, the install aborts before touching any disk.
+- Unit tests cover the sizing math for each layout at the minimum, a typical and a large disk size.
+- The install asks nothing: no Root Password or User Creation spoke, no storage spoke; the only possible prompt is the LUKS passphrase when disk.encrypt is true.
+- Each generation creates a new random temporary password; only its SHA-512 hash is in the blueprint/ISO; the plaintext is printed once at the end of the play and written to a 0600 file next to the outputs.
+- The user must set a new password at first login (chage -d 0), handled by GDM.
+- The root account is locked (rootpw --lock); admin access is through sudo for wheel.
+- The user's supplementary groups are wheel plus the user_groups of the selected components plus groups listed in the intent.
+- An optional uid and ssh_pubkey in the intent are applied to the created user.
+- Generated .toml, build-*.sh, ISO and password file are mode 0600; no LUKS passphrase appears in any generated file.
+- The play fails early with a clear message if passlib is missing on the controller.
+- The generated kickstart for every example intent passes `ksvalidator -v RHEL10`.
+- An unattended QEMU/libvirt install of the CIS example ISO completes with no input; afterwards the layout, auditd.conf and a `syncopated-scan` run are checked.
