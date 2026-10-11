@@ -1,0 +1,142 @@
+{
+  "stage": "interview",
+  "title": "Standalone workstation hardening: intent-driven, unattended ISO",
+  "goalSlug": "standalone-workstation-hardening",
+  "questions": [
+    {
+      "id": "intent-location",
+      "prompt": "Where do intent files live?",
+      "description": "Already decided in grilling: one intent file per machine/person generates both blueprint and kickstart; inventory stays builder-only (gir, tinybot). The intent file holds no plaintext secrets (password is generated per ISO), but it names a person and their machine.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "profiles/<name>.yml, gitignored; committed examples in profiles/examples/*.yml. Run: ansible-playbook playbooks/build.yml -e @profiles/<name>.yml",
+      "recommendedOptionIds": ["profiles-gitignored"],
+      "options": [
+        { "id": "profiles-gitignored", "label": "profiles/<name>.yml (gitignored) + committed profiles/examples/" },
+        { "id": "profiles-committed", "label": "profiles/<name>.yml, all committed" },
+        { "id": "outside-repo", "label": "Outside the repo (e.g. ~/.config/syncopated/profiles/), path passed in" }
+      ],
+      "required": true
+    },
+    {
+      "id": "schema-format",
+      "prompt": "How is the intent schema defined and enforced?",
+      "description": "The schema is the durable contract a future CLI/web UI writes against, so it should be machine-readable outside Ansible.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Canonical JSON Schema (schema/intent.schema.json) validated at play start with ansible.utils.validate (jsonschema engine); role keeps meta/argument_specs.yml for its own derived variables.",
+      "recommendedOptionIds": ["jsonschema"],
+      "options": [
+        { "id": "jsonschema", "label": "JSON Schema file, validated by ansible.utils.validate at play start" },
+        { "id": "argspecs", "label": "Ansible meta/argument_specs.yml only" },
+        { "id": "both-generated", "label": "JSON Schema canonical, argument_specs generated from it" }
+      ],
+      "required": true
+    },
+    {
+      "id": "intent-fields",
+      "prompt": "Which fields belong in intent schema v1?",
+      "description": "Anything not listed becomes a role-derived value (repos, sources, volume sizes, pre_tasks plumbing, output names).",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "All of these.",
+      "recommendedOptionIds": ["distro", "hostname", "hardware", "hardening", "disk", "users", "locale", "remote-logging", "extra-packages"],
+      "options": [
+        { "id": "distro", "label": "distro (e.g. rocky-10.2) + arch" },
+        { "id": "hostname", "label": "hostname" },
+        { "id": "hardware", "label": "hardware/stack → components (nvidia, cuda, intel-graphics, audio…)" },
+        { "id": "hardening", "label": "hardening: none | cis-l2-workstation | pci-dss | hipaa" },
+        { "id": "disk", "label": "disk: size_gib, encrypt, tmp mode, optional serial pin" },
+        { "id": "users", "label": "users: name, gecos, groups, optional uid, optional ssh pubkey" },
+        { "id": "locale", "label": "locale, keyboard, timezone" },
+        { "id": "remote-logging", "label": "remote_logging block (enabled false by default)" },
+        { "id": "extra-packages", "label": "extra_packages + package_pins" }
+      ],
+      "required": true
+    },
+    {
+      "id": "user-groups",
+      "prompt": "How are the user's supplementary groups chosen?",
+      "description": "An artist workstation needs audio/video/render; containers-virt implies libvirt; wheel gives sudo (root is locked).",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Components declare the groups they need (new optional component key user_groups, e.g. containers-virt → libvirt); the role unions them with wheel and any groups listed in intent.",
+      "recommendedOptionIds": ["derived"],
+      "options": [
+        { "id": "derived", "label": "Derived from components + wheel + intent extras" },
+        { "id": "explicit", "label": "Only what the intent file lists" },
+        { "id": "fixed", "label": "Fixed set: wheel, audio, video, render" }
+      ],
+      "required": true
+    },
+    {
+      "id": "wrong-machine-safety",
+      "prompt": "Safety before the unattended install wipes the disk?",
+      "description": "A fully unattended ISO erases the chosen disk (NVMe first, then largest) as soon as it boots. If it's booted on the wrong machine, that data is gone.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "30-second tty countdown naming disk model/size with an abort key (no keypress = proceed), plus an optional disk serial pin in intent that aborts on mismatch.",
+      "recommendedOptionIds": ["countdown", "serial-pin"],
+      "options": [
+        { "id": "countdown", "label": "%pre countdown naming the disk; any key aborts, timeout proceeds" },
+        { "id": "serial-pin", "label": "Optional disk.serial in intent; mismatch aborts" },
+        { "id": "boot-menu", "label": "Boot menu default is 'Troubleshoot', install must be picked" },
+        { "id": "none", "label": "No safety: the ISO is personal" }
+      ],
+      "required": true
+    },
+    {
+      "id": "warning-ux",
+      "prompt": "Where does the 'audit volume nearly full' warning appear?",
+      "description": "Triggered by auditd space_left_action=exec at 25% free. With rotation it is a backstop.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Persistent GNOME critical notification (stays until dismissed, re-shown each login while the condition holds), motd + Cockpit banner, and a journal entry.",
+      "recommendedOptionIds": ["gnome", "motd", "journal"],
+      "options": [
+        { "id": "gnome", "label": "Persistent GNOME critical notification for wheel users" },
+        { "id": "motd", "label": "motd / Cockpit banner" },
+        { "id": "journal", "label": "Journal entry (priority warning)" },
+        { "id": "mail", "label": "Mail to root (postfix is installed by CIS)" }
+      ],
+      "required": true
+    },
+    {
+      "id": "hipaa-retention",
+      "prompt": "HIPAA keeps the full audit rule set. Same 512 MB rotation cap?",
+      "description": "Full rules on a desktop ran ~280 MB/h; 512 MB is ~2 h of history. For the assessment lab, more history helps correlate violations with agent runs.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "HIPAA: 64 MB × 32 = 2 GiB cap on a 10 GiB audit LV; CIS/PCI: 32 MB × 16 = 512 MB cap on 4 GiB.",
+      "recommendedOptionIds": ["bigger"],
+      "options": [
+        { "id": "bigger", "label": "HIPAA 2 GiB cap / 10 GiB LV; CIS+PCI 512 MB / 4 GiB" },
+        { "id": "same", "label": "Same 512 MB / 4 GiB for all" }
+      ],
+      "required": true
+    },
+    {
+      "id": "migration",
+      "prompt": "What happens to today's per-variant playbooks?",
+      "description": "playbooks/osbuild-rocky-iso-*.yml, osbuild-almalinux-iso*.yml, osbuild-rocky-cuda-container.yml, osbuild.yml. bootc/container paths are out of scope.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Convert each ISO playbook into profiles/examples/<variant>.yml, assert the generated blueprint matches today's output (except the intended audit/disk/user changes), then delete the ISO playbooks. Leave container/bootc playbooks untouched.",
+      "recommendedOptionIds": ["convert-delete"],
+      "options": [
+        { "id": "convert-delete", "label": "Convert ISO playbooks to example intents, regression-check, delete them" },
+        { "id": "wrappers", "label": "Keep them as thin wrappers that load an example intent" },
+        { "id": "untouched", "label": "Leave them; new path lives alongside" }
+      ],
+      "required": true
+    },
+    {
+      "id": "verification",
+      "prompt": "What verification counts toward 'done'?",
+      "description": "No log server and no spare hardware assumed.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "All automated items, plus one manual install on the test laptop.",
+      "recommendedOptionIds": ["unit", "manifest", "journal-remote", "vm-install", "laptop"],
+      "options": [
+        { "id": "unit", "label": "Generation tests: schema validation, disk-size math, rendered kickstart/tailoring (pytest/bats), ksvalidator" },
+        { "id": "manifest", "label": "image-builder manifest depsolve for every example intent" },
+        { "id": "journal-remote", "label": "Throwaway systemd-journal-remote container receives uploads (e2e for the toggle)" },
+        { "id": "vm-install", "label": "Unattended QEMU/libvirt install of the CIS ISO: no prompts, layout + auditd.conf + oscap scan checked" },
+        { "id": "laptop", "label": "Manual install on the test laptop, 48 h uptime, /var/log/audit stays under cap" }
+      ],
+      "required": true
+    }
+  ]
+}

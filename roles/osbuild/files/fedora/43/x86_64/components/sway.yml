@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "sway" for Fedora 43 (x86_64).
+# Split from workstation/fedora-workstation-43.toml. Entries starting with @ are comps groups.
+# Versions are never pinned here; use osbuild_package_pins.
+label: "Sway tiling Wayland compositor and companion tools"
+repo_urls: []
+services: []
+kernel_args: []
+packages:
+  - "dunst"
+  - "foot"
+  - "grim"
+  - "imv"
+  - "kanshi"
+  - "playerctl"
+  - "slurp"
+  - "sway"
+  - "sway-config-fedora"
+  - "sway-contrib"
+  - "sway-systemd"
+  - "sway-wallpapers"
+  - "swaybg"
+  - "swayidle"
+  - "swaylock"
+  - "waybar"
+  - "wev"
+  - "wlr-randr"
+  - "wlsunset"
+  - "wofi"
+  - "xdg-desktop-portal-wlr"
+  - "ydotool"

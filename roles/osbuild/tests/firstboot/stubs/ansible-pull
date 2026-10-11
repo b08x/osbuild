@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# ansible-pull stub: logs its arguments; $ANSIBLE_PULL_RC is the exit status.
+source "${STUB_DIR:?}/_lib.sh"
+stub_log "ansible-pull $*"
+exit "${ANSIBLE_PULL_RC:-0}"

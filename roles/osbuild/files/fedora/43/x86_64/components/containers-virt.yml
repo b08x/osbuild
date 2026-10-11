@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "containers-virt" for Fedora 43 (x86_64).
+# Split from workstation/fedora-workstation-43-nvidia.toml and workstation/fedora-workstation-43.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "Podman, distrobox and libvirt/KVM"
+repo_urls: []
+services: []
+kernel_args: []
+flatpaks:
+  - "io.podman_desktop.PodmanDesktop"
+  - "io.dbeaver.DBeaverCommunity"
+packages:
+  - "@container-management"
+  - "distrobox"
+  - "ipxe-roms-qemu"
+  - "libvirt-daemon"
+  - "nbd"
+  - "podman"
+  - "podman-compose"
+  - "podman-docker"
+  - "qemu-kvm"
+  - "virt-install"
+  - "virt-viewer"
+  - "ipxe-roms"
+  - "virt-manager"

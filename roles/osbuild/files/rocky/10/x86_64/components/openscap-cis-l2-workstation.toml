@@ -1,0 +1,6 @@
+# Remediation runs at image build time (org.osbuild.oscap.remediation in the
+# "os" pipeline); scap-security-guide and openscap-scanner are added by
+# image-builder. Profile: CIS Red Hat Enterprise Linux 10 Benchmark, Level 2 - Workstation.
+[customizations.openscap]
+profile_id = "xccdf_org.ssgproject.content_profile_cis_workstation_l2"
+datastream = "/usr/share/xml/scap/ssg/content/ssg-rhel10-ds.xml"

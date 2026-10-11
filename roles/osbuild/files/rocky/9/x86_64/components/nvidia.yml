@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "nvidia" for Rocky Linux 9 (x86_64).
+# Split from workstation/rocky-9-8-workstation-nvidia.toml and workstation/rocky-9-8-workstation.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "NVIDIA proprietary driver, CUDA toolkit and container toolkit"
+repo_urls:
+  - "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64"
+  - "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
+services:
+  - "nvidia-cdi-refresh"
+  - "nvidia-persistenced"
+kernel_args:
+  - "rd.driver.blacklist=nouveau"
+  - "rd.driver.blacklist=nova-core"
+  - "modprobe.blacklist=nouveau"
+  - "nvidia-drm.modeset=1"
+fragment: nvidia.toml
+bootc_repos:
+  - |
+    cat > /etc/yum.repos.d/nvidia-cuda.repo << 'REPOEOF'
+    [cuda-el9-x86_64]
+    name=CUDA for EL 9
+    baseurl=https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/CDF6BA43.pub
+    REPOEOF
+  - |
+    cat > /etc/yum.repos.d/nvidia-container-toolkit.repo << 'REPOEOF'
+    [nvidia-container-toolkit]
+    name=NVIDIA Container Toolkit
+    baseurl=https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://nvidia.github.io/libnvidia-container/gpgkey
+    REPOEOF
+packages:
+  - "nvidia-driver"
+  - "nvidia-driver-cuda"
+  - "nvidia-driver-cuda-libs"
+  - "nvidia-driver-libs"
+  - "nvidia-persistenced"
+  - "nvidia-settings"
+  - "nvtop"
+  - "cuda-toolkit"
+  - "nvidia-container-toolkit"

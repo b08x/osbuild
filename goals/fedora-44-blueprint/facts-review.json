@@ -1,0 +1,63 @@
+{
+  "stage": "facts",
+  "title": "Fedora 44 Workstation Blueprint Generation",
+  "goalSlug": "fedora-44-blueprint",
+  "facts": [
+    {
+      "id": "fact-distro-target",
+      "text": "The blueprint and build scripts will target Fedora 44.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-image-kind",
+      "text": "The output image type will be a Fedora installer ISO (minimal-installer).",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-disk-layout",
+      "text": "The installation disk layout will be set to 'interactive' for user selection in Anaconda.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-playbook",
+      "text": "A dedicated playbook (playbooks/osbuild-fedora-workstation-gx-test.yml) will be created to execute the osbuild role.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-manifest",
+      "text": "The playbook will include and utilize the package selections from build-selections/build-fedora-workstation-gx-test-20261007_133802.yaml.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-generate-only",
+      "text": "The playbook will be configured to generate the blueprint and script (osbuild_only_generate: true) rather than running the build directly.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-repo-templates",
+      "text": "Repository URLs in roles/osbuild/vars/Fedora.yml will be templatized to dynamically use the version specified in osbuild_distro instead of hardcoded versions.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    }
+  ]
+}

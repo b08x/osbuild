@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Render a component-composed blueprint on localhost without building anything.
+#
+#   ansible-playbook tests/render_blueprint.yml \
+#     -e osbuild_distro=rocky-10.2 \
+#     -e '{"osbuild_blueprint_components": ["base", "anaconda"]}' \
+#     -e render_out=/tmp/blueprint.toml
+#
+# Optional: -e render_template=build.sh.j2 renders another role template with
+# the same merged component data. Needs no sudo, network or build host.
+- name: Render component blueprint
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    osbuild_distro: "rocky-10.2"
+    osbuild_blueprint_components: []
+    render_out: "/tmp/render-blueprint.toml"
+    render_template: "blueprint-components.toml.j2"
+  tasks:
+    - name: Load components (role defaults and tasks/components.yml)
+      ansible.builtin.include_role:
+        name: osbuild
+        tasks_from: components.yml
+        public: true
+
+    # Templates call lookup('file', <path relative to files/>), which only
+    # resolves inside the role. Rendering from the playbook uses absolute paths.
+    - name: Resolve absolute file paths
+      ansible.builtin.set_fact:
+        _abs_frame: "{{ playbook_dir }}/../roles/osbuild/files/{{ osbuild_blueprint_frame_path }}"
+        _abs_dir: "{{ playbook_dir }}/../roles/osbuild/files/{{ osbuild_components_dir }}"
+
+    - name: Render template with absolute file paths
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/osbuild/templates/{{ render_template }}"
+        dest: "{{ render_out }}"
+        mode: "0644"
+      vars:
+        osbuild_blueprint_frame_path: "{{ _abs_frame }}"
+        osbuild_components_dir: "{{ _abs_dir }}"

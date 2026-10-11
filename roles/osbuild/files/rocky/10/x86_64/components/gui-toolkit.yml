@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "gui-toolkit" for Rocky Linux 10 (x86_64).
+# Qt 5/6, GTK 4 and their theming helpers. Sources (verified 2026-10-04):
+# AppStream: qt6-qtbase, qt6-qttools, qt6-qtmultimedia, qt6-qtdeclarative, gtk4.
+# EPEL 10: qt5-qtbase, qt5-qttools, qt5-qtquickcontrols2,
+# qt5-qtgraphicaleffects, qscintilla-qt5, qt5ct, qt6ct, gtksourceview4.
+# Versions are never pinned here; use osbuild_package_pins.
+label: "Qt and GTK toolkits and theme configuration tools"
+repo_urls:
+  - "https://mirror.us.leaseweb.net/epel/10/Everything/x86_64"
+  - "https://dl.rockylinux.org/pub/rocky/10/CRB/x86_64/os/"
+services: []
+kernel_args: []
+packages:
+  - "gtk4"
+  - "gtksourceview4"
+  - "qscintilla-qt5"
+  - "qt5-qtbase"
+  - "qt5-qtgraphicaleffects"
+  - "qt5-qtquickcontrols2"
+  - "qt5-qttools"
+  - "qt5ct"
+  - "qt6-qtbase"
+  - "qt6-qtdeclarative"
+  - "qt6-qtmultimedia"
+  - "qt6-qttools"
+  - "qt6ct"
+  - "xdg-utils"

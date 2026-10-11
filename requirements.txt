@@ -1,4 +1,6 @@
 ansible-core>=2.15.0
 questionary>=2.0.0
 rich>=13.0.0
-ruamel.yaml>=0.18.0
+PyYAML>=6.0
+# pytest suite also needs:
+pytest>=8.0

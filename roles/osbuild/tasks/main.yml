@@ -20,7 +20,7 @@
       - Blueprint: {{ osbuild_blueprint_name }}
       - Distribution: {{ osbuild_distro }}
       - Build Mode: {{ 'bootc Container Image' if osbuild_build_bootc else 'Traditional ISO (' + osbuild_image_type + ')' }}
-      - Components: {{ osbuild_components | join(', ') }}
+      - Components: {{ osbuild_blueprint_components | join(', ') }}
       {% if not osbuild_build_bootc %}
       - Image Type: {{ osbuild_image_type }}
       {% else %}
@@ -57,16 +57,6 @@
     file: "vars/{{ ansible_distribution }}.yml"
 
   tags: ["osbuild"]
-- name: Load package taxonomy
-  ansible.builtin.include_vars:
-    # role_path (not playbook_dir): this file lives in the collection's own
-    # vars/packages/, two levels above roles/osbuild/, regardless of which
-    # playbook or directory depth invoked this role. Keyed by the build
-    # target (osbuild_distro), not the host, so cross-distro builds get the
-    # target's package names.
-    file: "{{ role_path }}/../../vars/packages/{{ osbuild_target_distribution }}.yml"
-
-  tags: ["osbuild"]
 - name: Resolve build mode
   ansible.builtin.import_tasks: select_build_mode.yml
   tags:
@@ -76,21 +66,20 @@
   ansible.builtin.import_tasks: repo_keys.yml
 
   tags: ["osbuild"]
-- name: Validate component selection
-  ansible.builtin.import_tasks: validate_components.yml
-  tags:
-    - always
-
-- name: Compute aggregated sources from selected components
-  ansible.builtin.set_fact:
-    osbuild_component_sources: >
-      {%- set ns = namespace(sources=[]) -%}
-      {%- for c in osbuild_components -%}
-      {%-   if c in osbuild_component_defs and osbuild_component_defs[c].sources is defined -%}
-      {%-     set ns.sources = ns.sources + osbuild_component_defs[c].sources -%}
-      {%-   endif -%}
-      {%- endfor -%}
-      {{ ns.sources | unique | list }}
+- name: Assert a component or a static blueprint is selected
+  ansible.builtin.assert:
+    that:
+      - osbuild_blueprint_components is sequence
+      - osbuild_blueprint_components is not string
+      - >-
+        osbuild_blueprint_components | length > 0
+        or (not osbuild_build_bootc | bool and osbuild_static_blueprint_path | length > 0)
+    fail_msg: >-
+      Set osbuild_blueprint_components to a list of component file names
+      (files/<distro>/<major>/<arch>/components/<name>.yml). bootc builds need
+      it; ISO and container builds may set osbuild_static_blueprint_path
+      instead.
+    quiet: true
   tags:
     - always
 
@@ -127,6 +116,14 @@
       tags:
         - sources
         - repos
+
+- name: Check extra repositories are consistent
+  ansible.builtin.import_tasks: repo_preflight.yml
+  when:
+    - osbuild_repo_preflight | bool
+    - osbuild_resolved_build_mode != 'bootc_image'
+  tags:
+    - always
 
 - name: MODE bootc_image
   when: osbuild_resolved_build_mode == 'bootc_image'

@@ -11,6 +11,87 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 stamp=$(mktemp)
 trap 'rm -f "$stamp"' EXIT
+{% if osbuild_extra_repo_urls | default([]) | length > 0 %}
+
+# Pre-flight: depsolve aborts when any --extra-repo has a repomd.xml that lists
+# a file the server does not serve (an interrupted publish upstream). Check
+# every file repomd.xml lists before the build starts, and fail with the repo
+# name. SKIP_REPO_PREFLIGHT=1 skips the check.
+extra_repos=(
+{% for url in osbuild_extra_repo_urls %}
+  {{ url | quote }}
+{% endfor %}
+)
+
+repo_preflight() {
+  local base repomd loc bad=0
+  for base in "${extra_repos[@]}"; do
+    case $base in
+      *\?*) echo "preflight: $base: metalink, not checked"; continue ;;
+    esac
+    base=${base%/}
+    if ! repomd=$(curl -fsL --retry 3 --retry-delay 2 --max-time 60 "$base/repodata/repomd.xml"); then
+      echo "preflight: $base: repodata/repomd.xml is not downloadable" >&2
+      bad=1
+      continue
+    fi
+    while IFS= read -r loc; do
+      if ! curl -fsL --retry 3 --retry-delay 2 --max-time 60 -o /dev/null -r 0-0 "$base/$loc"; then
+        echo "preflight: $base: repomd.xml lists $loc but the server does not serve it" >&2
+        bad=1
+      fi
+    done < <(printf '%s\n' "$repomd" | grep -o '<location href="[^"]*"' | sed 's/^<location href="//; s/"$//')
+  done
+  return "$bad"
+}
+
+if [ "${SKIP_REPO_PREFLIGHT:-0}" != 1 ]; then
+  echo "Pre-flight: checking {{ osbuild_extra_repo_urls | length }} extra repositories"
+  if ! repo_preflight; then
+    echo "A repository is inconsistent or unreachable; the depsolve would fail. Retry later, or SKIP_REPO_PREFLIGHT=1 to build anyway." >&2
+    exit 1
+  fi
+fi
+{% endif %}
+{% if osbuild_extra_repo_urls | default([]) | length > 0 %}
+
+# Pre-flight: depsolve aborts when any --extra-repo has a repomd.xml that lists
+# a file the server no longer serves (an interrupted publish upstream). Check
+# every file repomd.xml lists before the build starts, and fail with the repo
+# name. SKIP_REPO_PREFLIGHT=1 skips the check.
+extra_repos=(
+{% for url in osbuild_extra_repo_urls %}
+  {{ url | quote }}
+{% endfor %}
+)
+
+repo_preflight() {
+  local base repomd loc bad=0
+  for base in "${extra_repos[@]}"; do
+    base=${base%/}
+    if ! repomd=$(curl -fsL --retry 3 --retry-delay 2 --max-time 60 "$base/repodata/repomd.xml"); then
+      echo "preflight: $base: repodata/repomd.xml is not downloadable" >&2
+      bad=1
+      continue
+    fi
+    while IFS= read -r loc; do
+      if ! curl -fsL --retry 3 --retry-delay 2 --max-time 60 -o /dev/null -r 0-0 "$base/$loc"; then
+        echo "preflight: $base: repomd.xml lists $loc but the server does not serve it" >&2
+        bad=1
+      fi
+    done < <(printf '%s\n' "$repomd" | grep -o '<location href="[^"]*"' | sed 's/^<location href="//; s/"$//')
+  done
+  return "$bad"
+}
+
+if [ "${SKIP_REPO_PREFLIGHT:-0}" != 1 ]; then
+  echo "Pre-flight: checking {{ osbuild_extra_repo_urls | length }} extra repositories"
+  if ! repo_preflight; then
+    echo "A repository is inconsistent or unreachable; the depsolve would fail. Retry later, or SKIP_REPO_PREFLIGHT=1 to build anyway." >&2
+    exit 1
+  fi
+fi
+{% endif %}
 
 sudo image-builder build {{ osbuild_image_type | quote }} \
   --distro {{ osbuild_distro | quote }} \

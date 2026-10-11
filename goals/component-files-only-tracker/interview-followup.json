@@ -1,0 +1,9 @@
+{
+  "stage": "interview-followup",
+  "source": "AskUserQuestion in chat after interview-result.json",
+  "answers": [
+    { "questionId": "distros", "answer": "All: Rocky 10, AlmaLinux 10, Fedora 43, Rocky 9 get component files and frames" },
+    { "questionId": "rocky-static-dupes", "answer": "Delete superseded: osbuild-rocky-iso.yml, -nvidia.yml, -nvidia-generate.yml, -nvidia-interactive.yml; keep *-components.yml" },
+    { "questionId": "cuda-container", "answer": "Add frames/container.toml + cuda-container component; playbook sets osbuild_blueprint_frame_path" }
+  ]
+}

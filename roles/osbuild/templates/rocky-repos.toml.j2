@@ -1,0 +1,12 @@
+# Rocky Linux repository files (roles/osbuild/files/rocky/<major>/<arch>/yum.repos.d/).
+# Injected into every prepared Rocky blueprint by tasks/blueprint.yml; edit the
+# source files, not this. They are the rocky-repos files with [crb] (rocky.repo),
+# [plus] (rocky-extras.repo) and [rt] (rocky-addons.repo) set to enabled=1.
+{% for f in osbuild_rocky_repo_files %}
+
+[[customizations.files]]
+path = "/etc/yum.repos.d/{{ f }}"
+mode = "0644"
+data = '''
+{{ lookup('ansible.builtin.file', _osbuild_rocky_repo_dir ~ '/' ~ f, rstrip=false) }}'''
+{% endfor %}

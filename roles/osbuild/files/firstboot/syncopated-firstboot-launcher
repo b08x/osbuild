@@ -12,7 +12,9 @@ script=${SYNCOPATED_FIRSTBOOT:-/usr/local/bin/syncopated-firstboot}
 [[ -e $marker ]] && exit 0
 [[ ${EUID:-$(id -u)} -ne 0 ]] || exit 0
 
-cmd="$(printf '%q' "$script"); read -rp 'Press Enter to close…' _"
+# The script waits for Enter before exiting, so the printed yadm commands
+# stay on screen.
+cmd="SYNCOPATED_PAUSE_ON_EXIT=1 $(printf '%q' "$script")"
 
 for term in xdg-terminal-exec ptyxis kgx gnome-terminal kitty foot alacritty xterm; do
     command -v "$term" >/dev/null 2>&1 || continue

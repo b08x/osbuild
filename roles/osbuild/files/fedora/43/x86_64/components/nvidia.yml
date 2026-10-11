@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "nvidia" for Fedora 43 (x86_64).
+# Split from workstation/fedora-workstation-43-nvidia.toml and workstation/fedora-workstation-43.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "NVIDIA proprietary driver, CUDA toolkit and container toolkit"
+repo_urls:
+  - "https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64"
+  - "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64"
+services:
+  - "nvidia-cdi-refresh"
+kernel_args:
+  - "rd.driver.blacklist=nouveau"
+  - "rd.driver.blacklist=nova-core"
+  - "modprobe.blacklist=nouveau"
+  - "nvidia-drm.modeset=1"
+fragment: nvidia.toml
+bootc_repos:
+  - |
+    cat > /etc/yum.repos.d/rpmfusion-nonfree-nvidia-driver.repo << 'REPOEOF'
+    [rpmfusion-nonfree-nvidia-driver]
+    name=RPM Fusion for Fedora 43 - Nonfree - NVIDIA Driver
+    baseurl=http://download1.rpmfusion.org/nonfree/fedora/nvidia-driver/43/x86_64/
+    enabled=1
+    type=rpm-md
+    gpgcheck=1
+    gpgkey=https://rpmfusion.org/keys/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020
+    REPOEOF
+  - |
+    cat > /etc/yum.repos.d/nvidia-cuda.repo << 'REPOEOF'
+    [cuda-fedora43-x86_64]
+    name=CUDA for Fedora 43
+    baseurl=https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://developer.download.nvidia.com/compute/cuda/repos/fedora43/x86_64/1940C73E.pub
+    REPOEOF
+  - |
+    cat > /etc/yum.repos.d/nvidia-container-toolkit.repo << 'REPOEOF'
+    [nvidia-container-toolkit]
+    name=NVIDIA Container Toolkit
+    baseurl=https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://nvidia.github.io/libnvidia-container/gpgkey
+    REPOEOF
+packages:
+  - "nvidia-driver"
+  - "nvidia-driver-cuda"
+  - "nvidia-driver-cuda-libs"
+  - "nvidia-driver-libs"
+  - "nvidia-gpu-firmware"
+  - "nvidia-persistenced"
+  - "nvidia-settings"
+  - "nvtop"
+  - "cuda-toolkit"
+  - "nvidia-container-toolkit"

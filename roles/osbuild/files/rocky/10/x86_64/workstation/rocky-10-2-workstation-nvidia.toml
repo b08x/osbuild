@@ -222,12 +222,15 @@ packages = [
     { name = "pgvector", version = "*" },
     { name = "pulseaudio-utils", version = "*" },
     { name = "python3-firewall", version = "*" },
+    { name = "python3-rich", version = "*" },
+    { name = "python3-psutil", version = "*" },
     { name = "qemu-kvm", version = "*" },
     { name = "ranger", version = "*" },
     { name = "rbenv", version = "*" },
     { name = "rsync", version = "*" },
     { name = "ruby-devel", version = "*" },
     { name = "ruby-build-rbenv", version = "*" },
+    { name = "ruby-build-ruby", version = "*" },
     { name = "tar", version = "*" },
     { name = "tuned", version = "*" },
     { name = "tuned-ppd", version = "*" },
@@ -273,6 +276,8 @@ packages = [
     { name = "nvtop", version = "*" },
     { name = "cuda-toolkit", version = "*" },
     { name = "nvidia-container-toolkit", version = "*" },
+    { name = "google-chrome-stable", version = "*" },
+    { name = "code", version = "*" },
 ]
 
 [customizations]
@@ -405,6 +410,14 @@ gpgkeys = [
 enabled = true
 
 # Docker CE Stable
+[[customizations.repositories]]
+id = "code"
+name = "Visual Studio Code"
+baseurls = ["https://packages.microsoft.com/yumrepos/vscode"]
+gpgcheck = true
+gpgkeys = ["https://packages.microsoft.com/keys/microsoft.asc"]
+enabled = true
+
 [[customizations.repositories]]
 id = "docker-ce-stable"
 name = "Docker CE Stable - x86_64"

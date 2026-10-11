@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "cockpit" for Fedora 43 (x86_64).
+# Split from workstation/fedora-workstation-43-nvidia.toml and workstation/fedora-workstation-43.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "Cockpit web console"
+repo_urls: []
+services: []
+kernel_args: []
+packages:
+  - "cockpit"
+  - "cockpit-bridge"
+  - "cockpit-machines"
+  - "cockpit-podman"
+  - "cockpit-packagekit"
+  - "cockpit-storaged"
+  - "cockpit-ws"
+  - "cockpit-ws-selinux"
+  - "cockpit-networkmanager"
+  - "cockpit-sosreport"

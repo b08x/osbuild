@@ -1,0 +1,4 @@
+# Read by syncopated-firstboot after `dnf upgrade`. Generated from
+# osbuild_ansible_pull_repo and osbuild_ansible_pull_args; edit those variables.
+ANSIBLE_PULL_REPO={{ osbuild_ansible_pull_repo | string | quote }}
+ANSIBLE_PULL_ARGS=({% for a in _osbuild_ansible_pull_args %}{{ a | string | quote }}{{ ' ' if not loop.last }}{% endfor %})

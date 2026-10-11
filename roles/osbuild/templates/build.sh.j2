@@ -1,16 +1,16 @@
 #!/bin/bash
 # {{ ansible_managed }}
 # Build script for {{ osbuild_blueprint_name }} bootc image
-# Components: {{ osbuild_components | join(', ') }}
+# Components: {{ osbuild_blueprint_components | join(', ') }}
 
 set -ouex pipefail
 
 # =============================================================================
 # Repository Bootstrap — Install Third-Party Repos Before Packages
 # =============================================================================
-# Components define their required sources. Before installing any packages,
-# we install the release RPMs for each required third-party repository.
-# Standard RPMFusion repos are common to all builds.
+# Components define their required repositories (bootc_repos, copr_repos).
+# Before installing any packages, we add them. Standard RPMFusion repos are
+# common to all builds.
 
 echo "Bootstrapping third-party repositories..."
 
@@ -19,29 +19,14 @@ echo "Bootstrapping third-party repositories..."
 # dnf5 install -y --nodocs rpmfusion-free-release rpmfusion-nonfree-release
 
 # --- Component-specific repository setup ---
-{% set ns = namespace(dnf_repos=[], copr_repos=[]) %}
-{% for c in osbuild_components %}
-{%   if c in osbuild_component_defs %}
-{%     set comp = osbuild_component_defs[c] %}
-{%     if not (comp.blueprint_only is defined and comp.blueprint_only) %}
-{%       if comp.bootc_repos is defined and comp.bootc_repos | length > 0 %}
-{%         set ns.dnf_repos = ns.dnf_repos + comp.bootc_repos %}
-{%       endif %}
-{%       if comp.copr_repos is defined and comp.copr_repos | length > 0 %}
-{%         set ns.copr_repos = ns.copr_repos + comp.copr_repos %}
-{%       endif %}
-{%     endif %}
-{%   endif %}
-{% endfor %}
-
-{% for repo in ns.dnf_repos | unique %}
+{% for repo in _osbuild_bp_bootc_repos %}
 {{ repo }}
 {% endfor %}
 
-{% if ns.copr_repos | length > 0 %}
+{% if _osbuild_bp_copr_repos | length > 0 %}
 # Install dnf5-plugins-core for COPR support if not present
 dnf5 install -y dnf5-plugins-core
-{% for repo in ns.copr_repos | unique %}
+{% for repo in _osbuild_bp_copr_repos %}
 echo "Enabling COPR repo: {{ repo }}..."
 dnf5 copr enable -y {{ repo }}
 {% endfor %}
@@ -58,28 +43,14 @@ echo "Repository bootstrap complete."
 # =============================================================================
 # Package Installation — Component-Driven
 # =============================================================================
-# Each selected component installs its packages via dnf5.
-# Components with blueprint_only=true are skipped for bootc builds.
+# Each selected component file installs its packages via dnf5. Leave the
+# anaconda component out of bootc builds; it only matters for installer ISOs.
 
-echo "Components to process: {{ osbuild_components | join(', ') }}"
+echo "Components to process: {{ osbuild_blueprint_components | join(', ') }}"
 
-{% set ns2 = namespace(bootc=[]) %}
-{% for c in osbuild_components %}
-{%   if c in osbuild_component_defs %}
-{%     if not (osbuild_component_defs[c].blueprint_only | default(false)) %}
-{%       set ns2.bootc = ns2.bootc + [c] %}
-{%     endif %}
-{%   else %}
-echo "Warning: Component '{{ c }}' not found in osbuild_component_defs, skipping..."
-{%   if c == '[' or c == ']' or c == "'" or c == '"' or c == ',' %}
-echo "Note: It looks like osbuild_components might have been passed as a string instead of a list."
-{%   endif %}
-{%   endif %}
-{% endfor %}
-{% set bootc_components = ns2.bootc %}
-
+{% set bootc_components = osbuild_blueprint_components %}
 {% for c in bootc_components %}
-{% set comp = osbuild_component_defs[c] %}
+{% set comp = _osbuild_bp_components[c] %}
 {% if comp.packages is defined and comp.packages | length > 0 %}
 # -----------------------------------------------------------------------------
 # {{ comp.label }}
@@ -93,20 +64,13 @@ dnf5 install -y --nodocs {{ comp.packages | join(' ') }}
 # =============================================================================
 # Flatpak Installation — Component-Driven
 # =============================================================================
-{% set flatpak_ns = namespace(apps=[]) %}
-{% for c in bootc_components %}
-{% if osbuild_component_defs[c].flatpaks is defined %}
-{% set flatpak_ns.apps = flatpak_ns.apps + osbuild_component_defs[c].flatpaks %}
-{% endif %}
-{% endfor %}
-
-{% if flatpak_ns.apps | length > 0 %}
+{% if _osbuild_bp_flatpaks | length > 0 %}
 echo "Installing system Flatpaks..."
 # Ensure flatpak and flathub are configured
 dnf5 install -y flatpak
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-{% for app in flatpak_ns.apps | unique %}
+{% for app in _osbuild_bp_flatpaks %}
 echo "Installing {{ app }}..."
 flatpak install -y flathub {{ app }}
 {% endfor %}
@@ -170,19 +134,12 @@ echo "Enabling Podman socket..."
 systemctl enable podman.socket
 {% endif %}
 
-{% if 'nvidia' in osbuild_components %}
+{% if 'nvidia' in osbuild_blueprint_components %}
 # NVIDIA CDI service is enabled in Containerfile
 echo "NVIDIA CDI service will be enabled (see Containerfile)"
 {% endif %}
 
-{% set svc_ns = namespace(services=[]) %}
-{% for c in bootc_components %}
-{% if osbuild_component_defs[c].services is defined %}
-{% set svc_ns.services = svc_ns.services + osbuild_component_defs[c].services %}
-{% endif %}
-{% endfor %}
-
-{% for service in svc_ns.services | unique %}
+{% for service in _osbuild_bp_services %}
 systemctl enable {{ service }}
 {% endfor %}
 
@@ -212,6 +169,6 @@ echo "Build script completed successfully!"
 echo "Image: {{ osbuild_blueprint_name }}"
 echo "Base: {{ osbuild_bootc_base_image }}"
 {% for c in bootc_components %}
-{% set comp = osbuild_component_defs[c] %}
+{% set comp = _osbuild_bp_components[c] %}
 echo "{{ comp.label }}: Enabled"
 {% endfor %}

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "anaconda" for AlmaLinux 10 (x86_64).
+# Split from workstation/almalinux-10-2-workstation-nvidia.toml and workstation/almalinux-10-2-workstation.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "Anaconda installer environment"
+repo_urls: []
+services: []
+kernel_args: []
+packages:
+  - "anaconda"
+  - "anaconda-dracut"
+  - "anaconda-gui"
+  - "dracut-live"
+  - "dracut-network"

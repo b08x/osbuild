@@ -65,3 +65,7 @@ repo:
     baseurl: "http://dl.google.com/linux/chrome/rpm/stable/x86_64"
     gpgkey_url: "file:///usr/share/distribution-gpg-keys/google/linux_signing_key.pub"
     check_gpg: true
+  syncopated:
+    baseurl: "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/epel-10-x86_64/"
+    gpgkey_url: "https://download.copr.fedorainfracloud.org/results/b08x/syncopated/pubkey.gpg"
+    check_gpg: true

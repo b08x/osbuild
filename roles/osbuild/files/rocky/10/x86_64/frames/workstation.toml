@@ -15,7 +15,7 @@ enable = ["org.fedoraproject.Anaconda.Modules.Users"]
 disable = ["org.fedoraproject.Anaconda.Modules.Subscription"]
 
 [customizations.firewall]
-ports = ["24800:tcp"]
+ports = ["24800:tcp", "9090:tcp"]
 
 [customizations.firewall.services]
 enabled = ["ssh", "ntp", "samba-client", "rsyncd"]

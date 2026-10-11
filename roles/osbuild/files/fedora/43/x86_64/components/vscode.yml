@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "vscode" for Fedora 43 (x86_64).
+# code comes from Microsoft's yum repo (verified 2026-10-04, version 1.140.0
+# for x86_64). repo_urls makes the repo a depsolve source; fragment
+# vscode.toml writes /etc/yum.repos.d/code.repo into the image so dnf can
+# update the package. The RPM does not register the repo itself (its %post
+# repo block is commented out upstream), so there is no file name conflict as
+# there is for google-chrome.
+# Versions are never pinned here; use osbuild_package_pins.
+label: "Visual Studio Code (Microsoft yum repo)"
+repo_urls:
+  - "https://packages.microsoft.com/yumrepos/vscode"
+services: []
+kernel_args: []
+fragment: vscode.toml
+packages:
+  - "code"

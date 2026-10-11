@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT-0
 ---
 # Validation playbook for the first-login splash injection (tasks/blueprint.yml).
-# Prepares every static workstation blueprint plus one templated render into a
+# Prepares every static workstation blueprint plus one component-composed render into a
 # temporary output dir, twice each, then checks that each output is valid TOML
 # and carries the three files/firstboot/ entries exactly once, byte-identical.
 #
@@ -13,6 +13,8 @@
   become: false
   vars:
     _role_dir: "{{ playbook_dir | dirname }}"
+    _composed_distro: "fedora-43"
+    _composed_components: [base, anaconda]
     _out_dir: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/osbuild-firstboot-validate"
   tasks:
     - name: Reset output dir
@@ -39,7 +41,6 @@
         tasks_from: blueprint.yml
       vars:
         osbuild_output_dir: "{{ _out_dir }}"
-        osbuild_use_blueprint_template: false
         osbuild_static_blueprint_path: "{{ item.0 }}"
         osbuild_blueprint_name: "{{ item.0 | basename | splitext | first }}"
       loop: "{{ _static_paths | product([1, 2]) | list }}"
@@ -50,21 +51,27 @@
       ansible.builtin.include_vars:
         file: "{{ _role_dir }}/vars/{{ ansible_distribution }}.yml"
 
-    - name: Load package taxonomy
-      ansible.builtin.include_vars:
-        file: "{{ _role_dir }}/../../vars/packages/{{ ansible_distribution }}.yml"
+    - name: Load the component files for the composed blueprint
+      ansible.builtin.include_role:
+        name: "{{ _role_dir }}"
+        tasks_from: components.yml
+        public: true
+      vars:
+        osbuild_distro: "{{ _composed_distro }}"
+        osbuild_blueprint_components: "{{ _composed_components }}"
 
-    - name: Prepare the templated blueprint twice
+    - name: Prepare the composed blueprint twice
       ansible.builtin.include_role:
         name: "{{ _role_dir }}"
         tasks_from: blueprint.yml
       vars:
         osbuild_output_dir: "{{ _out_dir }}"
-        osbuild_use_blueprint_template: true
-        osbuild_blueprint_name: templated
+        osbuild_distro: "{{ _composed_distro }}"
+        osbuild_blueprint_components: "{{ _composed_components }}"
+        osbuild_blueprint_name: composed
       loop: [1, 2]
       loop_control:
-        label: "templated (run {{ item }})"
+        label: "composed (run {{ item }})"
 
     - name: Check injected entries
       ansible.builtin.command:

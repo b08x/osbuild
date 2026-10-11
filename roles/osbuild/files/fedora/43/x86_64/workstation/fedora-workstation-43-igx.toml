@@ -221,6 +221,8 @@ packages = [
     { name = "pulseaudio-utils", version = "*" },
     { name = "python3-firewall", version = "*" },
     { name = "python3-libdnf5", version = "*" },
+    { name = "python3-rich", version = "*" },
+    { name = "python3-psutil", version = "*" },
     { name = "qemu-kvm", version = "*" },
     { name = "ranger", version = "*" },
     { name = "rpmfusion-free-release", version = "*" },
@@ -373,6 +375,8 @@ packages = [
     { name = "nvidia-persistenced", version = "*" },
     { name = "nvidia-settings", version = "*" },
     { name = "nvtop", version = "*" },
+    { name = "google-chrome-stable", version = "*" },
+    { name = "code", version = "*" },
 ]
 
 [customizations]

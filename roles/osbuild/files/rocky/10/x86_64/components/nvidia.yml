@@ -18,6 +18,25 @@ kernel_args:
   - "modprobe.blacklist=nouveau"
   - "nvidia-drm.modeset=1"
 fragment: nvidia.toml
+bootc_repos:
+  - |
+    cat > /etc/yum.repos.d/nvidia-cuda.repo << 'REPOEOF'
+    [cuda-el10-x86_64]
+    name=CUDA for EL 10
+    baseurl=https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/CDF6BA43.pub
+    REPOEOF
+  - |
+    cat > /etc/yum.repos.d/nvidia-container-toolkit.repo << 'REPOEOF'
+    [nvidia-container-toolkit]
+    name=NVIDIA Container Toolkit
+    baseurl=https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://nvidia.github.io/libnvidia-container/gpgkey
+    REPOEOF
 packages:
   - "nvidia-driver"
   - "nvidia-driver-cuda"

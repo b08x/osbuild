@@ -1,0 +1,9 @@
+# RT follows the documented dl.rockylinux.org pub tree layout, like CRB;
+# upstream osbuild/images ships BaseOS/AppStream only (verified 2026-10-03)
+id = "rocky-rt"
+name = "Rocky Linux 10 - RT"
+type = "yum-baseurl"
+url = "https://dl.rockylinux.org/pub/rocky/10/RT/x86_64/os/"
+check_gpg = true
+check_ssl = true
+gpgkey_urls = ["file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-10"]

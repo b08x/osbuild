@@ -1,0 +1,7 @@
+- The blueprint and build scripts will target Fedora 44.
+- The output image type will be a Fedora installer ISO (minimal-installer).
+- The installation disk layout will be set to 'interactive' for user selection in Anaconda.
+- A dedicated playbook (playbooks/osbuild-fedora-workstation-gx-test.yml) will be created to execute the osbuild role.
+- The playbook will include and utilize the package selections from build-selections/build-fedora-workstation-gx-test-20261007_133802.yaml.
+- The playbook will be configured to generate the blueprint and script (osbuild_only_generate: true) rather than running the build directly.
+- Repository URLs in roles/osbuild/vars/Fedora.yml will be templatized to dynamically use the version specified in osbuild_distro instead of hardcoded versions.

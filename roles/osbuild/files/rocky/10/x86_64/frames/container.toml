@@ -1,0 +1,19 @@
+# Static, non-composable part of the Rocky Linux 10.2 CUDA application
+# container (image-builder type "container"). name/description/version/distro
+# and packages are rendered by templates/blueprint-components.toml.j2 from the
+# cuda-container component; do not define them here.
+#
+# An OCI image with the full CUDA toolkit (nvcc, headers, libraries) and a
+# host compiler. It carries no NVIDIA kernel driver: the host's driver and
+# libcuda are injected at run time by nvidia-container-toolkit through CDI:
+#
+#   podman run --rm --device nvidia.com/gpu=all <image> nvidia-smi
+
+# Put the CUDA toolchain on PATH for interactive (login) shells:
+#   podman run -it <image> bash -l
+[[customizations.files]]
+path = "/etc/profile.d/cuda.sh"
+mode = "0644"
+data = """
+export PATH=/usr/local/cuda/bin${PATH:+:${PATH}}
+"""

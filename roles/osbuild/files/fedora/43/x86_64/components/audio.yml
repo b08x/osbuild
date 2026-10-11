@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "audio" for Fedora 43 (x86_64).
+# Split from workstation/fedora-workstation-43-nvidia.toml and workstation/fedora-workstation-43.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "PipeWire audio stack"
+repo_urls: []
+services: []
+kernel_args: []
+flatpaks:
+  - "org.audacityteam.Audacity"
+  - "org.freac.freac"
+  - "org.pipewire.Helvum"
+  - "io.gitlab.theevilskeleton.Upscaler"
+  - "io.github.ltiber.Pwall"
+  - "io.github.bhack.mini-eq"
+  - "org.nomacs.ImageLounge"
+copr_repos:
+  - "@audinux/stable-audio"
+packages:
+  - "alsa-lib-devel"
+  - "alsa-utils"
+  - "pavucontrol"
+  - "pipewire"
+  - "pipewire-alsa"
+  - "pipewire-devel"
+  - "pipewire-gstreamer"
+  - "pipewire-jack-audio-connection-kit-devel"
+  - "pipewire-jack-audio-connection-kit-libs"
+  - "pipewire-pulseaudio"
+  - "pipewire-utils"
+  - "pulseaudio-utils"
+  - "wireplumber"

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Runs tasks/repo_preflight.yml against the URLs in -e osbuild_extra_repo_urls
+# (a JSON list). Used by tests/preflight/preflight.bats with local fake repos.
+- name: Validate extra repository pre-flight
+  hosts: host1
+  gather_facts: false
+  tasks:
+    - name: Run pre-flight
+      ansible.builtin.include_tasks: ../tasks/repo_preflight.yml

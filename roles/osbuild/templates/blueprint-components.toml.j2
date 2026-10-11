@@ -11,7 +11,9 @@ packages = [
 ]
 
 [customizations]
+{% if osbuild_image_type | default('') != 'container' %}
 hostname = "{{ osbuild_hostname }}"
+{% endif %}
 
 {{ lookup('ansible.builtin.file', osbuild_blueprint_frame_path) }}
 {% if _osbuild_bp_kernel_args %}

@@ -37,15 +37,50 @@
     # Mirrors the role default in roles/osbuild/defaults/main.yml.
     osbuild_image_type: "{{ 'minimal-installer' if ansible_distribution == 'Fedora' else 'image-installer' }}"
 
-    # Components
-    osbuild_components:
-      - base
-      - anaconda
-      - gnome
-      - sway
-      - nvidia
-      - development
-      - container-tools
+    # Components: names of files in
+    # roles/osbuild/files/<distro>/<major>/<arch>/components/ (all four
+    # targets ship these names; sway exists only for Fedora 43).
+    # Override osbuild_blueprint_components to pick another set.
+    osbuild_blueprint_components_default:
+      Fedora: &components_fedora
+        - base
+        - anaconda
+        - gnome-desktop
+        - fonts
+        - audio
+        - multimedia
+        - google-chrome
+        - vscode
+        - intel-graphics
+        - development
+        - containers-virt
+        - cockpit
+        - sway
+        - nvidia
+      AlmaLinux: &components_el
+        - base
+        - anaconda
+        - gnome-desktop
+        - fonts
+        - audio
+        - multimedia
+        - google-chrome
+        - vscode
+        - intel-graphics
+        - development
+        - containers-virt
+        - cockpit
+        - nvidia
+        - syncopated
+      Rocky: *components_el
+    osbuild_blueprint_components: "{{ osbuild_blueprint_components_default[ansible_distribution] }}"
+
+    # Disk layout (auto): the nvidia component (CUDA toolkit) needs a larger
+    # /usr than the role default of 30 GiB, as in the NVIDIA playbooks
+    # (measured install: 17 GiB used right after installation). Disks under
+    # 150 GiB abort when nvidia is selected. See the role README, "Layout".
+    osbuild_kickstart_usr_min_gib: "{{ 80 if 'nvidia' in osbuild_blueprint_components else 30 }}"
+    osbuild_kickstart_disk_min_gib: "{{ 150 if 'nvidia' in osbuild_blueprint_components else 100 }}"
 
     # Output
     osbuild_output_dir: "/var/tmp/osbuild-images"

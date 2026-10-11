@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Blueprint component "development" for Fedora 43 (x86_64).
+# Split from workstation/fedora-workstation-43-nvidia.toml and workstation/fedora-workstation-43.toml.
+# Entries starting with @ are comps groups. Versions are never pinned here;
+# use osbuild_package_pins.
+label: "Compilers, language toolchains and -devel packages"
+repo_urls: []
+services: []
+kernel_args: []
+copr_repos:
+  - "elegos/gitflow"
+  - "atim/lazydocker"
+packages:
+  - "@rpm-development-tools"
+  - "bats"
+  - "btrfs-progs-devel"
+  - "cargo"
+  - "chromium-headless"
+  - "gcc"
+  - "gcc-c++"
+  - "golang"
+  - "lm_sensors-devel"
+  - "ruby-devel"
+  - "@c-development"
+  - "@development-tools"
+  - "du-dust"
+  - "gitui"
+  - "postgresql16-contrib"
+  - "postgresql16-pgvector"
+  - "vips-devel"
