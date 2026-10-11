@@ -274,3 +274,71 @@ bash -c 'image-builder manifest image-installer --distro rocky-10.2 --arch x86_6
 After editing role files, the matching test suites in `roles/osbuild/tests/` apply; the table in [SKILL.md, section 5](.claude/skills/syncopated/SKILL.md) lists which suite covers which file.
 
 > **Note:** `image-builder build` prints scriptlet errors from `grub2-probe` and `dracut` (no `/dev/log`, no block devices in the sandbox). These are expected; a failed osbuild stage or a non-zero exit code is the real signal.
+
+---
+
+## Architecture Roadmap
+
+The project is evolving from manual, per-variant playbook generation toward an intent-driven, unattended appliance generator that applies enterprise-grade OpenSCAP security standards to standalone artist and developer workstations without requiring external logging servers or interactive installation steps.
+
+See the complete goal package at [`goals/standalone-workstation-hardening/goal.md`](goals/standalone-workstation-hardening/goal.md) for detailed specifications and acceptance criteria.
+
+```
+                      ┌────────────────────────────────────────┐
+                      │   User / Wizard Intent Profile         │
+                      │       (profiles/<machine>.yml)         │
+                      └──────────────────┬─────────────────────┘
+                                         │ Validates against schema/intent.schema.json
+                                         ▼
+                      ┌────────────────────────────────────────┐
+                      │       Universal Build Playbook         │
+                      │         (playbooks/build.yml)          │
+                      └────────┬───────────────────────┬───────┘
+                               │                       │
+               Generation-Time │                       │ OpenSCAP Tailoring &
+               Disk Layout     │                       │ Credentials Engine
+                               ▼                       ▼
+    ┌───────────────────────────────────┐    ┌───────────────────────────────────┐
+    │     Deterministic Kickstart       │    │     Hardened Blueprint Recipe     │
+    │  - Fixed logvol computed sizes    │    │  - Audit log rotation (capped)    │
+    │  - /home grows to fill disk       │    │  - Non-halting disk full actions  │
+    │  - 30s abort countdown on tty1    │    │  - Desktop noise rules unselected │
+    │  - Zero interactive spokes        │    │  - Throwaway random pass + chage  │
+    └─────────────────┬─────────────────┘    └─────────────────┬─────────────────┘
+                      │                                        │
+                      └──────────────────┬─────────────────────┘
+                                         │ image-builder compose
+                                         ▼
+                      ┌────────────────────────────────────────┐
+                      │      Personalized Unattended ISO       │
+                      │  Plug in -> auto install -> first boot │
+                      └────────────────────────────────────────┘
+```
+
+### Phase 1: OpenSCAP Tailoring & Standalone Audit Policy
+- **Log Rotation & Retention Capping**: Replace default unbounded logging (`keep_logs`) with bounded rotation (512 MB cap for CIS/PCI, 2 GiB for HIPAA) to prevent `/var/log/audit` exhaustion.
+- **Fail-Safe Workstation Execution**: Convert single-user/halt actions (`admin_space_left_action`, `disk_full_action`) to `rotate` and `syslog`, guaranteeing that log volume pressure never halts the physical machine.
+- **Proactive User Warning**: Install `/usr/local/libexec/syncopated-audit-warn` to trigger persistent GNOME critical notifications for `wheel` users, motd/Cockpit banners, and prioritized journal alerts when capacity drops below 25%.
+- **Desktop Noise Filtering**: Unselect high-frequency desktop syscall rules (`dac_modification_*`, `file_deletion_events_*`) for CIS L2 and PCI-DSS, while retaining full audit coverage for the HIPAA assessment profile.
+- **Integrated Audit & Compliance Tooling**: Package `/usr/local/bin/syncopated-scan` to perform automated dual-profile audits (stock vs tailored) exporting HTML and ARF reports to `/var/lib/syncopated/scans/`.
+
+### Phase 2: Generation-Time Deterministic Disk Sizing
+- **Predictable Volume Allocations**: Eliminate complex runtime `%pre` weight and volume calculations in Anaconda; compute exact partition and LV sizes at build time from the declared `disk.size_gib`.
+- **Flexible Space Utilization**: Allocate fixed slices for `/`, `/usr`, `/var`, `/var/tmp`, `/var/log`, and `/var/log/audit`, allowing `/home` to dynamically expand into available drive capacity with `--grow`.
+- **Safe Drive Target Selection**: Preserve automated drive discovery (NVMe-first, non-removable) while introducing a 30-second countdown on `/dev/tty1` with an instant abort key and optional drive serial number verification.
+
+### Phase 3: Personalized, Unattended Installation & Credentials
+- **Zero Interactive Installer Friction**: Suppress root password, user creation, and partition spokes in Anaconda for fully unattended deployments.
+- **Ephemeral Credentials**: Generate temporary random passwords during ISO creation, store only SHA-512 hashes in kickstart, and enforce mandatory password changes on initial GDM login via `chage -d 0`.
+- **Component-Derived Group Membership**: Aggregate supplementary user groups from selected components (e.g., `libvirt` from `containers-virt`, `audio`, `video`) combined with administrative `wheel` access.
+- **Strict Artifact Protection**: Enforce filesystem permissions of `0600` on generated blueprints, build scripts, ISOs, and credential logs, preventing secret exposure.
+
+### Phase 4: Intent Specification & Single Build Engine
+- **Formal Schema Enforcement**: Define `schema/intent.schema.json` to validate distro, hardware components, hardening profile, disk sizing, and identity.
+- **Universal Build Playbook**: Replace disparate per-variant build playbooks with `playbooks/build.yml` executing `role: osbuild` against profile configurations.
+- **Example Catalog Migration**: Transition existing variant configurations into committed example intents in `profiles/examples/`.
+
+### Phase 5: Pluggable Remote Logging & Advanced Protections
+- **Turnkey Remote Log Shipping**: Provide a simple `remote_logging.enabled` toggle to ship systemd and audit journals to a remote collector over mTLS via `systemd-journal-upload`.
+- **AI Credential & Secret Segmentation** *(Future Goal)*: Apply PCI-inspired separation patterns to LLM provider API keys and agent execution contexts.
+- **Self-Service CLI & Web UI** *(Future Goal)*: Introduce an interactive CLI wizard and lightweight web interface wrapping the intent generator.
