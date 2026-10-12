@@ -1,12 +1,14 @@
 #!/usr/bin/env bats
-# Tests for the %pre disk selection in roles/osbuild/files/kickstart/syncopated.ks.
-# Fact numbers refer to goals/kickstart-blueprint-directives/facts.md.
+# Tests for the %pre in roles/osbuild/files/kickstart/syncopated.ks: disk
+# selection, the serial and capacity guards, the countdown, and filling the
+# generation-time layout in for the chosen disk.
 #
 # The %pre body is extracted from the kickstart and run with stubbed lsblk,
-# findmnt and blkid (tests/kickstart/stubs/). SYNC_PRE_OUT, SYNC_PRE_TTY and
-# SYNC_PRE_CMDLINE point its outputs and /proc/cmdline at per-test files.
-# SYNC_PRE_LAYOUT points at a missing file unless a test writes one, so the
-# built-in layout defaults (equal to the role defaults) apply.
+# findmnt, blkid and chvt (tests/kickstart/stubs/). SYNC_PRE_* variables point
+# its inputs and outputs at per-test files. The layout files stand in for
+# what templates/kickstart.toml.j2 renders; tests/test_intent.py checks the
+# real rendered files (and runs ksvalidator on them).
+# Volume sizes are no longer computed here: tests/test_disk_sizing.py.
 
 GIB=1073741824
 
@@ -21,17 +23,26 @@ setup() {
   export PATH="$BATS_TEST_DIRNAME/stubs:$PATH"
   export LSBLK_DISKS="$BATS_TEST_TMPDIR/disks"
   export LSBLK_PARENTS="$BATS_TEST_TMPDIR/parents"
+  export LSBLK_INFO="$BATS_TEST_TMPDIR/info"
   export FINDMNT_MAP="$BATS_TEST_TMPDIR/mounts"
   export BLKID_MAP="$BATS_TEST_TMPDIR/labels"
+  export CHVT_LOG="$BATS_TEST_TMPDIR/chvt"
   export SYNC_PRE_OUT="$BATS_TEST_TMPDIR/partitions.ks"
   export SYNC_PRE_TTY="$BATS_TEST_TMPDIR/tty1"
+  export SYNC_PRE_COUNTDOWN_TTY="$BATS_TEST_TMPDIR/tty8"
+  export SYNC_PRE_COUNTDOWN_IN="$BATS_TEST_TMPDIR/keys"
+  export SYNC_PRE_SLEEP=:
   export SYNC_PRE_CMDLINE="$BATS_TEST_TMPDIR/cmdline"
-  export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/no-layout.env"
+  export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/layout.env"
+  export SYNC_PRE_LAYOUT_KS="$BATS_TEST_TMPDIR/layout.ks"
   : >"$LSBLK_DISKS"
   : >"$LSBLK_PARENTS"
+  : >"$LSBLK_INFO"
   : >"$FINDMNT_MAP"
   : >"$BLKID_MAP"
+  : >"$SYNC_PRE_COUNTDOWN_IN"
   echo "BOOT_IMAGE=/images/pxeboot/vmlinuz quiet" >"$SYNC_PRE_CMDLINE"
+  layout 100
 }
 
 # disk NAME SIZE_GIB [TRAN] [RM] [RO] [TYPE]
@@ -39,11 +50,44 @@ disk() {
   echo "$1 ${6:-disk} ${4:-0} ${5:-0} $(($2 * GIB)) ${3:-}" >>"$LSBLK_DISKS"
 }
 
+# info NAME SERIAL MODEL...
+info() {
+  echo "$*" >>"$LSBLK_INFO"
+}
+
+# layout DECLARED_GIB [SERIAL] [HOME_MIB]: the files the first %pre writes.
+# HOME_MIB 0 leaves the /home volume out.
+layout() {
+  printf 'DECLARED_MIB=%s\nDISK_SERIAL=%s\nCOUNTDOWN=30\n' "$(($1 * 1024))" "${2:-}" >"$SYNC_PRE_LAYOUT"
+  cat >"$SYNC_PRE_LAYOUT_KS" <<EOF
+ignoredisk --only-use=@DISK@
+zerombr
+clearpart --all --initlabel --disklabel=gpt --drives=@DISK@
+bootloader --boot-drive=@DISK@
+reqpart
+part /boot --size=2048 --fstype=xfs --ondisk=@DISK@
+part pv.00 --size=1 --grow --ondisk=@DISK@
+volgroup vg00 pv.00
+logvol / --vgname=vg00 --name=root --size=21697 --fstype=xfs
+logvol /usr --vgname=vg00 --name=usr --size=34371 --fstype=xfs
+logvol /var --vgname=vg00 --name=var --size=34371 --fstype=xfs
+EOF
+  if [ "${3:-1000}" != 0 ]; then
+    echo "logvol /home --vgname=vg00 --name=home --size=${3:-1000} --fstype=xfs --fsoptions=\"nodev,nosuid,noatime\"" >>"$SYNC_PRE_LAYOUT_KS"
+  fi
+}
+
 target() {
   sed -n 's/^ignoredisk --only-use=//p' "$SYNC_PRE_OUT"
 }
 
-@test "F9: NVMe wins over a larger SATA disk" {
+home() {
+  sed -n 's/^logvol \/home .*--size=\([0-9]*\).*/\1/p' "$SYNC_PRE_OUT"
+}
+
+# ---- disk selection (unchanged) ----------------------------------------------
+
+@test "NVMe wins over a larger SATA disk" {
   disk sda 2000 sata
   disk nvme0n1 500 nvme
   run bash "$PRE"
@@ -51,7 +95,7 @@ target() {
   [ "$(target)" = nvme0n1 ]
 }
 
-@test "F9: the largest NVMe disk wins among NVMe disks" {
+@test "the largest NVMe disk wins among NVMe disks" {
   disk nvme0n1 256 nvme
   disk nvme1n1 1000 nvme
   run bash "$PRE"
@@ -59,7 +103,15 @@ target() {
   [ "$(target)" = nvme1n1 ]
 }
 
-@test "F9: USB disks are excluded even when not flagged removable" {
+@test "the larger of two SATA disks wins" {
+  disk sda 250 sata
+  disk sdb 1000 sata
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  [ "$(target)" = sdb ]
+}
+
+@test "USB disks are excluded even when not flagged removable" {
   disk sdb 1000 usb
   disk sda 100 sata
   run bash "$PRE"
@@ -68,7 +120,7 @@ target() {
   [[ "$output" == *"skip sdb: usb"* ]]
 }
 
-@test "F9: removable and read-only disks are excluded" {
+@test "removable and read-only disks are excluded" {
   disk sdb 1000 sata 1
   disk sdc 1000 sata 0 1
   disk sda 100 sata
@@ -77,7 +129,7 @@ target() {
   [ "$(target)" = sda ]
 }
 
-@test "F9: zram, loop and optical devices are never candidates" {
+@test "zram, loop and optical devices are never candidates" {
   disk zram0 64
   disk loop0 100 "" 0 0 loop
   disk sr0 1 sata 1 1 rom
@@ -87,7 +139,7 @@ target() {
   [ "$(target)" = vda ]
 }
 
-@test "F9: the disk behind /run/install/repo is excluded" {
+@test "the disk behind /run/install/repo is excluded" {
   disk sdb 1000 sata
   disk sda 100 sata
   echo "/run/install/repo /dev/sdb1" >"$FINDMNT_MAP"
@@ -98,7 +150,7 @@ target() {
   [[ "$output" == *"skip sdb: install media"* ]]
 }
 
-@test "F9: an unpartitioned media disk is excluded by its own name" {
+@test "an unpartitioned media disk is excluded by its own name" {
   disk sdb 1000 sata
   disk sda 100 sata
   echo "/run/install/repo /dev/sdb" >"$FINDMNT_MAP"
@@ -107,7 +159,7 @@ target() {
   [ "$(target)" = sda ]
 }
 
-@test "F9: the inst.stage2 LABEL identifies the media disk when nothing is mounted" {
+@test "the inst.stage2 LABEL identifies the media disk when nothing is mounted" {
   disk sdc 2000 sata
   disk sda 100 sata
   echo "BOOT_IMAGE=/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Rocky-10-2-x86_64 quiet" >"$SYNC_PRE_CMDLINE"
@@ -118,23 +170,7 @@ target() {
   [ "$(target)" = sda ]
 }
 
-@test "F9: the larger of two SATA disks wins" {
-  disk sda 250 sata
-  disk sdb 1000 sata
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  [ "$(target)" = sdb ]
-}
-
-@test "F10: a 30 GiB target aborts with a readable error" {
-  disk vda 30
-  run bash "$PRE"
-  [ "$status" -eq 1 ]
-  [ ! -e "$SYNC_PRE_OUT" ]
-  grep -q "target disk vda has 30720 MiB; at least 102400 MiB (100 GiB) is required" "$SYNC_PRE_TTY"
-}
-
-@test "F10: no candidate disk aborts with a readable error" {
+@test "no candidate disk aborts with a readable error" {
   disk sdb 64 usb
   run bash "$PRE"
   [ "$status" -eq 1 ]
@@ -142,271 +178,136 @@ target() {
   grep -q "no installable disk found" "$SYNC_PRE_TTY"
 }
 
-lv() {
-  sed -n "s|^logvol $1 --vgname=vg00 --name=[a-z]* --size=\([0-9]*\) --fstype=xfs\$|\1|p" "$SYNC_PRE_OUT"
-}
+# ---- layout from generation time ---------------------------------------------
 
-@test "F11/F12: 100 GiB disk gets the minimums plus a weighted share and no /home" {
+@test "a disk of exactly the declared size gets the rendered layout verbatim" {
   disk nvme0n1 100 nvme
-  disk vdb 30
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 98304; reserve 7864; pool 90440; minimums / 20480, /usr 30720, /var 30720 (+ /home 20480 does not fit);
-  # 8520 left shared 1:3:3 -> 1217, 3651, 3651 (1 MiB rounding stays unassigned)
-  diff -u - "$SYNC_PRE_OUT" <<EOF
-ignoredisk --only-use=nvme0n1
-zerombr
-clearpart --all --initlabel --disklabel=gpt --drives=nvme0n1
-bootloader --boot-drive=nvme0n1
-reqpart
-part /boot --size=2048 --fstype=xfs --ondisk=nvme0n1
-part pv.00 --size=1 --grow --ondisk=nvme0n1
-volgroup vg00 pv.00
-logvol / --vgname=vg00 --name=root --size=21697 --fstype=xfs
-logvol /usr --vgname=vg00 --name=usr --size=34371 --fstype=xfs
-logvol /var --vgname=vg00 --name=var --size=34371 --fstype=xfs
-EOF
-  [[ "$output" == *"unassigned 7865 MiB"* ]]
+  diff -u <(sed 's/@DISK@/nvme0n1/g' "$SYNC_PRE_LAYOUT_KS") "$SYNC_PRE_OUT"
 }
 
-@test "F12: 477 GiB disk caps /usr and /var at 110 GiB and /home gets the remainder" {
-  disk nvme0n1 477 nvme
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  # usable 484352; reserve 38748; pool 445604; minimums 102400; 343204 left shared 1:3:3:5;
-  # /usr and /var reach their 112640 cap, / and /home share the rest
-  [ "$(lv /)" = 50373 ]
-  [ "$(lv /usr)" = 112640 ]
-  [ "$(lv /var)" = 112640 ]
-  [ "$(lv /home)" = 169950 ]
-  [[ "$output" == *"unassigned 38749 MiB"* ]]
+@test "%pre computes no volume sizes: every logvol size comes from the layout file" {
+  ! grep -Eq 'allocate|_MIN_MIB|_W=|RESERVE' "$PRE"
 }
 
-@test "F12: 931 GiB disk caps / at 64 GiB and the reserve at 64 GiB" {
-  disk nvme0n1 931 nvme
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  [ "$(lv /)" = 65536 ]
-  [ "$(lv /usr)" = 112640 ]
-  [ "$(lv /var)" = 112640 ]
-  [ "$(lv /home)" = 592896 ]
-  ! grep "^logvol" "$SYNC_PRE_OUT" | grep -q -- --grow
-  [[ "$output" == *"unassigned 65536 MiB"* ]]
-}
-
-@test "119 GiB disk still gets a /home volume and a /usr above its 30 GiB minimum" {
-  disk sdc 119 sata
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  [ "$(lv /usr)" = 32205 ]
-  [ "$(lv /var)" = 32205 ]
-  [ "$(lv /home)" = 22955 ]
-}
-
-@test "233 GiB disk shares the space by weight" {
-  disk sdc 233 sata
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  [ "$(lv /)" = 29924 ]
-  [ "$(lv /usr)" = 59054 ]
-  [ "$(lv /var)" = 59054 ]
-  [ "$(lv /home)" = 67703 ]
-}
-
-@test "layout env written by the role overrides the built-in defaults" {
-  disk nvme0n1 100 nvme
-  export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/layout.env"
-  printf '%s\n' RESERVE_PCT=0 ROOT_W=0 USR_W=1 VAR_W=1 >"$SYNC_PRE_LAYOUT"
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  # usable 98304, no reserve; minimums 20480 + 30720 + 30720 (no /home); 16384 left -> 8192 each to /usr and /var
-  [ "$(lv /)" = 20480 ]
-  [ "$(lv /usr)" = 38912 ]
-  [ "$(lv /var)" = 38912 ]
-  [ -z "$(lv /home)" ]
-  [[ "$output" == *"unassigned 0 MiB"* ]]
-}
-
-@test "auto: the NVIDIA playbooks' /usr minimum of 80 GiB (role vars) is applied" {
+@test "a larger disk gives the surplus to /home and nothing else changes" {
+  layout 100 "" 1000
   disk nvme0n1 150 nvme
-  export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/layout.env"
-  printf '%s\n' MIN_MIB=153600 USR_MIN_MIB=81920 >"$SYNC_PRE_LAYOUT"
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  # usable 149504; reserve 11960; pool 137544; minimums 20480 + 81920 + 30720; 4424 left shared 1:3:3
-  [ "$(lv /)" = 21112 ]
-  [ "$(lv /usr)" = 83816 ]
-  [ "$(lv /var)" = 32616 ]
-  [ -z "$(lv /home)" ]
+  [ "$(home)" = $((1000 + 50 * 1024)) ]
+  diff -u <(sed 's/@DISK@/nvme0n1/g' "$SYNC_PRE_LAYOUT_KS" | grep -v '^logvol /home') \
+    <(grep -v '^logvol /home' "$SYNC_PRE_OUT")
+  grep -q -- '--fsoptions="nodev,nosuid,noatime"' "$SYNC_PRE_OUT"
 }
 
-@test "auto: a 120 GiB disk is too small for an 80 GiB /usr minimum" {
-  disk nvme0n1 120 nvme
-  export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/layout.env"
-  printf '%s\n' USR_MIN_MIB=81920 >"$SYNC_PRE_LAYOUT"
+@test "without a /home volume the surplus stays unassigned" {
+  layout 100 "" 0
+  disk vda 300
   run bash "$PRE"
-  [ "$status" -eq 1 ]
-  grep -q "do not fit" "$SYNC_PRE_TTY"
+  [ "$status" -eq 0 ]
+  [ -z "$(home)" ]
+  diff -u <(sed 's/@DISK@/vda/g' "$SYNC_PRE_LAYOUT_KS") "$SYNC_PRE_OUT"
 }
 
-@test "minimums that do not fit abort" {
-  disk vda 150
-  export SYNC_PRE_LAYOUT="$BATS_TEST_TMPDIR/layout.env"
-  printf '%s\n' ROOT_MIN_MIB=90000 >"$SYNC_PRE_LAYOUT"
+@test "a disk smaller than declared aborts naming both sizes, before writing a layout" {
+  layout 476
+  disk nvme0n1 465 nvme
+  info nvme0n1 S5GXNF0 Samsung SSD 980 PRO 500GB
   run bash "$PRE"
   [ "$status" -eq 1 ]
   [ ! -e "$SYNC_PRE_OUT" ]
-  grep -q "do not fit" "$SYNC_PRE_TTY"
+  grep -q "target disk nvme0n1 (Samsung SSD 980 PRO 500GB) has 465 GiB (476160 MiB), but the profile declares disk.size_gib 476 GiB (487424 MiB)" "$SYNC_PRE_TTY"
+  # aborted before the countdown
+  [ ! -s "$CHVT_LOG" ]
 }
 
-@test "built-in layout defaults in the .ks equal the role defaults" {
-  local defaults="$BATS_TEST_DIRNAME/../../defaults/main.yml"
-  def() { sed -n "s/^osbuild_kickstart_$1: *\([0-9]*\)\$/\1/p" "$defaults"; }
-  ks() { sed -n "s/^$1=\([0-9]*\)\( .*\)\{0,1\}\$/\1/p" "$KS"; }
-  [ "$(ks MIN_MIB)" = $(($(def disk_min_gib) * 1024)) ]
-  [ "$(ks RESERVE_PCT)" = "$(def reserve_percent)" ]
-  [ "$(ks RESERVE_MAX_MIB)" = $(($(def reserve_max_gib) * 1024)) ]
-  for v in ROOT USR VAR; do
-    lower=$(echo "$v" | tr A-Z a-z)
-    [ "$(ks ${v}_MIN_MIB)" = $(($(def ${lower}_min_gib) * 1024)) ]
-    [ "$(ks ${v}_MAX_MIB)" = $(($(def ${lower}_max_gib) * 1024)) ]
-    [ "$(ks ${v}_W)" = "$(def ${lower}_weight)" ]
-  done
-  [ "$(ks HOME_MIN_MIB)" = $(($(def home_min_gib) * 1024)) ]
-  [ "$(ks HOME_W)" = "$(def home_weight)" ]
-}
-
-@test "F6: the kickstart with a generated layout passes ksvalidator" {
-  local ksv
-  ksv=$(command -v ksvalidator || echo "$BATS_TEST_DIRNAME/../../../../.venv/bin/ksvalidator")
-  [ -x "$ksv" ] || skip "ksvalidator not installed"
-  disk nvme0n1 500 nvme
+@test "missing layout files abort: only role-generated kickstarts install" {
+  rm "$SYNC_PRE_LAYOUT_KS"
+  disk vda 100
   run bash "$PRE"
-  [ "$status" -eq 0 ]
-  sed "s|^%include /tmp/partitions.ks|%include $SYNC_PRE_OUT|" "$KS" >"$BATS_TEST_TMPDIR/full.ks"
-  for v in RHEL9 RHEL10 F43; do
-    run "$ksv" -i -v "$v" "$BATS_TEST_TMPDIR/full.ks"
-    echo "$v: $output"
-    [ "$status" -eq 0 ]
-  done
+  [ "$status" -eq 1 ]
+  grep -q "syncopated-layout.ks\|layout.ks is missing" "$SYNC_PRE_TTY"
 }
 
-# --- compliant layout (LAYOUT_MODE=compliant) -------------------------------
+# ---- serial pin ----------------------------------------------------------------
 
-clv() {
-  sed -n "s|^logvol $1 --vgname=vg00 --name=[a-z_]* --size=\([0-9]*\) .*|\1|p" "$SYNC_PRE_OUT"
-}
-
-compliant() {
-  printf 'LAYOUT_MODE=compliant\n%s\n' "$*" >"$SYNC_PRE_LAYOUT"
-  export SYNC_PRE_POST_OUT="$BATS_TEST_TMPDIR/partitions-post.ks"
-}
-
-@test "compliant: 477 GiB disk gets every separate mount with hardening options" {
-  disk nvme0n1 477 nvme
-  compliant ""
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  for mp in /usr /var /var/tmp /var/log /var/log/audit /home; do
-    grep -q "^logvol $mp " "$SYNC_PRE_OUT"
-  done
-  ! grep -q "^logvol /tmp " "$SYNC_PRE_OUT"
-  grep -q '^logvol /var/tmp .*--fsoptions="nodev,nosuid,noexec[,"]' "$SYNC_PRE_OUT"
-  grep -q '^logvol /home .*--fsoptions="nodev,nosuid[,"]' "$SYNC_PRE_OUT"
-  grep -q '^part /boot .*--fsoptions="nodev,nosuid"' "$SYNC_PRE_OUT"
-  ! grep -q -- '--encrypted' "$SYNC_PRE_OUT"
-  # usable 484352; reserve 38748; pool 445604; fixed 110592 + /var min 40960 + /home min 10240;
-  # 283812 left shared 2:5 -> /var +81089, /home +202723
-  [ "$(clv /var)" = 122049 ]
-  [ "$(clv /home)" = 212962 ]
-  [[ "$output" == *"unassigned 38749 MiB"* ]]
-}
-
-@test "compliant: tmpfs /tmp is an fstab line in a %post include" {
-  disk nvme0n1 477 nvme
-  compliant ""
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  grep -q '^%post' "$SYNC_PRE_POST_OUT"
-  grep -q 'tmpfs /tmp tmpfs defaults,nodev,nosuid,noexec' "$SYNC_PRE_POST_OUT"
-  [ "$(tail -n1 "$SYNC_PRE_POST_OUT")" = "%end" ]
-}
-
-@test "compliant: TMP_MODE=lv adds a /tmp volume and an empty %post include" {
-  disk nvme0n1 477 nvme
-  compliant "TMP_MODE=lv"
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  grep -q '^logvol /tmp .*noexec' "$SYNC_PRE_OUT"
-  [ ! -s "$SYNC_PRE_POST_OUT" ]
-}
-
-@test "compliant: ENCRYPT=1 encrypts the physical volume" {
-  disk nvme0n1 477 nvme
-  compliant "ENCRYPT=1"
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  grep -q '^part pv.00 .*--encrypted' "$SYNC_PRE_OUT"
-}
-
-@test "compliant: 932 GiB disk clamps /var and gives the rest to /home" {
-  disk nvme0n1 932 nvme
-  compliant ""
-  run bash "$PRE"
-  [ "$status" -eq 0 ]
-  var=$(sed -n 's/^logvol \/var --.*--size=\([0-9]*\).*/\1/p' "$SYNC_PRE_OUT")
-  home=$(sed -n 's/^logvol \/home --.*--size=\([0-9]*\).*/\1/p' "$SYNC_PRE_OUT")
-  [ "$var" = 204800 ]
-  [ "$home" = 569344 ]
-  [[ "$output" == *"unassigned 65536 MiB"* ]]
-}
-
-@test "compliant: a 100 GiB disk aborts below the compliant minimum" {
+@test "a pinned serial that matches proceeds" {
+  layout 100 S5GXNF0R123
   disk nvme0n1 100 nvme
-  compliant ""
-  run bash "$PRE"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"at least"* ]]
-}
-
-@test "compliant: a 180 GiB disk (the minimum) fits the default layout with /home >= 10 GiB" {
-  disk nvme0n1 180 nvme
-  compliant ""
+  info nvme0n1 S5GXNF0R123 Samsung SSD
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  home=$(sed -n 's/^logvol \/home --.*--size=\([0-9]*\).*/\1/p' "$SYNC_PRE_OUT")
-  [ "$home" -ge 10240 ]
+  [ "$(target)" = nvme0n1 ]
 }
 
-@test "compliant: the NVIDIA playbook's 80 GiB /usr (role var) needs 215 GiB" {
-  disk nvme0n1 215 nvme
-  compliant "MIN_MIB=220160
-C_USR_MIB=81920"
+@test "a pinned serial that differs aborts before any disk is touched" {
+  layout 100 S5GXNF0R123
+  disk nvme0n1 100 nvme
+  info nvme0n1 OTHER999 Samsung SSD
+  run bash "$PRE"
+  [ "$status" -eq 1 ]
+  [ ! -e "$SYNC_PRE_OUT" ]
+  grep -q "has serial 'OTHER999', but the profile pins disk.serial 'S5GXNF0R123'" "$SYNC_PRE_TTY"
+  [ ! -s "$CHVT_LOG" ]
+}
+
+@test "a pinned serial with a disk that reports none aborts" {
+  layout 100 S5GXNF0R123
+  disk vda 100
+  run bash "$PRE"
+  [ "$status" -eq 1 ]
+  grep -q "has serial 'none'" "$SYNC_PRE_TTY"
+}
+
+# ---- countdown -------------------------------------------------------------------
+
+@test "the countdown names the disk model, serial and size, then proceeds" {
+  disk nvme0n1 100 nvme
+  info nvme0n1 S5GXNF0 Samsung SSD 980 PRO 500GB
   run bash "$PRE"
   [ "$status" -eq 0 ]
-  [ "$(clv /usr)" = 81920 ]
+  grep -q "Target disk:  /dev/nvme0n1" "$SYNC_PRE_COUNTDOWN_TTY"
+  grep -q "Model:        Samsung SSD 980 PRO 500GB" "$SYNC_PRE_COUNTDOWN_TTY"
+  grep -q "Serial:       S5GXNF0" "$SYNC_PRE_COUNTDOWN_TTY"
+  grep -q "Size:         100 GiB" "$SYNC_PRE_COUNTDOWN_TTY"
+  grep -q "Press any key within 30 seconds to abort" "$SYNC_PRE_COUNTDOWN_TTY"
+  grep -q "Installing in   1 s" "$SYNC_PRE_COUNTDOWN_TTY"
+  # switched to the countdown console and back to tty1
+  [ "$(cat "$CHVT_LOG")" = "$(printf '8\n1')" ]
 }
 
-@test "compliant: a 179 GiB disk aborts" {
-  disk nvme0n1 179 nvme
-  compliant ""
+@test "a key during the countdown aborts without writing a layout" {
+  disk vda 100
+  echo x >"$SYNC_PRE_COUNTDOWN_IN"
   run bash "$PRE"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
+  [ ! -e "$SYNC_PRE_OUT" ]
+  grep -q "a key was pressed during the countdown; no disk was changed" "$SYNC_PRE_TTY"
 }
 
-@test "built-in compliant defaults in the .ks equal the role defaults" {
-  local defaults="$BATS_TEST_DIRNAME/../../defaults/main.yml"
-  def() { sed -n "s/^osbuild_kickstart_compliant_$1: *\([0-9]*\)\$/\1/p" "$defaults"; }
-  ks() { sed -n "s/^$1=\([0-9]*\)\( .*\)\{0,1\}\$/\1/p" "$KS"; }
-  [ "$(ks C_ROOT_MIB)" = $(($(def root_gib) * 1024)) ]
-  [ "$(ks C_USR_MIB)" = $(($(def usr_gib) * 1024)) ]
-  [ "$(ks C_VAR_MIN_MIB)" = $(($(def var_min_gib) * 1024)) ]
-  [ "$(ks C_VAR_MAX_MIB)" = $(($(def var_max_gib) * 1024)) ]
-  [ "$(ks C_VAR_W)" = "$(def var_weight)" ]
-  [ "$(ks C_HOME_MIN_MIB)" = $(($(def home_min_gib) * 1024)) ]
-  [ "$(ks C_HOME_W)" = "$(def home_weight)" ]
-  [ "$(ks C_TMP_MIB)" = $(($(def tmp_gib) * 1024)) ]
-  [ "$(ks C_VARTMP_MIB)" = $(($(def var_tmp_gib) * 1024)) ]
-  [ "$(ks C_VARLOG_MIB)" = $(($(def var_log_gib) * 1024)) ]
-  [ "$(ks C_AUDIT_MIB)" = $(($(def audit_gib) * 1024)) ]
+@test "the countdown takes one second per step when the console gives no input" {
+  disk vda 100
+  printf 'DECLARED_MIB=102400\nDISK_SERIAL=\nCOUNTDOWN=3\n' >"$SYNC_PRE_LAYOUT"
+  export SYNC_PRE_SLEEP="$BATS_TEST_TMPDIR/sleep"
+  printf '#!/bin/sh\necho "$1" >>"%s"\n' "$BATS_TEST_TMPDIR/slept" >"$SYNC_PRE_SLEEP"
+  chmod +x "$SYNC_PRE_SLEEP"
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/slept")" -eq 3 ]
+}
+
+@test "the countdown length comes from the layout file" {
+  disk vda 100
+  printf 'DECLARED_MIB=102400\nDISK_SERIAL=\nCOUNTDOWN=5\n' >"$SYNC_PRE_LAYOUT"
+  run bash "$PRE"
+  [ "$status" -eq 0 ]
+  grep -q "Press any key within 5 seconds" "$SYNC_PRE_COUNTDOWN_TTY"
+}
+
+@test "the kickstart includes the generated layout and nothing else for storage" {
+  grep -q '^%include /tmp/partitions.ks$' "$KS"
+  ! grep -q 'partitions-post.ks' "$KS"
+  ! grep -Eq '^(autopart|part|logvol|clearpart|rootpw|user) ' "$KS"
 }

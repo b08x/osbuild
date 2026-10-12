@@ -8,10 +8,13 @@ OUTPUT_DIR/*.toml must parse as TOML and carry no user, group, unattended or
 sudo-nopasswd setting, must enable the Anaconda Users module, and must ship
 the wheel sudoers drop-in, the Flathub remote file and /etc/syncopated-release
 (naming the blueprint) exactly once. With MODE=enabled the kickstart
-contents must be the rendered lang/keyboard/timezone lines, the layout %pre
-that writes /tmp/syncopated-layout.env (exactly the LAYOUT_KEYS, integer
-values), then KS_SRC byte for byte; with MODE=disabled there must be no kickstart at all. When
-KSVALIDATOR is given, each rendered kickstart is also run through it.
+contents must be the rendered lang/keyboard/timezone lines, rootpw --lock,
+the user lines (SHA-512 hashes, no plaintext), the layout %pre that writes
+/tmp/syncopated-layout.env (exactly LAYOUT_KEYS) and /tmp/syncopated-layout.ks
+(fixed logvol sizes, @DISK@ placeholders), then KS_SRC byte for byte, then
+the chage %post; with MODE=disabled there must be no kickstart at all. When
+KSVALIDATOR is given, each rendered kickstart (layout filled in for vda) is
+also run through it with -v RHEL10.
 """
 import pathlib
 import re
@@ -32,27 +35,39 @@ ksvalidator = sys.argv[8] if len(sys.argv) > 8 else ""
 header = f"lang {locale}\nkeyboard {keyboard}\ntimezone {timezone} --utc\n"
 want = header + ks_src.read_text(encoding="utf-8")
 flathub_src = (ks_src.parent.parent / "flatpak" / "flathub.flatpakrepo").read_text(encoding="utf-8")
-LAYOUT_KEYS = ["MIN_MIB", "RESERVE_PCT", "RESERVE_MAX_MIB",
-               "ROOT_MIN_MIB", "ROOT_MAX_MIB", "ROOT_W",
-               "USR_MIN_MIB", "USR_MAX_MIB", "USR_W",
-               "VAR_MIN_MIB", "VAR_MAX_MIB", "VAR_W",
-               "HOME_MIN_MIB", "HOME_W"]
+LAYOUT_KEYS = ["DECLARED_MIB", "DISK_SERIAL", "COUNTDOWN"]
 LAYOUT_RE = re.compile(
+    r"rootpw --lock\n"
+    r"((?:user --name=\S+ --gecos=\"[^\"]*\" --groups=\S+(?: --uid=\d+)? --iscrypted --password=\$6\$\S+\n"
+    r"(?:sshkey --username=\S+ \"[^\"]+\"\n)?)+)"
     r"%pre --interpreter=/usr/bin/bash --erroronfail\n"
-    r"cat >/tmp/syncopated-layout\.env <<'EOF'\n((?:[A-Z_]+=[0-9]+\n)+)EOF\n%end\n")
+    r"cat >/tmp/syncopated-layout\.env <<'EOF'\n((?:[A-Z_]+=[^\n]*\n)+)EOF\n"
+    r"cat >/tmp/syncopated-layout\.ks <<'EOF'\n((?:[^\n]+\n)+?)EOF\n%end\n")
+POST_RE = re.compile(r"\n(?:# [^\n]*\n)*%post --interpreter=/usr/bin/bash --log=/root/syncopated-users\.log\n"
+                     r"(?:chage -d 0 \S+\n)+%end\n$")
 
 
 def strip_layout(contents):
-    """Return contents without the layout %pre, or an error string."""
+    """Return (contents without the rendered parts, layout ks), or (None, error)."""
     if not contents.startswith(header):
         return None, "kickstart does not start with the lang/keyboard/timezone header"
     m = LAYOUT_RE.match(contents, len(header))
     if not m:
-        return None, "layout %pre missing after the header"
-    keys = [line.split("=")[0] for line in m.group(1).splitlines()]
+        return None, "rootpw --lock, user lines or the layout %pre missing after the header"
+    keys = [line.split("=")[0] for line in m.group(2).splitlines()]
     if keys != LAYOUT_KEYS:
         return None, f"layout keys {keys} != {LAYOUT_KEYS}"
-    return header + contents[m.end():], None
+    layout = m.group(3)
+    if not re.search(r"^logvol / --vgname=vg00 --name=root --size=\d+ --fstype=xfs", layout, re.M):
+        return None, "layout has no fixed-size / volume"
+    if "--grow" in "".join(l for l in layout.splitlines() if l.startswith("logvol")):
+        return None, "a logical volume grows; sizes must be fixed at generation time"
+    rest = contents[m.end():]
+    post = POST_RE.search(rest)
+    if not post:
+        return None, "chage %post missing at the end"
+    return (header + rest[:post.start()], layout), None
+
 
 blueprints = sorted(out_dir.glob("*.toml"))
 errors = []
@@ -105,13 +120,13 @@ for bp in blueprints:
         stripped, layout_err = strip_layout(contents or "")
         if layout_err:
             err.append(layout_err)
-        elif stripped != want:
+        elif stripped[0] != want:
             err.append("kickstart contents differ from rendered header + layout + source")
         elif ksvalidator:
             with tempfile.NamedTemporaryFile("w", suffix=".ks") as ks:
-                ks.write(contents.replace("%include /tmp/partitions.ks\n", ""))
+                ks.write(contents.replace("%include /tmp/partitions.ks\n", stripped[1].replace("@DISK@", "vda")))
                 ks.flush()
-                run = subprocess.run([ksvalidator, ks.name], capture_output=True, text=True)
+                run = subprocess.run([ksvalidator, "-v", "RHEL10", ks.name], capture_output=True, text=True)
                 if run.returncode != 0:
                     err.append(f"ksvalidator: {run.stdout.strip()} {run.stderr.strip()}")
     else:

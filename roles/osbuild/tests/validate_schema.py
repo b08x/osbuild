@@ -12,7 +12,8 @@ from pathlib import Path
 import yaml
 
 FILES = Path(__file__).resolve().parent.parent / "files"
-LIST_FIELDS = ["packages", "repo_urls", "services", "kernel_args", "flatpaks", "bootc_repos", "copr_repos"]
+LIST_FIELDS = ["packages", "repo_urls", "services", "kernel_args", "flatpaks", "bootc_repos", "copr_repos",
+               "user_groups", "openscap_unselected"]
 KNOWN = {"label", "fragment", *LIST_FIELDS}
 
 

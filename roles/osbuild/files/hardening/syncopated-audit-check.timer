@@ -1,0 +1,9 @@
+[Unit]
+Description=Check free space on the audit log volume at boot and hourly
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

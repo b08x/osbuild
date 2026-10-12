@@ -533,14 +533,18 @@ def cli_verify(store: ComponentStore, target: str, component: Optional[str] = No
 # Playbook component selection
 # =============================================================================
 
-_COMPONENTS_KEY = re.compile(r"^(?P<indent>\s*)osbuild_blueprint_components:\s*(?:#.*)?$")
-_DISTRO_LINE = re.compile(r"""^\s*osbuild_distro:\s*["']?(?P<distro>[a-z]+)-(?P<ver>\d+)""", re.M)
-_ARCH_LINE = re.compile(r"""^\s*osbuild_arch:\s*["']?(?P<arch>[\w]+)""", re.M)
+# Playbooks name the list osbuild_blueprint_components; build intents
+# (profiles/*.yml, schema/intent.schema.json) name it components.
+_COMPONENTS_KEY = re.compile(r"^(?P<indent>\s*)(?:osbuild_blueprint_)?components:\s*(?:#.*)?$")
+_DISTRO_LINE = re.compile(r"""^\s*(?:osbuild_)?distro:\s*["']?(?P<distro>[a-z]+)-(?P<ver>\d+)""", re.M)
+_ARCH_LINE = re.compile(r"""^\s*(?:osbuild_)?arch:\s*["']?(?P<arch>[\w]+)""", re.M)
 _NAME_ITEM = re.compile(r"^(?P<indent>\s*)-\s+(?P<name>[A-Za-z0-9][\w.-]*)\s*(?:#.*)?$")
 
 
 class PlaybookSelection:
-    """The ``osbuild_blueprint_components`` block list of one playbook file.
+    """The component block list of one playbook or build intent file.
+
+    ``osbuild_blueprint_components`` in a playbook, ``components`` in an intent.
 
     Edits touch only that list's item lines; everything else stays byte for byte.
     """
@@ -550,7 +554,7 @@ class PlaybookSelection:
         self.lines = self.path.read_text().split("\n")
         self._start = next((i for i, l in enumerate(self.lines) if _COMPONENTS_KEY.match(l)), None)
         if self._start is None:
-            raise TrackerError(f"{self.path}: no 'osbuild_blueprint_components:' block list found")
+            raise TrackerError(f"{self.path}: no 'osbuild_blueprint_components:' or 'components:' block list found")
         self._items = self._scan()
         if not self._items:
             raise TrackerError(f"{self.path}: osbuild_blueprint_components is not a block list of names")
@@ -765,11 +769,14 @@ def tui_playbook(targets: Dict[str, Path], root: Path) -> None:
     playbooks = sorted(
         p for p in (root / "playbooks").glob("*.yml")
         if "osbuild_blueprint_components:" in p.read_text() and not p.name.endswith("osbuild.yml")
+    ) + sorted(
+        p for p in [*(root / "profiles").glob("*.yml"), *(root / "profiles" / "examples").glob("*.yml")]
+        if re.search(r"(?m)^\s+components:", p.read_text())
     )
     if not playbooks:
         _say("warn", "No playbook with a component list found")
         return
-    choices = [Choice(p.name, value=str(p)) for p in playbooks] + [Separator(), Choice("Back", value=_BACK)]
+    choices = [Choice(str(p.relative_to(root)), value=str(p)) for p in playbooks] + [Separator(), Choice("Back", value=_BACK)]
     picked = questionary.select("Choose a playbook:", choices=choices).ask()
     if picked is None or picked == _BACK:
         return
@@ -871,7 +878,7 @@ def build_parser() -> argparse.ArgumentParser:
     target_arg(p)
     p.add_argument("component", nargs="?")
     p = sub.add_parser("playbook", help="List, add or remove the components a playbook builds from")
-    p.add_argument("path", type=Path, help="Playbook file, e.g. playbooks/osbuild-rocky-iso-components.yml")
+    p.add_argument("path", type=Path, help="Playbook or intent file, e.g. profiles/examples/rocky-10-2-workstation-components.yml")
     p.add_argument("action", choices=["list", "add", "remove"])
     p.add_argument("components", nargs="*", metavar="COMPONENT")
     p.add_argument("--target", help="Override the target derived from the playbook's osbuild_distro")

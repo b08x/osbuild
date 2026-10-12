@@ -1,0 +1,10 @@
+# {{ ansible_managed | default('Managed by Ansible') }}
+# Ship the journal (audit events included) to {{ osbuild_remote_logging.url }}
+# over mTLS. A drop-in, so it wins over /etc/systemd/journal-upload.conf
+# whatever the OpenSCAP remediation writes there. The keys come in as service
+# credentials (systemd-journal-upload runs as a dynamic user).
+[Upload]
+URL={{ osbuild_remote_logging.url }}
+ServerKeyFile=/run/credentials/systemd-journal-upload.service/client.key
+ServerCertificateFile=/run/credentials/systemd-journal-upload.service/client.pem
+TrustedCertificateFile=/run/credentials/systemd-journal-upload.service/ca.pem

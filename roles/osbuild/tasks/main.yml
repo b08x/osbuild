@@ -89,6 +89,12 @@
   tags:
     - always
 
+- name: Prepare the audit policy and remote logging
+  ansible.builtin.import_tasks: hardening.yml
+  when: osbuild_blueprint_components | length > 0
+  tags:
+    - always
+
 - name: Phase 1 - Infrastructure Setup
   tags:
     - always
@@ -156,7 +162,8 @@
       ansible.builtin.template:
         src: image-builder-build.sh.j2
         dest: "{{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh"
-        mode: "0755"
+        mode: "0600"
+        owner: "{{ osbuild_output_owner | default('', true) or omit }}"
 
     - name: Display configuration-only mode
       ansible.builtin.debug:
@@ -220,6 +227,22 @@
         build_status: "FINISHED"
       tags:
         - always
+
+# Shown once; the same passwords are in the 0600 credentials file.
+- name: Display the temporary user passwords
+  ansible.builtin.debug:
+    msg: |
+      Temporary passwords for {{ osbuild_blueprint_name }} (also in
+      {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.credentials.txt, mode 0600).
+      Each user must choose a new password at first login; root is locked.
+      {% for u in _osbuild_users %}
+        {{ u.name }}: {{ _osbuild_user_passwords[u.name] }}
+      {% endfor %}
+  when:
+    - _osbuild_users | default([]) | length > 0
+    - build_status | default('') in ['GENERATED', 'FINISHED']
+  tags:
+    - always
 
 - name: Display completion summary
   ansible.builtin.debug:

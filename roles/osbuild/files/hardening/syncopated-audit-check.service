@@ -1,0 +1,8 @@
+[Unit]
+Description=Check free space on the audit log volume
+Documentation=file:/usr/local/sbin/syncopated-audit-warn
+After=auditd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/syncopated-audit-warn

@@ -9,6 +9,8 @@ label: "Podman, distrobox and libvirt/KVM"
 repo_urls: []
 services: []
 kernel_args: []
+# Supplementary groups for the installer users (tasks/credentials.yml).
+user_groups: ["libvirt"]
 packages:
   - "@container-management"
   - "distrobox"

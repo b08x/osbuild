@@ -547,6 +547,27 @@ def test_every_shipped_playbook_list_parses_and_names_real_components():
         assert set(pb.components) <= set(store.names()), path.name
 
 
+def test_every_example_intent_list_parses_and_names_real_components():
+    targets = pt.discover_targets(ROOT)
+    examples = sorted((ROOT / "profiles" / "examples").glob("*.yml"))
+    assert examples
+    for path in examples:
+        pb = pt.PlaybookSelection(path)
+        store = pt.ComponentStore(targets[pb.target()])
+        assert set(pb.components) <= set(store.names()), path.name
+
+
+def test_intent_component_list_add_changes_only_the_list(tmp_path):
+    src = ROOT / "profiles" / "examples" / "rocky-10-2-workstation-components.yml"
+    intent = tmp_path / "mine.yml"
+    intent.write_text(src.read_text())
+    pb = pt.PlaybookSelection(intent)
+    assert pb.target() == "rocky/10/x86_64"
+    assert pb.add(["nvidia"], after="cockpit") == ["nvidia"]
+    pb.save()
+    assert intent.read_text() == src.read_text().replace("  - cockpit\n", "  - cockpit\n  - nvidia\n")
+
+
 def test_tui_playbook_editor_applies_checkbox_changes(monkeypatch, tree, playbook):
     script = Script(
         select=["Components in a playbook", str(playbook), "Exit"],

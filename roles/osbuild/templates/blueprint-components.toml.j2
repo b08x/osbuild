@@ -21,16 +21,34 @@ hostname = "{{ osbuild_hostname }}"
 append = "{{ _osbuild_bp_kernel_args | join(' ') }}"
 
 {% endif %}
-{% if _osbuild_bp_services %}
+{% if _osbuild_bp_services or _osbuild_bp_services_disabled | default([]) %}
 [customizations.services]
 enabled = [
 {% for s in _osbuild_bp_services %}
     "{{ s }}",
 {% endfor %}
 ]
+{% if _osbuild_bp_services_disabled | default([]) %}
+disabled = [
+{% for s in _osbuild_bp_services_disabled %}
+    "{{ s }}",
+{% endfor %}
+]
+{% endif %}
 
 {% endif %}
 {% for f in _osbuild_bp_fragments %}
 # --- component fragment: {{ f }} ---
 {{ lookup('ansible.builtin.file', osbuild_components_dir ~ '/' ~ f) }}
 {% endfor %}
+{% if _osbuild_bp_openscap_unselected | default([]) %}
+
+# OpenSCAP tailoring (tasks/hardening.yml): image-builder runs autotailor on
+# the profile above and remediates with the tailored profile.
+[customizations.openscap.tailoring]
+unselected = [
+{% for r in _osbuild_bp_openscap_unselected %}
+    "xccdf_org.ssgproject.content_rule_{{ r }}",
+{% endfor %}
+]
+{% endif %}

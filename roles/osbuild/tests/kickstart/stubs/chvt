@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# chvt stub: records the virtual console switches in $CHVT_LOG.
+echo "$1" >>"${CHVT_LOG:-/dev/null}"

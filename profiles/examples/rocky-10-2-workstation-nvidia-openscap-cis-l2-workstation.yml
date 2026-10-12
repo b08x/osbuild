@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Rocky Linux Workstation 10.2 (NVIDIA, OpenSCAP cis-l2-workstation).
+# Replaces playbooks/osbuild-rocky-iso-nvidia-openscap-components.yml (osbuild_openscap_profile: cis-l2-workstation).
+#
+#   ansible-playbook playbooks/build.yml -e @profiles/examples/rocky-10-2-workstation-nvidia-openscap-cis-l2-workstation.yml
+#
+# Copy to profiles/<name>.yml (gitignored) and set disk, users and locale for
+# the machine it installs.
+#
+# Secure Boot is not compatible with the unsigned proprietary NVIDIA modules:
+# disable it or enroll a MOK on the target machine. /usr is 80 GiB because
+# nvidia is selected.
+intent:
+  version: 1
+  name: rocky-10-2-workstation-nvidia-openscap-cis-l2-workstation
+  description: Rocky Linux Workstation 10.2 (NVIDIA, OpenSCAP cis-l2-workstation)
+  distro: rocky-10.2
+  arch: x86_64
+  hostname: syncopated-gx
+  components:
+  - base
+  - anaconda
+  - gnome-desktop
+  - fonts
+  - audio
+  - multimedia
+  - google-chrome
+  - vscode
+  - intel-graphics
+  - development
+  - containers-virt
+  - cockpit
+  - nvidia
+  - cuda-container
+  - gui-toolkit
+  - syncopated
+  hardening: cis-l2-workstation
+  disk:
+    # Declared disk size: 476 GiB is a 512 GB disk. Smaller disks abort the
+    # install; larger ones give the surplus to /home.
+    size_gib: 476
+    encrypt: false
+    tmp: tmpfs
+  users:
+  - name: syncopated
+    gecos: Syncopated Admin
+  locale:
+    language: en_US.UTF-8
+    keyboard: us
+    timezone: America/New_York
+  remote_logging:
+    enabled: false

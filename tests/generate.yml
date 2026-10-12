@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Generate the files playbooks/build.yml writes, on localhost and without a
+# build host, image-builder, sudo or network:
+#
+#   ansible-playbook tests/generate.yml -e @profiles/examples/<name>.yml \
+#     -e generate_out=/tmp/out
+#
+# Runs the same role task files in the same order as the generate_only path
+# of playbooks/build.yml: intent validation and mapping, components, audit
+# policy and remote logging, blueprint (with disk layout, users and
+# kickstart), build script. Skipped: build-host checks, package install,
+# gpg keys and the repository pre-flight. tests/test_intent.py drives it.
+- name: Generate an intent's blueprint and build script locally
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    generate_out: "/tmp/syncopated-generate"
+    _git_commit: test
+  tasks:
+    - name: Validate the intent and map it to role variables
+      ansible.builtin.include_role:
+        name: osbuild
+        tasks_from: intent.yml
+        public: true
+
+    - name: Point the outputs at the test directory
+      ansible.builtin.set_fact:
+        osbuild_output_dir: "{{ generate_out }}"
+        osbuild_output_filename: "{{ osbuild_blueprint_name }}-{{ _git_commit }}.iso"
+        osbuild_release_commit: "{{ _git_commit }}"
+
+    - name: Create the output directory
+      ansible.builtin.file:
+        path: "{{ generate_out }}"
+        state: directory
+        mode: "0755"
+
+    - name: Load components
+      ansible.builtin.include_role:
+        name: osbuild
+        tasks_from: components.yml
+        public: true
+
+    - name: Prepare the audit policy and remote logging
+      ansible.builtin.include_role:
+        name: osbuild
+        tasks_from: hardening.yml
+        public: true
+
+    - name: Prepare the blueprint
+      ansible.builtin.include_role:
+        name: osbuild
+        tasks_from: blueprint.yml
+        public: true
+
+    - name: Write the build script
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/osbuild/templates/image-builder-build.sh.j2"
+        dest: "{{ generate_out }}/build-{{ osbuild_blueprint_name }}.sh"
+        mode: "0600"
+
+    - name: Record the derived settings for the tests
+      ansible.builtin.copy:
+        dest: "{{ generate_out }}/generated.json"
+        mode: "0600"
+        content: "{{ _report | to_nice_json }}\n"
+      vars:
+        _report:
+          blueprint_name: "{{ osbuild_blueprint_name }}"
+          components: "{{ osbuild_blueprint_components }}"
+          image_type: "{{ osbuild_image_type }}"
+          extra_repo_urls: "{{ osbuild_extra_repo_urls }}"
+          disk_layout: "{{ _osbuild_disk_layout }}"
+          users: "{{ _osbuild_users | map('dict2items') | map('rejectattr', 'key', 'eq', 'password_hash') | map('items2dict') | list }}"

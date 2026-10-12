@@ -28,3 +28,7 @@ output/
 *~
 .idea/
 .vscode/
+
+# Build intents: personal profiles stay local; examples are committed.
+/profiles/*
+!/profiles/examples/

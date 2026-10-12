@@ -1,0 +1,10 @@
+# {{ _osbuild_inject_title }}. Injected into the prepared blueprint by
+# tasks/{{ _osbuild_inject_source }}; edit the sources, not this.
+{% for f in _osbuild_inject_files %}
+
+[[customizations.files]]
+path = "{{ f.path }}"
+mode = "{{ f.mode }}"
+data = '''
+{{ f.content }}'''
+{% endfor %}

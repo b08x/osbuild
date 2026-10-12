@@ -52,6 +52,9 @@
     _osbuild_bp_bootc_repos: >-
       {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
          | map(attribute='bootc_repos', default=[]) | flatten | unique | list }}
+    _osbuild_bp_openscap_unselected: >-
+      {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
+         | map(attribute='openscap_unselected', default=[]) | flatten | unique | list }}
     _osbuild_bp_copr_repos: >-
       {{ osbuild_blueprint_components | map('extract', _osbuild_bp_components)
          | map(attribute='copr_repos', default=[]) | flatten | unique | list }}

@@ -25,6 +25,10 @@
     ksvalidator: ""
     # check_kickstart.py requires the sudoers drop-in; the role default is off.
     osbuild_kickstart_sudoers: true
+    # The kickstart needs users and a declared disk (an intent supplies them).
+    osbuild_users:
+      - { name: tester, gecos: "Kickstart Tester", groups: [audio] }
+    osbuild_disk_size_gib: 476
   tasks:
     - name: Reset output dirs
       ansible.builtin.file:
@@ -71,7 +75,8 @@
 
     - name: Load distribution repository variables
       ansible.builtin.include_vars:
-        file: "{{ _role_dir }}/vars/{{ ansible_distribution }}.yml"
+        # The build-host vars; any supported one serves a non-RedHat controller.
+        file: "{{ lookup('ansible.builtin.first_found', [_role_dir ~ '/vars/' ~ ansible_distribution ~ '.yml', _role_dir ~ '/vars/Fedora.yml']) }}"
 
     - name: Load the component files for the composed blueprint
       ansible.builtin.include_role:

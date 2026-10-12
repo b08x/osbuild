@@ -19,3 +19,24 @@ packages:
   - "rsyslog"
   - "cronie"
   - "postfix"
+# Workstation audit policy (tasks/hardening.yml writes auditd.conf): rotate
+# within a fixed cap, never halt, suspend or single-user. The stock rules that
+# demand keep_logs, a small max_log_file, and halt/single/suspend/email space
+# actions are unselected in the OpenSCAP tailoring, so a scan with the tailored
+# profile lists them as not selected rather than failed.
+# HIPAA keeps every audit rule of the stock profile; only the action rules
+# above are unselected.
+openscap_unselected:
+  - "auditd_data_retention_max_log_file_action"
+  - "auditd_data_retention_max_log_file_action_stig"
+  - "auditd_data_retention_max_log_file"
+  - "auditd_data_retention_num_logs"
+  - "auditd_data_retention_space_left"
+  - "auditd_data_retention_space_left_action"
+  - "auditd_data_retention_space_left_percentage"
+  - "auditd_data_retention_admin_space_left_action"
+  - "auditd_data_retention_admin_space_left_percentage"
+  - "auditd_data_disk_full_action"
+  - "auditd_data_disk_full_action_stig"
+  - "auditd_data_disk_error_action"
+  - "auditd_data_disk_error_action_stig"

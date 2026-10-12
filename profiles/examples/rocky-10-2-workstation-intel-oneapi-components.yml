@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Rocky Linux Workstation 10.2 (Intel oneAPI, components).
+# Replaces playbooks/osbuild-rocky-iso-intel-oneapi-components.yml.
+#
+#   ansible-playbook playbooks/build.yml -e @profiles/examples/rocky-10-2-workstation-intel-oneapi-components.yml
+#
+# Copy to profiles/<name>.yml (gitignored) and set disk, users and locale for
+# the machine it installs.
+#
+# The playbook partitioned interactively; the intent install is unattended
+# with the generated simple layout, so "interactive partitioning" left the
+# description.
+intent:
+  version: 1
+  name: rocky-10-2-workstation-intel-oneapi-components
+  description: Rocky Linux Workstation 10.2 (Intel oneAPI, components)
+  distro: rocky-10.2
+  arch: x86_64
+  hostname: syncopated-dx-intel
+  components:
+  - base
+  - anaconda
+  - gnome-desktop
+  - fonts
+  - audio
+  - multimedia
+  - google-chrome
+  - vscode
+  - intel-graphics
+  - development
+  - containers-virt
+  - cockpit
+  - intel-oneapi
+  - syncopated
+  hardening: none
+  disk:
+    # Declared disk size: 476 GiB is a 512 GB disk. Smaller disks abort the
+    # install; larger ones give the surplus to /home.
+    size_gib: 476
+    encrypt: false
+    tmp: tmpfs
+  users:
+  - name: syncopated
+    gecos: Syncopated Admin
+  locale:
+    language: en_US.UTF-8
+    keyboard: us
+    timezone: America/New_York
+  remote_logging:
+    enabled: false
