@@ -275,7 +275,7 @@ An intent sets `hardening`; the role adds the component (`tasks/intent.yml`) and
 
 - `max_log_file_action = rotate` with the cap above; `admin_space_left_action = rotate` (at 10 % free), `disk_full_action = rotate`, `disk_error_action = syslog`. Nothing halts, suspends or drops to single-user mode.
 - `space_left = 25%` with `space_left_action = exec /usr/local/sbin/syncopated-audit-warn`.
-- CIS and PCI-DSS also unselect the per-syscall `audit_rules_dac_modification_*` and `audit_rules_file_deletion_events_*` rules, which fire on every file save, chmod and rename of a desktop session. HIPAA keeps every audit rule of the stock profile (including its `-f 2` failure mode).
+- CIS and PCI-DSS also unselect the per-syscall `audit_rules_dac_modification_*` and `audit_rules_file_deletion_events_*` rules, which fire on every file save, chmod and rename of a desktop session. CIS also unselects `audit_rules_unsuccessful_file_modification_*`, which log every `open()` that fails with EACCES/EPERM, including htop's reads of `/proc/<pid>/io` at each refresh (PCI-DSS does not select them). HIPAA keeps every audit rule of the stock profile (including its `-f 2` failure mode).
 
 **Password length.** The intent's `password_min_length` sets `var_password_pam_minlen` (pam_pwquality `minlen`) in the tailoring; remediation writes that value and the tailored scan checks it. Without it the profile's value applies: 14 for CIS, 12 for PCI-DSS. HIPAA does not select the rule, so the role refuses `password_min_length` with `hipaa` or `none`.
 

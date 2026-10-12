@@ -66,7 +66,8 @@ def test_tailoring_removes_every_selected_halt_or_retention_rule(benchmark, prof
         assert {r for r in profiles[stock] if r.startswith("audit_rules_")} <= selected
     else:
         assert not {r for r in selected if r.startswith(("audit_rules_dac_modification_",
-                                                          "audit_rules_file_deletion_events_"))}
+                                                          "audit_rules_file_deletion_events_",
+                                                          "audit_rules_unsuccessful_file_modification_"))}
 
 
 @needs_content

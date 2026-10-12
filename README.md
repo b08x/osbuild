@@ -128,7 +128,7 @@ The play validates the intent before anything else and stops naming the offendin
 
 - auditd rotates within a fixed cap (`max_log_file` × `num_logs` = 32 MB × 16 for CIS and PCI-DSS, 64 MB × 32 for HIPAA) and never halts, suspends or drops to single-user mode: `admin_space_left_action` and `disk_full_action` rotate, `disk_error_action` logs.
 - Below 25 % free on `/var/log/audit`, `syncopated-audit-warn` logs a warning to the journal, writes a motd and Cockpit banner, and shows `wheel` users a GNOME critical notification that returns at each login while the condition holds.
-- CIS and PCI-DSS drop the per-syscall `dac_modification_*` and `file_deletion_events_*` rules, which fire on every file save and rename of a desktop session; HIPAA keeps every audit rule.
+- CIS and PCI-DSS drop the per-syscall `dac_modification_*` and `file_deletion_events_*` rules, which fire on every file save and rename of a desktop session. CIS also drops the `unsuccessful_file_modification_*` rules, which log every failed read of `/proc/<pid>/*` by htop, top and system monitors. HIPAA keeps every audit rule.
 - `password_min_length` (CIS and PCI-DSS) sets the minimum password length the profile enforces; by default CIS requires 14 characters, PCI-DSS 12.
 - The deviations are unselected in the tailoring, not overridden afterwards. `sudo syncopated-scan` evaluates the host against the stock and the tailored profile and writes HTML and ARF reports to `/var/lib/syncopated/scans/<timestamp>/`; the tailored report lists the deviations as not selected.
 
@@ -330,7 +330,7 @@ See the complete goal package at [`goals/standalone-workstation-hardening/goal.m
 - **Log Rotation & Retention Capping**: Replace default unbounded logging (`keep_logs`) with bounded rotation (512 MB cap for CIS/PCI, 2 GiB for HIPAA) to prevent `/var/log/audit` exhaustion.
 - **Fail-Safe Workstation Execution**: Convert single-user/halt actions (`admin_space_left_action`, `disk_full_action`) to `rotate` and `syslog`, guaranteeing that log volume pressure never halts the physical machine.
 - **Proactive User Warning**: Install `/usr/local/sbin/syncopated-audit-warn` to trigger persistent GNOME critical notifications for `wheel` users, motd/Cockpit banners, and prioritized journal alerts when capacity drops below 25%.
-- **Desktop Noise Filtering**: Unselect high-frequency desktop syscall rules (`dac_modification_*`, `file_deletion_events_*`) for CIS L2 and PCI-DSS, while retaining full audit coverage for the HIPAA assessment profile.
+- **Desktop Noise Filtering**: Unselect high-frequency desktop syscall rules (`dac_modification_*`, `file_deletion_events_*`; CIS L2 also `unsuccessful_file_modification_*`) for CIS L2 and PCI-DSS, while retaining full audit coverage for the HIPAA assessment profile.
 - **Integrated Audit & Compliance Tooling**: Package `/usr/local/bin/syncopated-scan` to perform automated dual-profile audits (stock vs tailored) exporting HTML and ARF reports to `/var/lib/syncopated/scans/`.
 
 ### Phase 2: Generation-Time Deterministic Disk Sizing *(implemented)*

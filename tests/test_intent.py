@@ -344,12 +344,17 @@ def test_tailoring_unselects_the_audit_deviations(generated, example):
     g = generated[example]
     unselected = set(g.unselected())
     assert AUDIT_ACTION_RULES <= unselected
-    noise = {r for r in unselected if r.startswith(("audit_rules_dac_modification_", "audit_rules_file_deletion_events_"))}
+    noise = {r for r in unselected if r.startswith(("audit_rules_dac_modification_", "audit_rules_file_deletion_events_",
+                                                    "audit_rules_unsuccessful_file_modification_"))}
     if "hipaa" in example:
         assert not [r for r in unselected if r.startswith("audit_rules_")], "HIPAA keeps every audit rule"
     else:
         assert {"audit_rules_dac_modification_chmod", "audit_rules_dac_modification_setxattr",
                 "audit_rules_file_deletion_events_unlink", "audit_rules_file_deletion_events_rename"} <= noise
+    if "cis" in example:
+        # failed opens of /proc/<pid>/* by htop, top and system monitors
+        assert {"audit_rules_unsuccessful_file_modification_open",
+                "audit_rules_unsuccessful_file_modification_openat"} <= noise
     # the stock profile stays the base of the tailoring
     assert g.customizations["openscap"]["profile_id"].startswith("xccdf_org.ssgproject.content_profile_")
     assert g.customizations["openscap"]["datastream"].endswith("ssg-rhel10-ds.xml")

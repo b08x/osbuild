@@ -142,7 +142,8 @@ The former hard rules are enforced in the role; an intent cannot set them:
   halts/suspends/single-users; below 25% free on `/var/log/audit`,
   `syncopated-audit-warn` warns in the journal, motd, Cockpit, and a GNOME
   critical notification for wheel users at each login. CIS/PCI unselect the
-  `dac_modification_*`/`file_deletion_events_*` rules. The tailoring is a JSON
+  `dac_modification_*`/`file_deletion_events_*` rules; CIS also
+  unselects `unsuccessful_file_modification_*` (failed `/proc` reads by htop). The tailoring is a JSON
   file in the image (`/etc/syncopated/openscap-tailoring.json`, blueprint
   `json_tailoring`) carrying the unselected rules and SSG variables
   (`password_min_length` → `var_password_pam_minlen`). `sudo syncopated-scan`
