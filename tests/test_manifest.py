@@ -57,9 +57,9 @@ def test_example_depsolves_and_carries_the_tailoring(generated, example, tmp_pat
         assert "org.osbuild.oscap.autotailor" in types
         assert "org.osbuild.oscap.remediation" in types
         tailor = next(s for s in stages(doc) if s["type"] == "org.osbuild.oscap.autotailor")
-        text = json.dumps(tailor)
-        for rule in g.unselected():
-            assert rule in text, rule
+        path = g.customizations["openscap"]["json_tailoring"]["filepath"]
+        assert tailor["options"]["config"]["tailoring_file"] == path
+        assert {"auditd_data_retention_max_log_file_action"} <= set(g.unselected())
         remediation = next(s for s in stages(doc) if s["type"] == "org.osbuild.oscap.remediation")
         assert "tailoring" in json.dumps(remediation)
 

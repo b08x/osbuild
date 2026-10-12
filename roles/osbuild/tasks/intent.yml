@@ -65,6 +65,9 @@
     osbuild_disk_tmp: "{{ intent.disk.tmp | default('tmpfs') }}"
     osbuild_disk_serial: "{{ intent.disk.serial | default('') }}"
     osbuild_users: "{{ intent.users }}"
+    osbuild_root_enabled: "{{ intent.root.enabled | default(false) }}"
+    osbuild_openscap_variables: >-
+      {{ {'var_password_pam_minlen': intent.password_min_length} if intent.password_min_length is defined else {} }}
     osbuild_locale: "{{ intent.locale.language }}"
     osbuild_keyboard: "{{ intent.locale.keyboard }}"
     osbuild_timezone: "{{ intent.locale.timezone }}"

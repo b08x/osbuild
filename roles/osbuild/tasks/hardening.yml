@@ -7,9 +7,11 @@
 #
 # Hardened builds (osbuild_hardening != none) get
 #   - the OpenSCAP tailoring: the openscap-* component's openscap_unselected
-#     rules (+ the journal-upload rule while remote logging is off), rendered
-#     as [customizations.openscap.tailoring] by blueprint-components.toml.j2;
-#     image-builder runs autotailor and remediates with the tailored profile
+#     rules (+ the journal-upload rule while remote logging is off) and the
+#     osbuild_openscap_variables values, written as a JSON tailoring file
+#     (osbuild_openscap_tailoring_json) and referenced from
+#     [customizations.openscap.json_tailoring] by blueprint-components.toml.j2;
+#     image-builder runs autotailor on it and remediates with the result
 #   - /etc/audit/auditd.conf (templates/auditd.conf.j2): rotation within a
 #     fixed cap, no halt/single/suspend actions, warning script on low space
 #   - syncopated-audit-warn, its hourly timer and the GNOME login notifier
@@ -41,9 +43,24 @@
   ansible.builtin.set_fact:
     _osbuild_bp_services_disabled: []
     _osbuild_hardening_files: []
+    _osbuild_hardening_dirs: []
     _osbuild_remote_logging_files: []
     _osbuild_remote_logging_dirs: []
     _osbuild_journal_upload_pki: /etc/pki/syncopated/journal-upload
+
+- name: Assert the OpenSCAP variables apply to the hardening profile
+  ansible.builtin.assert:
+    that:
+      - osbuild_openscap_variables is mapping
+      - osbuild_openscap_variables | length == 0 or osbuild_hardening != 'none'
+      - >-
+        'var_password_pam_minlen' not in osbuild_openscap_variables
+        or osbuild_hardening in ['cis-l2-workstation', 'pci-dss']
+    fail_msg: >-
+      password_min_length (osbuild_openscap_variables: {{ osbuild_openscap_variables }})
+      needs hardening cis-l2-workstation or pci-dss; '{{ osbuild_hardening }}'
+      does not check the password length.
+    quiet: true
 
 - name: Prepare the workstation audit policy
   when: osbuild_hardening != 'none'
@@ -55,6 +72,7 @@
     _profile_id: "{{ _fragment | regex_search('(?m)^profile_id\\s*=\\s*\"([^\"]+)\"', '\\1') | first }}"
     _datastream: "{{ _fragment | regex_search('(?m)^datastream\\s*=\\s*\"([^\"]+)\"', '\\1') | first }}"
     _journal_upload_rule: service_systemd-journal-upload_enabled
+    _tailored_profile_id: "{{ _profile_id }}_syncopated"
   block:
     - name: Unselect the journal-upload rule while remote logging is off
       ansible.builtin.set_fact:
@@ -62,6 +80,23 @@
       when:
         - not osbuild_remote_logging.enabled | default(false) | bool
         - osbuild_hardening == 'cis-l2-workstation'
+
+    # templates/openscap-tailoring.json.j2: the unselected rules and
+    # osbuild_openscap_variables for autotailor --json-tailoring.
+    - name: Set the tailored profile ID
+      ansible.builtin.set_fact:
+        _osbuild_openscap_tailored_profile_id: "{{ _tailored_profile_id }}"
+
+    - name: Write the JSON tailoring
+      ansible.builtin.set_fact:
+        _osbuild_hardening_dirs:
+          - path: "{{ osbuild_openscap_tailoring_json | dirname }}"
+            mode: "0755"
+        _osbuild_hardening_files:
+          - path: "{{ osbuild_openscap_tailoring_json }}"
+            mode: "0644"
+            # A mapping; templates/injected-files.toml.j2 writes it as JSON.
+            json: "{{ lookup('ansible.builtin.template', 'openscap-tailoring.json.j2') | from_json }}"
 
     - name: Run the audit space check hourly
       ansible.builtin.set_fact:
@@ -82,7 +117,9 @@
 
     - name: List the audit policy and scan files
       ansible.builtin.set_fact:
-        _osbuild_hardening_files:
+        _osbuild_hardening_files: "{{ _osbuild_hardening_files + _audit_files }}"
+      vars:
+        _audit_files:
           - path: /etc/audit/auditd.conf
             mode: "0640"
             content: "{{ lookup('ansible.builtin.template', 'auditd.conf.j2', rstrip=false) }}"
@@ -115,7 +152,8 @@
               PROFILE={{ _profile_id }}
               # Where image-builder leaves the autotailor output, newest layout first.
               TAILORING_FILES="/usr/share/xml/osbuild-openscap-data/tailoring.xml /oscap_data/tailoring.xml"
-              UNSELECTED="{{ _osbuild_bp_openscap_unselected | join(' ') }}"
+              # The tailoring input; autotailor rebuilds from it when no output is found.
+              TAILORING_JSON={{ osbuild_openscap_tailoring_json }}
 
     - name: Add the Cockpit banner setting
       ansible.builtin.set_fact:

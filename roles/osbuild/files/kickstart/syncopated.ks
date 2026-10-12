@@ -15,7 +15,7 @@
 graphical
 firstboot --disable
 reboot
-network --bootproto=dhcp --device=link --activate --onboot=on
+network --bootproto=dhcp --activate --onboot=on
 
 # Pick one target disk, check it, count down on a tty, then write the rendered
 # layout for that disk to /tmp/partitions.ks.

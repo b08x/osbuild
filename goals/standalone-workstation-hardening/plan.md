@@ -40,7 +40,7 @@ Shift partition and volume calculations from `%pre` bash scripts to playbook gen
   - `roles/osbuild/tests/kickstart/kickstart.bats`
 - **Actions:**
   - Compute volume sizes at playbook execution time based on `disk.size_gib`:
-    - Hardened profiles: fixed root (35 GiB), `/usr` (80 GiB when nvidia/cuda selected, else 45 GiB), `/var/tmp` (8 GiB), `/var/log` (10 GiB), `/var/log/audit` (4 GiB for CIS/PCI, 10 GiB for HIPAA), `/tmp` (8 GiB lv if tmp=lv, else tmpfs), `/var` (40 GiB min), and `/home` absorbing remaining space via `--grow`.
+    - Hardened profiles: fixed root (35 GiB), `/usr` (80 GiB when nvidia/cuda selected, else 60 GiB), `/var/tmp` (8 GiB), `/var/log` (10 GiB), `/var/log/audit` (4 GiB for CIS/PCI, 10 GiB for HIPAA), `/tmp` (8 GiB lv if tmp=lv, else tmpfs), `/var` (40 GiB min), and `/home` absorbing remaining space via `--grow`.
     - `hardening: none`: standard workstation layout (`/`, `/usr`, `/var`, `/home` with `--grow`).
   - Render exact `logvol` directives directly into `kickstart.toml.j2`.
   - Streamline `syncopated.ks`:

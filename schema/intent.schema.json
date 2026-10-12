@@ -80,7 +80,7 @@
       }
     },
     "users": {
-      "description": "Users the installer creates. Each gets a throwaway password (changed at first login) and the groups wheel + the components' user_groups + groups.",
+      "description": "Users the installer creates. Each gets the initial password (osbuild_initial_password, default \"syncopated\"; changed at first login) and the groups wheel + the components' user_groups + groups.",
       "type": "array",
       "minItems": 1,
       "items": {
@@ -114,6 +114,21 @@
             "pattern": "^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\\.com) [A-Za-z0-9+/=]+( [^\"\\\\\\n]*)?$"
           }
         }
+      }
+    },
+    "password_min_length": {
+      "description": "Minimum password length that the hardening profile enforces (pam_pwquality minlen; SSG variable var_password_pam_minlen). Defaults to the profile's value: 14 for CIS, 12 for PCI-DSS. Only cis-l2-workstation and pci-dss check it.",
+      "type": "integer",
+      "minimum": 6,
+      "maximum": 64
+    },
+    "root": {
+      "description": "Root account. Locked by default (administration through sudo). enabled: true gives root the users' initial password (changed at first login).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false}
       }
     },
     "locale": {

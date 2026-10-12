@@ -77,6 +77,7 @@ Default to generate-only: the role writes files, the user runs the build.
      hostname: studio-gx
      components: [base, anaconda, gnome-desktop, ..., nvidia]   # never openscap-*
      hardening: cis-l2-workstation    # none | cis-l2-workstation | pci-dss | hipaa
+     password_min_length: 9   # optional; CIS/PCI only (default 14 / 12)
      disk:
        size_gib: 931            # declared target disk size (GiB)
        encrypt: false           # true: LUKS, the installer asks the passphrase
@@ -89,6 +90,7 @@ Default to generate-only: the role writes files, the user runs the build.
          uid: 1500              # optional
          ssh_pubkey: "ssh-ed25519 AAAA... ada@laptop"   # optional
      locale: {language: en_US.UTF-8, keyboard: us, timezone: America/New_York}
+     root: {enabled: false}             # true: root gets the initial password too
      remote_logging: {enabled: false}   # or enabled: true + url, ca_cert, client_cert, client_key
      extra_packages: []         # one-off packages for this machine
      package_pins: {}           # {pkg: "1.2.*"}
@@ -132,14 +134,18 @@ The former hard rules are enforced in the role; an intent cannot set them:
   `disk.size_gib`, then counts down 30 s on tty8 naming model, serial and
   size — any key aborts. Volume sizes are fixed in the kickstart, computed at
   generation (`filter_plugins/disk_layout.py`); a larger disk's surplus goes to `/home`.
-- Root locked; users get a throwaway password (new each generation, SHA-512 hash
-  only in the ISO; plaintext in `<output>/<name>.credentials.txt`, mode 0600,
-  and printed once at the end of the play) and must change it at first login.
+- Root locked unless `root: {enabled: true}`. Users (and an enabled root) get
+  the initial password `syncopated` (`osbuild_initial_password`; SHA-512 hash
+  only in the ISO; also in `<output>/<name>.credentials.txt`, mode 0600, and
+  printed at the end of the play) and must change it at first login.
 - Hardened: auditd rotates within 512 MB (CIS/PCI) or 2 GiB (HIPAA), never
   halts/suspends/single-users; below 25% free on `/var/log/audit`,
   `syncopated-audit-warn` warns in the journal, motd, Cockpit, and a GNOME
   critical notification for wheel users at each login. CIS/PCI unselect the
-  `dac_modification_*`/`file_deletion_events_*` rules. `sudo syncopated-scan`
+  `dac_modification_*`/`file_deletion_events_*` rules. The tailoring is a JSON
+  file in the image (`/etc/syncopated/openscap-tailoring.json`, blueprint
+  `json_tailoring`) carrying the unselected rules and SSG variables
+  (`password_min_length` → `var_password_pam_minlen`). `sudo syncopated-scan`
   writes stock + tailored HTML/ARF reports to `/var/lib/syncopated/scans/<ts>/`.
 - `remote_logging.enabled: true` → systemd-journal-upload over mTLS; an
   unreachable log host only produces log lines and retries.
@@ -278,7 +284,8 @@ ansible-lint
 - The play validates the intent first; a schema error names the field
   (`intent.disk.size_gib: ...`). A too-small `disk.size_gib` fails at
   generation with the minimum the layout needs.
-- Generated files are mode 0600 and owned by the connecting user;
+- Generated files are mode 0644 (0600 with remote logging; credentials always
+  0600) and owned by the connecting user;
   `/var/tmp/osbuild-images` itself is root-owned on gir. Use a scratch
   `-e osbuild_output_dir=...` for manual manifest runs. `passlib` must be
   importable by the controller Python (`dnf install python3-passlib`).

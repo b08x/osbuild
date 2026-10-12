@@ -14,7 +14,7 @@ import jsonschema
 import pytest
 from passlib.hash import sha512_crypt
 
-from intent_helpers import (EXAMPLES, ROOT, SCHEMA, generate, generate_intent, load_intent,
+from intent_helpers import (EXAMPLES, ROOT, SCHEMA, Generated, generate, generate_intent, load_intent,
                             run_generate)
 
 EXAMPLE_IDS = [p.stem for p in EXAMPLES]
@@ -62,6 +62,10 @@ def errors_for(intent):
     (lambda i: i["users"][0].update(gecos='Evil" --groups=root'), "users.0.gecos"),
     (lambda i: i["users"][0].update(ssh_pubkey="not a key"), "users.0.ssh_pubkey"),
     (lambda i: i["users"][0].update(password="hunter2"), "users.0"),
+    (lambda i: i.update(root={"enabled": "yes"}), "root.enabled"),
+    (lambda i: i.update(password_min_length=3), "password_min_length"),
+    (lambda i: i.update(password_min_length="9"), "password_min_length"),
+    (lambda i: i.update(root={"enabled": True, "password": "hunter2"}), "root"),
     (lambda i: i.update(remote_logging={"enabled": True}), "remote_logging"),
     (lambda i: i.update(remote_logging={"enabled": True, "url": "http://log:19532", "ca_cert": "a",
                                         "client_cert": "b", "client_key": "c"}), "remote_logging.url"),
@@ -119,17 +123,18 @@ def test_profiles_are_gitignored_except_examples():
 # ---- outputs, modes, credentials ---------------------------------------------------
 
 @pytest.mark.parametrize("example", EXAMPLE_IDS)
-def test_outputs_are_mode_0600(generated, example):
+def test_outputs_are_0644_and_credentials_0600(generated, example):
     g = generated[example]
-    for path in (g.toml_path, g.script_path, g.credentials_path):
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600, path.name
+    for path in (g.toml_path, g.script_path):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o644, path.name
+    assert stat.S_IMODE(g.credentials_path.stat().st_mode) == 0o600
     assert not list(g.dir.glob("*~")), "backup copies of the blueprint leak secrets"
 
 
 @pytest.mark.parametrize("example", EXAMPLE_IDS)
-def test_iso_is_made_0600_by_the_build_script(generated, example):
+def test_iso_is_made_0644_by_the_build_script(generated, example):
     g = generated[example]
-    assert f"chmod 0600 {g.name}-test.iso" in g.script_path.read_text()
+    assert f"chmod 0644 {g.name}-test.iso" in g.script_path.read_text()
 
 
 @pytest.mark.parametrize("example", EXAMPLE_IDS)
@@ -138,25 +143,48 @@ def test_only_the_hash_reaches_the_blueprint(generated, example):
     passwords = g.passwords()
     assert list(passwords) == ["syncopated"]
     password = passwords["syncopated"]
-    assert re.fullmatch(r"[A-Za-z0-9]{20}", password)
+    assert password == "syncopated"
     m = re.search(r"^user --name=syncopated .* --iscrypted --password=(\S+)$", g.kickstart, re.M)
     assert m and m.group(1).startswith("$6$")
     assert sha512_crypt.verify(password, m.group(1))
-    for path in (g.toml_path, g.script_path):
-        assert password not in path.read_text()
+    assert "--plaintext" not in g.kickstart
 
 
-def test_each_generation_makes_a_new_password(tmp_path):
+def test_root_enabled_gets_the_initial_password(tmp_path):
+    intent = cis_intent()
+    intent["root"] = {"enabled": True}
+    g = generate_intent(intent, tmp_path)
+    passwords = g.passwords()
+    assert list(passwords) == ["syncopated", "root"]
+    password = passwords["root"]
+    assert password == "syncopated"
+    assert not re.search(r"^rootpw --lock$", g.kickstart, re.M)
+    m = re.search(r"^rootpw --iscrypted (\S+)$", g.kickstart, re.M)
+    assert m and m.group(1).startswith("$6$")
+    assert sha512_crypt.verify(password, m.group(1))
+    assert re.search(r"^chage -d 0 root$", g.kickstart, re.M)
+    assert "--plaintext" not in g.kickstart
+
+
+def test_each_generation_salts_the_hash_anew(tmp_path):
     profile = EXAMPLES[0]
-    a = generate(profile, tmp_path / "a").passwords()
-    b = generate(profile, tmp_path / "b").passwords()
-    assert a != b
+    a, b = (generate(profile, tmp_path / d) for d in "ab")
+    assert a.passwords() == b.passwords() == {"syncopated": "syncopated"}
+    hashes = [re.search(r"^user --name=syncopated .* --password=(\S+)$", g.kickstart, re.M).group(1) for g in (a, b)]
+    assert hashes[0] != hashes[1]
 
 
-def test_password_is_printed_once_at_the_end(generated):
-    g = generated["rocky-10-2-workstation-components"]
-    password = g.passwords()["syncopated"]
-    assert g.log.count(password) == 0  # tests/generate.yml does not run the role's banner
+def test_initial_password_is_a_role_variable(tmp_path):
+    result = run_generate(EXAMPLES[0], tmp_path / "out", extra={"osbuild_initial_password": "changeme"})
+    assert result.returncode == 0, result.stdout[-3000:]
+    g = Generated(tmp_path / "out", result.stdout)
+    assert g.passwords() == {"syncopated": "changeme"}
+    m = re.search(r"^user --name=syncopated .* --password=(\S+)$", g.kickstart, re.M)
+    assert sha512_crypt.verify("changeme", m.group(1))
+    assert g.log.count("changeme") == 0  # no_log; tests/generate.yml does not run the role's banner
+
+
+def test_password_is_printed_once_at_the_end():
     main = (ROOT / "roles" / "osbuild" / "tasks" / "main.yml").read_text()
     assert "Display the temporary user passwords" in main
     assert main.index("Display the temporary user passwords") > main.index("MODE generate_only")
@@ -187,6 +215,7 @@ def test_install_asks_nothing(generated, example):
     g = generated[example]
     ks = g.kickstart
     assert re.search(r"^rootpw --lock$", ks, re.M)
+    assert "chage -d 0 root" not in ks
     assert re.search(r"^user --name=syncopated --gecos=\"Syncopated Admin\" --groups=wheel", ks, re.M)
     assert "%include /tmp/partitions.ks" in ks
     assert "chage -d 0 syncopated" in ks
@@ -222,8 +251,7 @@ def test_user_groups_come_from_wheel_components_and_intent(tmp_path):
     assert lines[1].startswith('user --name=bob --gecos="Bob" --groups=wheel,libvirt,render,video --iscrypted')
     assert 'sshkey --username=ada "ssh-ed25519 AAAAC3' in g.kickstart
     assert "sshkey --username=bob" not in g.kickstart
-    assert set(g.passwords()) == {"ada", "bob"}
-    assert g.passwords()["ada"] != g.passwords()["bob"]
+    assert g.passwords() == {"ada": "syncopated", "bob": "syncopated"}
 
 
 def test_component_without_user_groups_adds_only_wheel(generated):
@@ -254,7 +282,7 @@ def test_layout_has_fixed_sizes_from_the_declared_disk(generated, example):
     if cuda:
         assert usr >= 80 * 1024
     elif intent["hardening"] != "none":
-        assert usr == 45 * 1024
+        assert usr == 60 * 1024
     encrypted = "--encrypted" in g.layout_ks
     assert encrypted == intent["disk"].get("encrypt", False)
 
@@ -383,6 +411,38 @@ def test_unhardened_builds_have_no_audit_policy(generated):
 
 # ---- remote logging ----------------------------------------------------------------------
 
+@pytest.mark.parametrize("example", HARDENED)
+def test_tailoring_is_a_json_file_in_the_image(generated, example):
+    g = generated[example]
+    ref = g.customizations["openscap"]["json_tailoring"]
+    assert ref["filepath"] == "/etc/syncopated/openscap-tailoring.json"
+    assert ref["profile_id"] == g.customizations["openscap"]["profile_id"] + "_syncopated"
+    assert "tailoring" not in g.customizations["openscap"]
+    profile = g.tailoring()
+    assert ref["profile_id"].endswith(profile["id"])
+    assert g.customizations["openscap"]["profile_id"].endswith(profile["base_profile_id"])
+    assert g.unselected() and g.variables() == {}
+    assert g.file(ref["filepath"])["mode"] == "0644"
+    assert "TAILORING_JSON=/etc/syncopated/openscap-tailoring.json" in g.file("/etc/sysconfig/syncopated-scan")["data"]
+
+
+def test_password_min_length_sets_the_ssg_variable(tmp_path):
+    intent = cis_intent()
+    intent["password_min_length"] = 9
+    g = generate_intent(intent, tmp_path)
+    assert g.variables() == {"var_password_pam_minlen": "9"}
+    assert "auditd_data_retention_max_log_file_action" in g.unselected()
+
+
+@pytest.mark.parametrize("hardening", ["none", "hipaa"])
+def test_password_min_length_needs_a_profile_that_checks_it(tmp_path, hardening):
+    intent = cis_intent()
+    intent["hardening"] = hardening
+    intent["password_min_length"] = 9
+    with pytest.raises(RuntimeError, match="needs hardening cis-l2-workstation or pci-dss"):
+        generate_intent(intent, tmp_path)
+
+
 def test_remote_logging_off_disables_upload_and_unselects_its_cis_rule(generated):
     g = generated["rocky-10-2-workstation-openscap-cis-l2-workstation"]
     assert "service_systemd-journal-upload_enabled" in g.unselected()
@@ -428,8 +488,11 @@ def test_remote_logging_on_is_one_switch(tmp_path):
     assert {"/etc/systemd/journal-upload.conf.d",
             "/etc/systemd/system/systemd-journal-upload.service.d"} <= set(dirs)
     assert_file_parents_exist(g)
-    # the key is only in the 0600 blueprint, never in the play output
+    # the key is only in the blueprint and image, both 0600, never in the play output
     assert "MIIBfakekey" not in g.log
+    for path in (g.toml_path, g.script_path, g.credentials_path):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600, path.name
+    assert f"chmod 0600 {g.name}-test.iso" in g.script_path.read_text()
 
 
 def test_remote_logging_works_without_hardening(tmp_path):

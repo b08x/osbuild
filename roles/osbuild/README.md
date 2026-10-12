@@ -271,17 +271,19 @@ Rocky 10 ships one component per OpenSCAP profile. Each one adds the profile's p
 
 An intent sets `hardening`; the role adds the component (`tasks/intent.yml`) and asserts that exactly that `openscap-*` component is selected (`tasks/hardening.yml`), because image-builder accepts one profile per blueprint.
 
-**Workstation tailoring.** A standalone workstation has no central log collector and must never stop because its audit volume filled. The stock profiles demand `max_log_file_action = keep_logs`, a small `max_log_file`, and `single`/`halt`/`suspend`/`email` for the space and disk actions. Each `openscap-*` component lists, in `openscap_unselected`, the rules that check those settings; `templates/blueprint-components.toml.j2` renders them as `[customizations.openscap.tailoring] unselected = [...]`, image-builder runs `autotailor` (`org.osbuild.oscap.autotailor`) and remediates with the tailored profile. `tasks/hardening.yml` then ships the workstation `/etc/audit/auditd.conf` (`templates/auditd.conf.j2`):
+**Workstation tailoring.** A standalone workstation has no central log collector and must never stop because its audit volume filled. The stock profiles demand `max_log_file_action = keep_logs`, a small `max_log_file`, and `single`/`halt`/`suspend`/`email` for the space and disk actions. Each `openscap-*` component lists, in `openscap_unselected`, the rules that check those settings; `tasks/hardening.yml` writes them, with the SSG variable values of `osbuild_openscap_variables`, as a JSON tailoring file (`templates/openscap-tailoring.json.j2`, injected at `osbuild_openscap_tailoring_json`, `/etc/syncopated/openscap-tailoring.json`); the blueprint references it in `[customizations.openscap.json_tailoring]`, image-builder runs `autotailor --json-tailoring` (`org.osbuild.oscap.autotailor`) on it and remediates with the tailored profile `<profile>_syncopated`. The blueprint format's `[customizations.openscap.tailoring]` takes only selected/unselected rules, not variables, so the JSON form is used for every hardened build. `tasks/hardening.yml` then ships the workstation `/etc/audit/auditd.conf` (`templates/auditd.conf.j2`):
 
 - `max_log_file_action = rotate` with the cap above; `admin_space_left_action = rotate` (at 10 % free), `disk_full_action = rotate`, `disk_error_action = syslog`. Nothing halts, suspends or drops to single-user mode.
 - `space_left = 25%` with `space_left_action = exec /usr/local/sbin/syncopated-audit-warn`.
 - CIS and PCI-DSS also unselect the per-syscall `audit_rules_dac_modification_*` and `audit_rules_file_deletion_events_*` rules, which fire on every file save, chmod and rename of a desktop session. HIPAA keeps every audit rule of the stock profile (including its `-f 2` failure mode).
 
+**Password length.** The intent's `password_min_length` sets `var_password_pam_minlen` (pam_pwquality `minlen`) in the tailoring; remediation writes that value and the tailored scan checks it. Without it the profile's value applies: 14 for CIS, 12 for PCI-DSS. HIPAA does not select the rule, so the role refuses `password_min_length` with `hipaa` or `none`.
+
 No setting is overridden in `%post`: a scan with the tailored profile lists the deviations as *not selected*, not as failed.
 
 **Low-space warning.** `syncopated-audit-warn` (run by auditd at `space_left`, and at boot and hourly by `syncopated-audit-check.timer`) below `osbuild_audit_warn_free_percent` (25) free: logs a warning-priority journal entry (`journalctl -t syncopated-audit`), writes `/etc/motd.d/90-syncopated-audit` and the Cockpit login banner (`/etc/cockpit/issue.cockpit`, wired up in `/etc/cockpit/cockpit.conf` when `cockpit` is selected), and shows logged-in `wheel` users a GNOME critical notification. `/etc/xdg/autostart/syncopated-audit-notify.desktop` repeats the notification at every login while the condition holds. Above the threshold the files are removed again.
 
-**Scans.** `sudo syncopated-scan` evaluates the host against the stock profile and the tailored one (`/usr/share/xml/osbuild-openscap-data/tailoring.xml` or `/oscap_data/tailoring.xml` from image-builder; rebuilt with `autotailor` from `/etc/sysconfig/syncopated-scan` if neither exists) and writes `stock-` and `tailored-` `arf.xml`/`report.html`, the tailoring and a `summary.txt` to `/var/lib/syncopated/scans/<timestamp>/` (mode 0700).
+**Scans.** `sudo syncopated-scan` evaluates the host against the stock profile and the tailored one (`/usr/share/xml/osbuild-openscap-data/tailoring.xml` or `/oscap_data/tailoring.xml` from image-builder; rebuilt with `autotailor --json-tailoring` from the injected JSON file named in `/etc/sysconfig/syncopated-scan` if neither exists) and writes `stock-` and `tailored-` `arf.xml`/`report.html`, the tailoring and a `summary.txt` to `/var/lib/syncopated/scans/<timestamp>/` (mode 0700).
 
 **Remote logging** (`osbuild_remote_logging`, intent `remote_logging`). Off: `systemd-journal-upload` stays disabled (when its package is in the image) and CIS's `service_systemd-journal-upload_enabled` rule is unselected. On (`enabled: true`, `url`, `ca_cert`, `client_cert`, `client_key` as PEM text or controller paths): `systemd-journal-remote` is installed, `systemd-journal-upload` and `systemd-journald-audit.socket` are enabled, `/etc/systemd/journal-upload.conf.d/50-syncopated.conf` points at the URL, and a unit drop-in passes the keys from `/etc/pki/syncopated/journal-upload/` (mode 0600) as credentials and restarts the uploader every 30 s without a start limit. An unreachable log host only produces log lines; journald keeps every entry locally.
 
@@ -321,7 +323,8 @@ ISO image types only. Details in [Installer Kickstart](#installer-kickstart) and
 | `osbuild_kickstart_sudoers` | `false` | Ship `/etc/sudoers.d/90-wheel-nopasswd` (passwordless sudo for `wheel`). Off by default; the CIS and PCI-DSS profiles flag it |
 | `osbuild_firstboot_enabled` | `true` | First-login yadm dotfiles splash (desktop images) |
 | `osbuild_kickstart_file` | `kickstart/syncopated.ks` | Kickstart source under `files/`; set only to use your own file |
-| `osbuild_output_owner` | connecting user (`playbooks/build.yml`) | Owner of the generated files, which are mode 0600 |
+| `osbuild_output_owner` | connecting user (`playbooks/build.yml`) | Owner of the generated files |
+| `osbuild_output_mode` | `0644` (`0600` with remote logging) | Mode of the blueprint, build script and image; the credentials file is always 0600 |
 | `osbuild_controller_python` | `ansible_playbook_python` | Must import `passlib` (checked before anything else) |
 | `osbuild_audit_policy`, `osbuild_audit_warn_free_percent`, `osbuild_audit_admin_free_percent` | see defaults | Per-profile auditd cap and audit volume; warning (25) and rotation (10) thresholds |
 
@@ -971,9 +974,9 @@ cat >/tmp/syncopated-layout.ks <<'EOF'             #   fixed-size logvol lines, 
 
 image-builder adds its own `%include` with the payload in front. Edit only `files/kickstart/syncopated.ks`; it must not contain three consecutive single quotes (the TOML literal-string delimiter) or Jinja delimiters; the role asserts this.
 
-**The install asks nothing.** Language, keyboard, timezone, network (DHCP on the first linked NIC, also at boot), storage, root (locked) and the users are set by the kickstart, so Anaconda starts installing on its own and reboots when done. The only possible prompt is the LUKS passphrase when `osbuild_disk_encrypt` is true; no passphrase is ever written to a generated file.
+**The install asks nothing.** Language, keyboard, timezone, network (DHCP; `network` has no `--device`, so Anaconda uses the first device with link and the initramfs asks DHCP on any interface; `--device=link` made dracut log `No device with link found` when no carrier was up yet), storage, root (locked unless `osbuild_root_enabled`) and the users are set by the kickstart, so Anaconda starts installing on its own and reboots when done. The only possible prompt is the LUKS passphrase when `osbuild_disk_encrypt` is true; no passphrase is ever written to a generated file.
 
-**Credentials** (`tasks/credentials.yml`). Every run makes a new random 20-character password per user on the controller and hashes it with SHA-512 (`passlib`; the play checks for it first). Only the hash reaches the blueprint and the ISO. The plaintext is printed once at the end of the play and written to `<osbuild_output_dir>/<name>.credentials.txt`. The `%post` runs `chage -d 0`, so the first login (GDM) asks for a new password. Supplementary groups are `wheel`, the `user_groups` of the selected components (`libvirt` from `containers-virt`, `render`/`video` from `intel-oneapi`) and the user's own `groups`. The blueprint, the build script, the credentials file and the ISO are mode 0600.
+**Credentials** (`tasks/credentials.yml`). Every user gets the initial password `osbuild_initial_password` (default `syncopated`), hashed with SHA-512 and a new random salt on the controller (`passlib`; the play checks for it first). Only the hash reaches the blueprint and the ISO. With `osbuild_root_enabled` (intent `root: {enabled: true}`), root gets the same password instead of `rootpw --lock`. The plaintext is printed once at the end of the play and written to `<osbuild_output_dir>/<name>.credentials.txt`. The `%post` runs `chage -d 0` for each user (and root), so the first login (GDM) asks for a new password. Supplementary groups are `wheel`, the `user_groups` of the selected components (`libvirt` from `containers-virt`, `render`/`video` from `intel-oneapi`) and the user's own `groups`. The credentials file is mode 0600; the blueprint, the build script and the ISO are `osbuild_output_mode` (0644, or 0600 with remote logging).
 
 **Blueprint restrictions.** image-builder rejects a user kickstart next to `[[customizations.user]]`, `[[customizations.group]]`, `installer.unattended` or `installer.sudo-nopasswd`. No blueprint in this role carries them, and the role fails before the build if a prepared blueprint does. Every blueprint enables `org.fedoraproject.Anaconda.Modules.Users`, which processes the kickstart `user` lines.
 
@@ -1019,8 +1022,8 @@ XFS can grow but not shrink. The maxima and the reserve keep space available for
 Any hardening profile replaces the layout above with the separate mounts that the CIS, PCI-DSS and HIPAA OpenSCAP profiles scan for (see [OpenSCAP Profiles](#openscap-profiles)). Disk selection, the 2 GiB `/boot` and `vg00` are the same. With *usable* = declared size − 4 GiB:
 
 1. **Reserve**: `compliant_reserve_percent` (8 %) of usable, at most `reserve_max_gib` (64 GiB), stays unassigned in `vg00`.
-2. Fixed volumes: `/` 35 GiB, `/usr` 45 GiB (80 with CUDA), `/var/tmp` 8 GiB, `/var/log` 10 GiB, `/var/log/audit` 4 GiB (CIS, PCI-DSS) or 10 GiB (HIPAA), and `/tmp` 8 GiB with `disk.tmp: lv`.
-3. **`/var`** (at least 40 GiB, at most 200 GiB; it holds podman images, flatpaks and libvirt disks) and **`/home`** (at least 10 GiB, no maximum) get their minimums, then share the rest 2:5.
+2. Fixed volumes: `/` 35 GiB, `/usr` 60 GiB (80 with CUDA), `/var/tmp` 8 GiB, `/var/log` 10 GiB, `/var/log/audit` 4 GiB (CIS, PCI-DSS) or 10 GiB (HIPAA), and `/tmp` 8 GiB with `disk.tmp: lv`.
+3. **`/var`** (at least 40 GiB, at most 185 GiB; it holds podman images, flatpaks and libvirt disks) and **`/home`** (at least 10 GiB, no maximum) get their minimums, then share the rest 2:5.
 
 Mount options are set in the kickstart (`logvol --fsoptions`), not by the build-time remediation, because Anaconda writes `/etc/fstab` at install time:
 
@@ -1032,14 +1035,14 @@ Mount options are set in the kickstart (`logvol --fsoptions`), not by the build-
 | `/var/tmp`, `/var/log`, `/var/log/audit` | `nodev,nosuid,noexec,noatime` |
 | `/tmp` (tmpfs or volume) | `nodev,nosuid,noexec` |
 
-The smallest declared size is 170 GiB for CIS/PCI-DSS and 176 GiB for HIPAA (208 / 214 GiB with CUDA):
+The smallest declared size is 186 GiB for CIS/PCI-DSS and 193 GiB for HIPAA (208 / 214 GiB with CUDA):
 
 | Declared disk | `/var/log/audit` | `/var` | `/home` | Unassigned |
 |---|---|---|---|---|
-| 170 GiB | 4 GiB | 40.2 GiB | 10.5 GiB | 13.3 GiB |
-| 476 GiB | 4 GiB | 120.6 GiB | 211.6 GiB | 37.8 GiB |
-| 931 GiB | 4 GiB | 200 GiB | 561 GiB | 64 GiB |
-| 476 GiB (HIPAA) | 10 GiB | 118.9 GiB | 207.3 GiB | 37.8 GiB |
+| 186 GiB | 4 GiB | 40.1 GiB | 10.3 GiB | 14.6 GiB |
+| 476 GiB | 4 GiB | 116.4 GiB | 200.9 GiB | 37.8 GiB |
+| 931 GiB | 4 GiB | 185 GiB | 561 GiB | 64 GiB |
+| 476 GiB (HIPAA) | 10 GiB | 114.6 GiB | 196.6 GiB | 37.8 GiB |
 
 `/tmp` as tmpfs may still fail a profile's `partition_for_tmp` rule, which asks for "its own partition or logical volume"; use `disk.tmp: lv` to satisfy it. `noexec` on `/var/tmp` can break tools that run from there, so test the first `dnf update` on a new image. Installed-system `/tmp` content is lost on every boot with tmpfs.
 

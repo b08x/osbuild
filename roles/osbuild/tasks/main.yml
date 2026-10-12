@@ -162,7 +162,7 @@
       ansible.builtin.template:
         src: image-builder-build.sh.j2
         dest: "{{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh"
-        mode: "0600"
+        mode: "{{ osbuild_output_mode }}"
         owner: "{{ osbuild_output_owner | default('', true) or omit }}"
 
     - name: Display configuration-only mode
@@ -232,12 +232,15 @@
 - name: Display the temporary user passwords
   ansible.builtin.debug:
     msg: |
-      Temporary passwords for {{ osbuild_blueprint_name }} (also in
+      Initial passwords for {{ osbuild_blueprint_name }} (also in
       {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.credentials.txt, mode 0600).
-      Each user must choose a new password at first login; root is locked.
+      Each user must choose a new password at first login; {{ 'so must root.' if osbuild_root_enabled | bool else 'root is locked.' }}
       {% for u in _osbuild_users %}
         {{ u.name }}: {{ _osbuild_user_passwords[u.name] }}
       {% endfor %}
+      {% if osbuild_root_enabled | bool %}
+        root: {{ _osbuild_root_password }}
+      {% endif %}
   when:
     - _osbuild_users | default([]) | length > 0
     - _osbuild_build_status | default('') in ['GENERATED', 'FINISHED']

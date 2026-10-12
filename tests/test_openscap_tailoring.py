@@ -5,6 +5,7 @@ use ssg-rhel10-ds.xml; where only ssg-rhel9-ds.xml is installed (e.g.
 Debian/Ubuntu ssg-nondebian) the rule IDs are checked against it, allowing
 the rules that RHEL 10 content added. Skipped when no data stream exists.
 """
+import json
 import re
 import shutil
 import subprocess
@@ -72,12 +73,17 @@ def test_tailoring_removes_every_selected_halt_or_retention_rule(benchmark, prof
 @pytest.mark.skipif(not (shutil.which("oscap") and shutil.which("autotailor")), reason="oscap/autotailor missing")
 def test_syncopated_scan_reports_tailored_rules_as_not_selected(tmp_path):
     rules = unselected("cis-l2-workstation")
+    tailoring = tmp_path / "tailoring.json"
+    tailoring.write_text(json.dumps({"profiles": [{
+        "id": "cis_workstation_l2_syncopated", "base_profile_id": "cis_workstation_l2",
+        "rules": {r: {"evaluate": False} for r in rules},
+        "variables": {"var_password_pam_minlen": {"value": "9"}}}]}))
     conf = tmp_path / "scan.conf"
     conf.write_text(
         f"DATASTREAM={DATASTREAM}\n"
         "PROFILE=xccdf_org.ssgproject.content_profile_cis_workstation_l2\n"
         f'TAILORING_FILES="{tmp_path}/none.xml"\n'
-        f'UNSELECTED="{" ".join(rules)}"\n')
+        f"TAILORING_JSON={tailoring}\n")
     run = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
                          env={"PATH": "/usr/bin:/bin", "SYNC_SCAN_CONF": str(conf),
                               "SYNC_SCAN_DIR": str(tmp_path / "scans")}, timeout=900)

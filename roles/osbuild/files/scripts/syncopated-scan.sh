@@ -17,8 +17,8 @@
 #   DATASTREAM        SCAP source data stream
 #   PROFILE           stock profile ID
 #   TAILORING_FILES   candidate tailoring files written by image-builder
-#   UNSELECTED        rule IDs the tailoring unselects; used to rebuild the
-#                     tailoring with autotailor when no candidate exists
+#   TAILORING_JSON    the JSON tailoring the image was built with; used to
+#                     rebuild the tailoring with autotailor when no candidate exists
 set -uo pipefail
 
 CONF=${SYNC_SCAN_CONF:-/etc/sysconfig/syncopated-scan}
@@ -34,7 +34,7 @@ die() {
 DATASTREAM=
 PROFILE=
 TAILORING_FILES=
-UNSELECTED=
+TAILORING_JSON=
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
 if [ -z "$DATASTREAM" ] || [ -z "$PROFILE" ]; then
@@ -57,16 +57,12 @@ for f in $TAILORING_FILES; do
 done
 if [ -n "$tailoring" ]; then
   cp "$tailoring" "$out/tailoring.xml"
-elif command -v "$AUTOTAILOR" >/dev/null 2>&1; then
-  args=()
-  for rule in $UNSELECTED; do
-    args+=(--unselect "$rule")
-  done
-  "$AUTOTAILOR" --new-profile-id "${PROFILE}_syncopated_tailoring" "${args[@]}" \
-    -o "$out/tailoring.xml" "$DATASTREAM" "$PROFILE" ||
-    die "autotailor could not rebuild the tailoring"
+elif [ -r "$TAILORING_JSON" ] && command -v "$AUTOTAILOR" >/dev/null 2>&1; then
+  "$AUTOTAILOR" --new-profile-id "${PROFILE}_syncopated" --json-tailoring "$TAILORING_JSON" \
+    -o "$out/tailoring.xml" "$DATASTREAM" ||
+    die "autotailor could not rebuild the tailoring from $TAILORING_JSON"
 else
-  die "no tailoring file (looked for: $TAILORING_FILES) and no autotailor to rebuild it (package openscap-utils)"
+  die "no tailoring file (looked for: $TAILORING_FILES) and no autotailor + $TAILORING_JSON to rebuild it (package openscap-utils)"
 fi
 tailored_profile=$(grep -o 'Profile id="[^"]*"' "$out/tailoring.xml" | head -n1 | cut -d'"' -f2)
 [ -n "$tailored_profile" ] || die "$out/tailoring.xml names no profile"

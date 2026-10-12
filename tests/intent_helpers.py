@@ -86,10 +86,20 @@ class Generated:
         return dict(line.split(": ", 1) for line in self.credentials_path.read_text().splitlines()
                     if line and not line.startswith("#"))
 
+    def tailoring(self):
+        """The injected JSON tailoring profile (templates/openscap-tailoring.json.j2), or {}."""
+        ref = self.customizations.get("openscap", {}).get("json_tailoring")
+        if not ref:
+            return {}
+        (profile,) = json.loads(self.file(ref["filepath"])["data"])["profiles"]
+        return profile
+
     def unselected(self):
-        prefix = "xccdf_org.ssgproject.content_rule_"
-        tailoring = self.customizations.get("openscap", {}).get("tailoring", {})
-        return [r[len(prefix):] for r in tailoring.get("unselected", [])]
+        rules = self.tailoring().get("rules", {})
+        return [r for r, v in rules.items() if v == {"evaluate": False}]
+
+    def variables(self):
+        return {k: v["value"] for k, v in self.tailoring().get("variables", {}).items()}
 
     def standalone_kickstart(self, disk="vda"):
         """The kickstart with %include /tmp/partitions.ks replaced by the layout for ``disk``."""

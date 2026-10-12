@@ -41,14 +41,12 @@ disabled = [
 # --- component fragment: {{ f }} ---
 {{ lookup('ansible.builtin.file', osbuild_components_dir ~ '/' ~ f) }}
 {% endfor %}
-{% if _osbuild_bp_openscap_unselected | default([]) %}
+{% if osbuild_hardening | default('none') != 'none' %}
 
-# OpenSCAP tailoring (tasks/hardening.yml): image-builder runs autotailor on
-# the profile above and remediates with the tailored profile.
-[customizations.openscap.tailoring]
-unselected = [
-{% for r in _osbuild_bp_openscap_unselected %}
-    "xccdf_org.ssgproject.content_rule_{{ r }}",
-{% endfor %}
-]
+# OpenSCAP tailoring (tasks/hardening.yml, templates/openscap-tailoring.json.j2):
+# the JSON file is injected into the image; image-builder runs autotailor on
+# it and remediates with the tailored profile.
+[customizations.openscap.json_tailoring]
+profile_id = "{{ _osbuild_openscap_tailored_profile_id }}"
+filepath = "{{ osbuild_openscap_tailoring_json }}"
 {% endif %}

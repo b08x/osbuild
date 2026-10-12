@@ -59,7 +59,7 @@
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/osbuild/templates/image-builder-build.sh.j2"
         dest: "{{ generate_out }}/build-{{ osbuild_blueprint_name }}.sh"
-        mode: "0600"
+        mode: "{{ osbuild_output_mode }}"
 
     - name: Record the derived settings for the tests
       ansible.builtin.copy:

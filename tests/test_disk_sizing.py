@@ -126,8 +126,8 @@ def test_simple_matches_the_old_installer_math(size_gib, expected):
 
 
 @pytest.mark.parametrize("size_gib,var,home,unassigned", [
-    (477, 122049, 212962, 38749),
-    (932, 204800, 569344, 65536),
+    (477, 117660, 201991, 38749),
+    (932, 189440, 569344, 65536),
 ])
 def test_compliant_matches_the_old_installer_math(size_gib, var, home, unassigned):
     result = dl.syncopated_disk_layout(size_gib, "compliant", params(audit_gib=10))
@@ -137,7 +137,7 @@ def test_compliant_matches_the_old_installer_math(size_gib, var, home, unassigne
 
 # ---- compliant layout (any hardening profile) --------------------------------
 
-FIXED = {"/": 35, "/usr": 45, "/var/tmp": 8, "/var/log": 10}
+FIXED = {"/": 35, "/usr": 60, "/var/tmp": 8, "/var/log": 10}
 
 
 @pytest.mark.parametrize("audit_gib", [4, 10])
@@ -161,7 +161,7 @@ def test_compliant_typical_disk_476_gib(audit_gib):
         assert s[mount] == gib * MIB, mount
     assert s["/var/log/audit"] == audit_gib * MIB
     assert "/tmp" not in s                      # tmpfs
-    assert 40 * MIB <= s["/var"] <= 200 * MIB
+    assert 40 * MIB <= s["/var"] <= 185 * MIB
     assert s["/home"] > s["/var"]
 
 
@@ -169,7 +169,7 @@ def test_compliant_large_disk_clamps_var():
     result = dl.syncopated_disk_layout(4000, "compliant", params())
     check_invariants(result, 4000)
     s = sizes(result)
-    assert s["/var"] == 200 * MIB
+    assert s["/var"] == 185 * MIB
     assert result["reserve_mib"] == 64 * MIB
 
 
@@ -190,7 +190,7 @@ def test_compliant_mount_options():
 def test_compliant_cuda_usr_is_80_gib_and_raises_the_minimum():
     p = params(usr_gib=80)
     assert sizes(dl.syncopated_disk_layout(476, "compliant", p))["/usr"] == 80 * MIB
-    assert dl.minimum_disk_gib("compliant", p) == dl.minimum_disk_gib("compliant", params()) + 35 + 3
+    assert dl.minimum_disk_gib("compliant", p) == dl.minimum_disk_gib("compliant", params()) + 20 + 2
 
 
 # ---- argument checks ----------------------------------------------------------

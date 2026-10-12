@@ -112,13 +112,13 @@ ansible-playbook playbooks/build.yml -e @profiles/studio.yml
 bash /var/tmp/osbuild-images/build-<name>.sh   # builds <name>-<commit>.iso
 ```
 
-The play validates the intent before anything else and stops naming the offending field (`intent.disk.size_gib: 10 is less than the minimum of 32`). It writes, mode `0600` and owned by you:
+The play validates the intent before anything else and stops naming the offending field (`intent.disk.size_gib: 10 is less than the minimum of 32`). It writes, owned by you, mode `0644` (`0600` with remote logging, whose client key is in the blueprint and image; the credentials file is always `0600`):
 
 | File | Content |
 |---|---|
 | `<name>.toml` | Blueprint with the kickstart: users, locked root, the disk layout |
 | `build-<name>.sh` | Runs `image-builder build` with the components' extra repositories |
-| `<name>.credentials.txt` | The temporary password of each user (also printed once at the end of the play) |
+| `<name>.credentials.txt` | The initial password of each user, `syncopated` by default (also printed once at the end of the play) |
 
 **The install asks nothing.** Boot the ISO and walk away: the installer picks the target disk (install media, removable, read-only and USB disks excluded; NVMe first, then the largest), shows a 30-second countdown on a console naming the disk's model, serial and size (any key aborts), and installs. The only possible prompt is the LUKS passphrase when `disk.encrypt` is true. Each user signs in with the temporary password and chooses a new one (GDM asks); root is locked, `wheel` uses sudo. A new password is generated on every run and only its SHA-512 hash reaches the ISO.
 
@@ -129,6 +129,7 @@ The play validates the intent before anything else and stops naming the offendin
 - auditd rotates within a fixed cap (`max_log_file` × `num_logs` = 32 MB × 16 for CIS and PCI-DSS, 64 MB × 32 for HIPAA) and never halts, suspends or drops to single-user mode: `admin_space_left_action` and `disk_full_action` rotate, `disk_error_action` logs.
 - Below 25 % free on `/var/log/audit`, `syncopated-audit-warn` logs a warning to the journal, writes a motd and Cockpit banner, and shows `wheel` users a GNOME critical notification that returns at each login while the condition holds.
 - CIS and PCI-DSS drop the per-syscall `dac_modification_*` and `file_deletion_events_*` rules, which fire on every file save and rename of a desktop session; HIPAA keeps every audit rule.
+- `password_min_length` (CIS and PCI-DSS) sets the minimum password length the profile enforces; by default CIS requires 14 characters, PCI-DSS 12.
 - The deviations are unselected in the tailoring, not overridden afterwards. `sudo syncopated-scan` evaluates the host against the stock and the tailored profile and writes HTML and ARF reports to `/var/lib/syncopated/scans/<timestamp>/`; the tailored report lists the deviations as not selected.
 
 **Remote logging** is off by default. `remote_logging: {enabled: true, url: https://logs:19532, ca_cert, client_cert, client_key}` (PEM text or controller paths) is the only change needed to ship the journal, audit events included, with `systemd-journal-upload` over mTLS. An unreachable log host changes nothing on the workstation; the uploader logs the failure and retries every 30 s.
@@ -200,7 +201,7 @@ The skill turns a plain-language request into an **intent file** under `profiles
 1. **Clarify.** Up to three questions, asked only when the request leaves something open: image kind (installer ISO, application container, bootc image, qcow2), distro and version as `image-builder list` names it, hardware stack, hardening profile, disk size and users for ISOs.
 2. **Write the intent.** Start from the closest `profiles/examples/*.yml`, save it as `profiles/<name>.yml`, and set what the request says. Containers and bootc images start from their playbooks instead.
 3. **Verify.** `ansible-playbook playbooks/build.yml -e @profiles/<name>.yml` (validates the intent first), `shellcheck` on the build script, an `image-builder manifest` depsolve with `ksvalidator -v RHEL10` on the kickstart, and `ansible-lint`. The manifest RPM list is inspected, not just its exit code.
-4. **Report.** The build command, where the temporary passwords are, what was verified, and what was not (no image built, no VM install test).
+4. **Report.** The build command, where the initial passwords are, what was verified, and what was not (no image built, no VM install test).
 
 ### Examples
 
@@ -313,7 +314,7 @@ See the complete goal package at [`goals/standalone-workstation-hardening/goal.m
     │  - /home takes a larger disk's    │
     │    surplus; reserve stays free    │    │  - Non-halting disk full actions  │
     │  - 30s abort countdown on a tty   │    │  - Desktop noise rules unselected │
-    │  - Zero interactive spokes        │    │  - Throwaway random pass + chage  │
+    │  - Zero interactive spokes        │    │  - Initial password + forced chage│
     └─────────────────┬─────────────────┘    └─────────────────┬─────────────────┘
                       │                                        │
                       └──────────────────┬─────────────────────┘
@@ -339,9 +340,9 @@ See the complete goal package at [`goals/standalone-workstation-hardening/goal.m
 
 ### Phase 3: Personalized, Unattended Installation & Credentials *(implemented)*
 - **Zero Interactive Installer Friction**: Suppress root password, user creation, and partition spokes in Anaconda for fully unattended deployments.
-- **Ephemeral Credentials**: Generate temporary random passwords during ISO creation, store only SHA-512 hashes in kickstart, and enforce mandatory password changes on initial GDM login via `chage -d 0`.
+- **Initial Credentials**: Every user (and root, when `root.enabled`) gets the initial password `syncopated` (`osbuild_initial_password`); only its SHA-512 hash is in the kickstart, and enforce mandatory password changes on initial GDM login via `chage -d 0`.
 - **Component-Derived Group Membership**: Aggregate supplementary user groups from selected components (e.g., `libvirt` from `containers-virt`, `render` and `video` from `intel-oneapi`) combined with administrative `wheel` access.
-- **Strict Artifact Protection**: Enforce filesystem permissions of `0600` on generated blueprints, build scripts, ISOs, and credential logs, preventing secret exposure.
+- **Artifact Permissions**: Blueprints, build scripts and ISOs are `0644` (`osbuild_output_mode`), `0600` when remote logging embeds the client key; the credentials file is always `0600`.
 
 ### Phase 4: Intent Specification & Single Build Engine *(implemented)*
 - **Formal Schema Enforcement**: Define `schema/intent.schema.json` to validate distro, hardware components, hardening profile, disk sizing, and identity.

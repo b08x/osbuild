@@ -1,0 +1,15 @@
+{#- JSON tailoring for autotailor --json-tailoring (ComplianceAsCode format),
+    written by tasks/hardening.yml to osbuild_openscap_tailoring_json. IDs are
+    short: no xccdf_org.ssgproject.content_{profile,rule,value}_ prefix. -#}
+{%- set prefix = 'xccdf_org.ssgproject.content_profile_' -%}
+{%- set ns = namespace(rules={}, variables={}) -%}
+{%- for rule in _osbuild_bp_openscap_unselected -%}
+{%-   set ns.rules = ns.rules | combine({rule: {'evaluate': false}}) -%}
+{%- endfor -%}
+{%- for name, value in osbuild_openscap_variables.items() -%}
+{%-   set ns.variables = ns.variables | combine({name: {'value': value | string}}) -%}
+{%- endfor -%}
+{{ {'profiles': [{'id': _osbuild_openscap_tailored_profile_id | replace(prefix, ''),
+                  'base_profile_id': _profile_id | replace(prefix, ''),
+                  'rules': ns.rules,
+                  'variables': ns.variables}]} | to_json }}

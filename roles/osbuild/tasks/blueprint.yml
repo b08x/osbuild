@@ -10,7 +10,7 @@
   ansible.builtin.template:
     src: blueprint-components.toml.j2
     dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
-    mode: "0600"
+    mode: "{{ osbuild_output_mode }}"
     owner: "{{ osbuild_output_owner | default('', true) or omit }}"
   when: _osbuild_use_components
 
@@ -18,7 +18,7 @@
   ansible.builtin.copy:
     src: "{{ osbuild_static_blueprint_path }}"
     dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml"
-    mode: "0600"
+    mode: "{{ osbuild_output_mode }}"
     owner: "{{ osbuild_output_owner | default('', true) or omit }}"
   when: not _osbuild_use_components
 
@@ -128,6 +128,7 @@
       - marker: syncopated-hardening
         title: Workstation audit policy and syncopated-scan
         files: "{{ _osbuild_hardening_files | default([]) }}"
+        dirs: "{{ _osbuild_hardening_dirs | default([]) }}"
       - marker: syncopated-remote-logging
         title: Remote logging (systemd-journal-upload over mTLS)
         files: "{{ _osbuild_remote_logging_files | default([]) }}"
@@ -135,7 +136,7 @@
   block:
     - name: Assert injected files fit in TOML literal strings
       ansible.builtin.assert:
-        that: "\"'''\" not in item.1.content"
+        that: "\"'''\" not in (item.1.content if item.1.content is defined else item.1.json | to_json)"
         fail_msg: "{{ item.1.path }} contains ''' and cannot be embedded in a TOML literal string"
         quiet: true
       loop: "{{ _osbuild_inject_blocks | subelements('files') }}"
@@ -212,18 +213,21 @@
         fail_msg: "The rendered kickstart contains --passphrase; LUKS passphrases are never written to generated files."
         quiet: true
 
-    - name: Write the throwaway passwords next to the outputs
+    - name: Write the initial passwords next to the outputs
       ansible.builtin.copy:
         dest: "{{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.credentials.txt"
         mode: "0600"
         owner: "{{ osbuild_output_owner | default('', true) or omit }}"
         content: |
-          # {{ osbuild_blueprint_name }}: temporary passwords generated {{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}.
-          # Each user must choose a new password at first login. Root is locked;
-          # use sudo. Delete this file once the machine is installed.
+          # {{ osbuild_blueprint_name }}: initial passwords, generated {{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}.
+          # Each user must choose a new password at first login.{{ ' Root is locked;' if not osbuild_root_enabled | bool else '' }}
+          # {{ 'use sudo. ' if not osbuild_root_enabled | bool else 'Root must too. ' }}Delete this file once the machine is installed.
           {% for u in _osbuild_users %}
           {{ u.name }}: {{ _osbuild_user_passwords[u.name] }}
           {% endfor %}
+          {% if osbuild_root_enabled | bool %}
+          root: {{ _osbuild_root_password }}
+          {% endif %}
       no_log: true
 
 - name: Append passwordless sudo for wheel to blueprint

@@ -7,10 +7,11 @@
 # The profile (schema/intent.schema.json; examples in profiles/examples/)
 # names the distro, components, hardening profile, disk, users, locale and
 # remote logging. The play validates it before anything else, then the osbuild
-# role writes, mode 0600, into osbuild_output_dir:
+# role writes, mode 0644 (0600 with remote logging; credentials always 0600),
+# into osbuild_output_dir:
 #   <name>.toml               blueprint with the kickstart (users, disk layout)
 #   build-<name>.sh           run it to build <name>-<commit>.iso
-#   <name>.credentials.txt    the throwaway user passwords (also printed once)
+#   <name>.credentials.txt    the initial user passwords (also printed once)
 #
 #   bash /var/tmp/osbuild-images/build-<name>.sh
 #
@@ -52,7 +53,7 @@
 
     # Lookups run on the controller; set_fact evaluates this once, so every
     # role task sees the same image name. Generated files belong to the
-    # connecting user (they are mode 0600).
+    # connecting user.
     - name: Set image name and output owner
       ansible.builtin.set_fact:
         _git_commit: >-

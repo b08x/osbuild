@@ -1,8 +1,9 @@
 # Installer kickstart (roles/osbuild/files/{{ osbuild_kickstart_file }}). Injected
 # into every prepared blueprint by tasks/blueprint.yml; edit the source file,
 # not this. Rendered here: lang/keyboard/timezone (osbuild_locale,
-# osbuild_keyboard, osbuild_timezone), the locked root account, the users
-# (tasks/credentials.yml: SHA-512 hashes of throwaway passwords) and the
+# osbuild_keyboard, osbuild_timezone), the root account (locked unless
+# osbuild_root_enabled), the users
+# (tasks/credentials.yml: SHA-512 hashes of the initial password) and the
 # {{ _osbuild_disk_layout.layout }} disk layout computed at generation time
 # for a {{ osbuild_disk_size_gib }} GiB disk (tasks/disk_layout.yml).
 
@@ -11,7 +12,11 @@ contents = '''
 lang {{ osbuild_locale }}
 keyboard {{ osbuild_keyboard }}
 timezone {{ osbuild_timezone }} --utc
+{% if osbuild_root_enabled | bool %}
+rootpw --iscrypted {{ _osbuild_root_password_hash }}
+{% else %}
 rootpw --lock
+{% endif %}
 {% for u in _osbuild_users %}
 user --name={{ u.name }} --gecos="{{ u.gecos }}" --groups={{ u.groups | join(',') }}{{ (' --uid=' ~ u.uid) if u.uid | default('', true) else '' }} --iscrypted --password={{ u.password_hash }}
 {% if u.ssh_pubkey | default('', true) | length > 0 %}
@@ -50,12 +55,15 @@ echo 'tmpfs /tmp tmpfs defaults,nodev,nosuid,noexec,mode=1777,size={{ (osbuild_k
 %end
 {% endif %}
 {% if _osbuild_users | length > 0 %}
-# The generated passwords are throwaway: each user picks a new one at first
+# The initial password is known: each user picks a new one at first
 # login (GDM asks).
 %post --interpreter=/usr/bin/bash --log=/root/syncopated-users.log
 {% for u in _osbuild_users %}
 chage -d 0 {{ u.name }}
 {% endfor %}
+{% if osbuild_root_enabled | bool %}
+chage -d 0 root
+{% endif %}
 %end
 {% endif %}
 '''

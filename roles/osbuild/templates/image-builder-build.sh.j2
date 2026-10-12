@@ -7,8 +7,8 @@
 #
 #   bash {{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh
 #
-# This script, the blueprint and the ISO are mode 0600: the blueprint and the
-# ISO carry password hashes and, with remote logging, the client key.
+# This script, the blueprint and the image are mode {{ osbuild_output_mode }}
+# (osbuild_output_mode: 0644, or 0600 when remote logging embeds the client key).
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -72,8 +72,7 @@ if [ -z "$image" ]; then
 fi
 sudo cp "$image" {{ osbuild_output_filename | quote }}
 sudo chown "$(id -u):$(id -g)" {{ osbuild_output_filename | quote }}
-# The ISO carries the user password hashes (and remote logging keys): 0600.
-chmod 0600 {{ osbuild_output_filename | quote }}
+chmod {{ osbuild_output_mode }} {{ osbuild_output_filename | quote }}
 ls -lh {{ osbuild_output_filename | quote }}
 {% if osbuild_image_type in ['container', 'container-minimal'] %}
 
