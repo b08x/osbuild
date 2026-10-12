@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # git stub: `ls-remote` fails for any URL containing "bad".
+# shellcheck source=_lib.sh
 source "${STUB_DIR:?}/_lib.sh"
 stub_log "git $*"
 if [[ ${1:-} == ls-remote ]]; then

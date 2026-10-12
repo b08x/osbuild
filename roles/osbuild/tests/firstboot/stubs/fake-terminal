@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Terminal emulator stub used by the launcher tests; linked in as ptyxis etc.
+# shellcheck source=_lib.sh
 source "${STUB_DIR:?}/_lib.sh"
 stub_log "${0##*/} $*"
 exit 0

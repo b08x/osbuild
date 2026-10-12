@@ -14,11 +14,7 @@ galaxy_info:
         - "8"
         - "9"
         - "10"
-    - name: Rocky
-      versions:
-        - "9"
-        - "10"
-    - name: EL
+    - name: EL # Enterprise Linux clones (Rocky 9/10, others); Galaxy has no Rocky platform
       versions:
         - "8"
         - "9"

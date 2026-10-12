@@ -42,11 +42,11 @@
         paths: "{{ _role_dir }}/files"
         patterns: "*.toml"
         recurse: true
-      register: _static
+      register: _osbuild_test_static
 
     - name: Keep only workstation blueprints
       ansible.builtin.set_fact:
-        _static_paths: "{{ _static.files | map(attribute='path') | select('search', '/workstation/') | sort }}"
+        _osbuild_test_static_paths: "{{ _osbuild_test_static.files | map(attribute='path') | select('search', '/workstation/') | sort }}"
 
     - name: Prepare each static blueprint twice with the kickstart enabled
       ansible.builtin.include_role:
@@ -56,7 +56,7 @@
         osbuild_output_dir: "{{ _out_on }}"
         osbuild_static_blueprint_path: "{{ item.0 }}"
         osbuild_blueprint_name: "{{ item.0 | basename | splitext | first }}"
-      loop: "{{ _static_paths | product([1, 2]) | list }}"
+      loop: "{{ _osbuild_test_static_paths | product([1, 2]) | list }}"
       loop_control:
         label: "{{ item.0 | basename }} (run {{ item.1 }})"
 
@@ -69,7 +69,7 @@
         osbuild_kickstart_enabled: false
         osbuild_static_blueprint_path: "{{ item }}"
         osbuild_blueprint_name: "{{ item | basename | splitext | first }}"
-      loop: "{{ _static_paths }}"
+      loop: "{{ _osbuild_test_static_paths }}"
       loop_control:
         label: "{{ item | basename }}"
 
@@ -114,7 +114,7 @@
     - name: Check kickstart in enabled and disabled outputs
       ansible.builtin.command:
         argv: "{{ ['python3', _role_dir ~ '/tests/kickstart/check_kickstart.py', item.dir,
-                   _role_dir ~ '/files/kickstart/syncopated.ks', _static_paths | length + 1, item.mode,
+                   _role_dir ~ '/files/kickstart/syncopated.ks', _osbuild_test_static_paths | length + 1, item.mode,
                    _defaults.osbuild_locale, _defaults.osbuild_keyboard, _defaults.osbuild_timezone]
                   + ([ksvalidator | realpath] if (ksvalidator | length > 0) else []) }}"
       vars:
@@ -126,12 +126,12 @@
         - { dir: "{{ _out_off }}", mode: disabled }
       loop_control:
         label: "{{ item.mode }}"
-      register: _check
+      register: _osbuild_test_check
       changed_when: false
 
     - name: Show check results
       ansible.builtin.debug:
-        msg: "{{ _check.results | map(attribute='stdout_lines') | flatten }}"
+        msg: "{{ _osbuild_test_check.results | map(attribute='stdout_lines') | flatten }}"
 
     - name: Write a blueprint that still defines a user
       ansible.builtin.copy:

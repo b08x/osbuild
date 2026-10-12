@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # yadm stub: repo lives at $HOME/.local/share/yadm/repo.git like real yadm.
+# shellcheck source=_lib.sh
 source "${STUB_DIR:?}/_lib.sh"
 stub_log "yadm $*"
 repo="$HOME/.local/share/yadm/repo.git"

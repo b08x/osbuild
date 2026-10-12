@@ -14,38 +14,38 @@
 #   - Use https:// URLs for keys not bundled (fetched at build time by repo_keys.yml)
 #   - Omit gpgkey_url for repos with check_gpg: false
 
-repo:
+osbuild_repo:
   # BaseOS/AppStream per upstream osbuild/images rocky-{9,10}.json;
   # CRB per the dl.rockylinux.org pub tree layout (citations.md item 6).
   rocky-baseos:
-    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/BaseOS/{{ osbuild_arch }}/os/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _osbuild_distro_major_version }}/BaseOS/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   rocky-appstream:
-    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/AppStream/{{ osbuild_arch }}/os/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _osbuild_distro_major_version }}/AppStream/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   rocky-crb:
-    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/CRB/{{ osbuild_arch }}/os/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _osbuild_distro_major_version }}/CRB/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   # Plus and RT follow the same pub tree layout as CRB (verified 2026-10-03:
   # repodata/repomd.xml returns 200 for 9 and 10). rocky-repos ships them as
   # plus (rocky-extras.repo) and rt (rocky-addons.repo), disabled.
   rocky-plus:
-    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/plus/{{ osbuild_arch }}/os/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _osbuild_distro_major_version }}/plus/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   rocky-rt:
-    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _distro_major_version }}/RT/{{ osbuild_arch }}/os/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _distro_major_version }}"
+    baseurl: "https://dl.rockylinux.org/pub/rocky/{{ _osbuild_distro_major_version }}/RT/{{ osbuild_arch }}/os/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rocky/RPM-GPG-KEY-Rocky-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   # EPEL builds for all RHEL-compatible clones; Rocky resolves epel-release
   # from its extras repository (https://docs.fedoraproject.org/en-US/epel/,
   # citations.md item 8).
   epel:
-    baseurl: "https://mirror.us.leaseweb.net/epel/{{ _distro_major_version }}/Everything/{{ osbuild_arch }}/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/epel/RPM-GPG-KEY-EPEL-{{ _distro_major_version }}"
+    baseurl: "https://mirror.us.leaseweb.net/epel/{{ _osbuild_distro_major_version }}/Everything/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/epel/RPM-GPG-KEY-EPEL-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   # RPM Fusion for EL only publishes an "updates" channel — el/releases/{9,10}
   # and el/nvidia-driver/{9,10} both 404 upstream, so those repos are omitted
@@ -55,12 +55,12 @@ repo:
   # "-fedora-2020" keys. Same situation as AlmaLinux 10
   # (roles/osbuild/vars/AlmaLinux.yml, citations.md item 10).
   rpmfusion-free-updates:
-    baseurl: "http://download1.rpmfusion.org/free/el/updates/{{ _distro_major_version }}/{{ osbuild_arch }}/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-el-{{ _distro_major_version }}"
+    baseurl: "http://download1.rpmfusion.org/free/el/updates/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-el-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   rpmfusion-nonfree-updates:
-    baseurl: "http://download1.rpmfusion.org/nonfree/el/updates/{{ _distro_major_version }}/{{ osbuild_arch }}/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-el-{{ _distro_major_version }}"
+    baseurl: "http://download1.rpmfusion.org/nonfree/el/updates/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-el-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   # NVIDIA publishes dnf repos at .../cuda/repos/rhel{9,10}/x86_64/ and
   # supports Rocky Linux as a target (https://developer.nvidia.com/cuda-downloads,
@@ -85,7 +85,7 @@ repo:
   # RHEL-compatible clones (https://docs.docker.com/engine/install/,
   # citations.md item 12).
   docker-ce-stable:
-    baseurl: "https://download.docker.com/linux/centos/{{ _distro_major_version }}/{{ osbuild_arch }}/stable"
+    baseurl: "https://download.docker.com/linux/centos/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/stable"
     gpgkey_url: "https://download.docker.com/linux/centos/gpg"
     check_gpg: true
   # VS Code / Google Chrome: distro-agnostic yum repos, identical to the

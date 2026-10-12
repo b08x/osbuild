@@ -8,13 +8,13 @@
     df -BG {{ osbuild_work_dir | dirname }} | awk 'NR==2 {print $4}' | sed 's/G//'
   args:
     executable: /bin/bash
-  register: available_space
+  register: _osbuild_available_space
   changed_when: false
-  failed_when: available_space.stdout | int < osbuild_min_disk_space
+  failed_when: _osbuild_available_space.stdout | int < osbuild_min_disk_space
 
 - name: Display available disk space
   ansible.builtin.debug:
-    msg: "Available disk space: {{ available_space.stdout }}GB (minimum required: {{ osbuild_min_disk_space }}GB)"
+    msg: "Available disk space: {{ _osbuild_available_space.stdout }}GB (minimum required: {{ osbuild_min_disk_space }}GB)"
 
 - name: Install image-builder and related packages
   ansible.builtin.dnf:

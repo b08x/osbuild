@@ -565,7 +565,7 @@ def test_intent_component_list_add_changes_only_the_list(tmp_path):
     assert pb.target() == "rocky/10/x86_64"
     assert pb.add(["nvidia"], after="cockpit") == ["nvidia"]
     pb.save()
-    assert intent.read_text() == src.read_text().replace("  - cockpit\n", "  - cockpit\n  - nvidia\n")
+    assert intent.read_text() == src.read_text().replace("    - cockpit\n", "    - cockpit\n    - nvidia\n")
 
 
 def test_tui_playbook_editor_applies_checkbox_changes(monkeypatch, tree, playbook):

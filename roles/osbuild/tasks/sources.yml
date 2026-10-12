@@ -13,11 +13,11 @@
     osbuild_extra_repo_urls: >-
       {%- set ns = namespace(urls=osbuild_extra_repo_urls | default([]) | list) -%}
       {%- for s in osbuild_sources -%}
-      {%-   if s in repo -%}
-      {%-     if repo[s].metalink is defined -%}
-      {%-       set ns.urls = ns.urls + [repo[s].metalink] -%}
-      {%-     elif repo[s].baseurl is defined -%}
-      {%-       set ns.urls = ns.urls + [repo[s].baseurl] -%}
+      {%-   if s in osbuild_repo -%}
+      {%-     if osbuild_repo[s].metalink is defined -%}
+      {%-       set ns.urls = ns.urls + [osbuild_repo[s].metalink] -%}
+      {%-     elif osbuild_repo[s].baseurl is defined -%}
+      {%-       set ns.urls = ns.urls + [osbuild_repo[s].baseurl] -%}
       {%-     endif -%}
       {%-   endif -%}
       {%- endfor -%}

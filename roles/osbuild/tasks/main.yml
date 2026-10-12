@@ -144,7 +144,7 @@
 
     - name: Set build status to finished
       ansible.builtin.set_fact:
-        build_status: "FINISHED"
+        _osbuild_build_status: "FINISHED"
       tags:
         - always
 
@@ -183,7 +183,7 @@
 
     - name: Set build status to generated
       ansible.builtin.set_fact:
-        build_status: "GENERATED"
+        _osbuild_build_status: "GENERATED"
       tags:
         - always
 
@@ -208,7 +208,7 @@
         - compose
 
     - name: Build retry logic
-      when: osbuild_build_retries | int > 0 and build_status != "FINISHED"
+      when: osbuild_build_retries | int > 0 and _osbuild_build_status != "FINISHED"
       block:
         - name: Wait before retry
           ansible.builtin.pause:
@@ -224,7 +224,7 @@
 
     - name: Set build status to finished
       ansible.builtin.set_fact:
-        build_status: "FINISHED"
+        _osbuild_build_status: "FINISHED"
       tags:
         - always
 
@@ -240,7 +240,7 @@
       {% endfor %}
   when:
     - _osbuild_users | default([]) | length > 0
-    - build_status | default('') in ['GENERATED', 'FINISHED']
+    - _osbuild_build_status | default('') in ['GENERATED', 'FINISHED']
   tags:
     - always
 
@@ -252,9 +252,9 @@
       ╚════════════════════════════════════════════════════════════════╝
 
       Blueprint: {{ osbuild_blueprint_name }}
-      Status: {{ build_status | default('UNKNOWN') }}
+      Status: {{ _osbuild_build_status | default('UNKNOWN') }}
 
-      {% if build_status == 'FINISHED' %}
+      {% if _osbuild_build_status == 'FINISHED' %}
       Image Location: {{ osbuild_output_dir }}/{{ osbuild_output_filename }}
 
       Verification Steps:
@@ -272,7 +272,7 @@
          sudo dd if={{ osbuild_output_dir }}/{{ osbuild_output_filename }} \
            of=/dev/sdX bs=4M status=progress oflag=sync
 
-      {% elif build_status == 'GENERATED' %}
+      {% elif _osbuild_build_status == 'GENERATED' %}
       Configuration ready in: {{ osbuild_output_dir }}
       Blueprint: {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml
 

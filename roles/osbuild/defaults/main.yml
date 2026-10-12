@@ -68,11 +68,11 @@ osbuild_build_bootc: false
 # Target Version Helpers
 # =============================================================================
 
-_distro_version: "{{ osbuild_distro | regex_replace('^[a-z]+-', '') }}"
+_osbuild_distro_version: "{{ osbuild_distro | regex_replace('^[a-z]+-', '') }}"
 # Major version only (e.g. "10"): distribution-gpg-keys, RPM Fusion EL,
 # NVIDIA CUDA (rhel*), and Docker CE publish per-major artifacts. AlmaLinux
-# metalinks and EPEL point-release paths use the full _distro_version.
-_distro_major_version: "{{ _distro_version | regex_replace('\\..*', '') }}"
+# metalinks and EPEL point-release paths use the full _osbuild_distro_version.
+_osbuild_distro_major_version: "{{ _osbuild_distro_version | regex_replace('\\..*', '') }}"
 
 # =============================================================================
 # Component File Schema
@@ -169,7 +169,7 @@ osbuild_distro_sources_fedora:
 # Google Chrome — so one list serves both; per-distro URLs and GPG keys
 # live in vars/AlmaLinux.yml and vars/Rocky.yml.
 osbuild_distro_sources_el:
-  # Rocky CRB, Plus and RT. Names absent from the host's `repo` dictionary
+  # Rocky CRB, Plus and RT. Names absent from the host's `osbuild_repo` dictionary
   # (e.g. on an AlmaLinux host) are skipped by tasks/sources.yml.
   - rocky-crb
   - rocky-plus
@@ -188,7 +188,7 @@ osbuild_distro_sources_el:
 # package resolution.
 osbuild_extra_repo_urls: []
 
-# Repository names (keys of vars/<build host distribution>.yml `repo`) turned
+# Repository names (keys of vars/<build host distribution>.yml `osbuild_repo`) turned
 # into --extra-repo URLs: the host distribution's common list. Selected
 # components add their own repo_urls (tasks/components.yml). Derived, never
 # set by an intent: empty when the target family (Fedora vs EL) differs from
@@ -220,12 +220,12 @@ osbuild_sources: >-
 # that selects packages.
 osbuild_blueprint_components: []
 osbuild_components_dir: >-
-  {{ osbuild_target_distribution | lower }}/{{ _distro_major_version }}/{{ osbuild_arch }}/components
+  {{ osbuild_target_distribution | lower }}/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/components
 # Static, non-composable blueprint part (firewall, locale, timezone, files).
 # Playbooks that build another image kind point this at another frame, e.g.
 # frames/container.toml.
 osbuild_blueprint_frame_path: >-
-  {{ osbuild_target_distribution | lower }}/{{ _distro_major_version }}/{{ osbuild_arch }}/frames/workstation.toml
+  {{ osbuild_target_distribution | lower }}/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/frames/workstation.toml
 
 # Hand-written blueprint copied as is. Used only when
 # osbuild_blueprint_components is empty; the path is relative to the role's
@@ -490,7 +490,7 @@ osbuild_container_tag: "localhost/{{ osbuild_blueprint_name }}:latest"
 # Major-version based: the template tree is files/almalinux/10/... and
 # files/rocky/10/..., so a point-release osbuild_distro (almalinux-10.2,
 # rocky-10.2) must resolve to the major-only template name.
-osbuild_repo_config_template: "{{ ansible_distribution | lower }}-{{ _distro_major_version }}.json.j2"
+osbuild_repo_config_template: "{{ ansible_distribution | lower }}-{{ _osbuild_distro_major_version }}.json.j2"
 
 # Keep build logs on failure
 # [COMPATIBILITY] Retained for backward compatibility.

@@ -2,6 +2,7 @@
 # gum stub. choose/input/confirm answers come from $GUM_QUEUE, one per line.
 # For input, the answer "__default__" returns the --value argument.
 # An empty queue makes the prompt exit 130 (user pressed Ctrl-C).
+# shellcheck source=_lib.sh
 source "${STUB_DIR:?}/_lib.sh"
 stub_log "gum $*"
 cmd=${1:-}

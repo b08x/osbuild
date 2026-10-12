@@ -441,3 +441,15 @@ def test_extra_repos_come_from_components(generated, example):
             assert f"https://dl.rockylinux.org/pub/rocky/10/{repo}/x86_64/os/" in urls
     for url in urls:
         assert f"--extra-repo {url}" in g.script_path.read_text() or f"--extra-repo '{url}'" in g.script_path.read_text()
+
+
+def test_iso_builds_only_go_through_build_yml():
+    import yaml
+    for path in (ROOT / "playbooks" / "osbuild.yml", ROOT / "osbuild.yml"):
+        play = yaml.safe_load(path.read_text())[0]
+        assert play["vars"]["osbuild_kickstart_enabled"] is False
+        asserts = [t for t in play["pre_tasks"] if "Refuse installer ISOs" in t.get("name", "")]
+        assert asserts and "image-installer" in asserts[0]["ansible.builtin.assert"]["that"]
+    for path in (ROOT / "playbooks").glob("*.yml"):
+        assert not re.search(r"^\s*osbuild_image_type:\s*[\"']?(image|minimal|network)-installer", path.read_text(), re.M), \
+            f"{path.name} sets an installer image type; ISOs go through playbooks/build.yml"

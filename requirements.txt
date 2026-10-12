@@ -2,5 +2,11 @@ ansible-core>=2.15.0
 questionary>=2.0.0
 rich>=13.0.0
 PyYAML>=6.0
+# playbooks/build.yml: intent validation (ansible.utils.validate, jsonschema
+# engine) and SHA-512 password hashes (password_hash needs passlib on
+# Python >= 3.13). Fedora/EL: python3-jsonschema python3-passlib.
+jsonschema>=4.0
+passlib>=1.7
 # pytest suite also needs:
 pytest>=8.0
+pykickstart>=3.48      # ksvalidator -v RHEL10

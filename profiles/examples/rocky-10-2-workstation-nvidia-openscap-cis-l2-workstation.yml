@@ -19,22 +19,22 @@ intent:
   arch: x86_64
   hostname: syncopated-gx
   components:
-  - base
-  - anaconda
-  - gnome-desktop
-  - fonts
-  - audio
-  - multimedia
-  - google-chrome
-  - vscode
-  - intel-graphics
-  - development
-  - containers-virt
-  - cockpit
-  - nvidia
-  - cuda-container
-  - gui-toolkit
-  - syncopated
+    - base
+    - anaconda
+    - gnome-desktop
+    - fonts
+    - audio
+    - multimedia
+    - google-chrome
+    - vscode
+    - intel-graphics
+    - development
+    - containers-virt
+    - cockpit
+    - nvidia
+    - cuda-container
+    - gui-toolkit
+    - syncopated
   hardening: cis-l2-workstation
   disk:
     # Declared disk size: 476 GiB is a 512 GB disk. Smaller disks abort the
@@ -43,8 +43,8 @@ intent:
     encrypt: false
     tmp: tmpfs
   users:
-  - name: syncopated
-    gecos: Syncopated Admin
+    - name: syncopated
+      gecos: Syncopated Admin
   locale:
     language: en_US.UTF-8
     keyboard: us

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # dnf stub. $DNF_RC is the exit status. DNF_UPDATES=1 reports an upgraded
 # package; otherwise dnf reports "Nothing to do.".
+# shellcheck source=_lib.sh
 source "${STUB_DIR:?}/_lib.sh"
 stub_log "dnf $*"
 if [[ ${DNF_UPDATES:-0} -eq 1 ]]; then
