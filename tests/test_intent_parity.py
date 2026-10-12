@@ -9,6 +9,7 @@ removing only the intended changes:
 * the workstation audit policy files and the OpenSCAP tailoring
 * systemd-journal-upload disabled and the audit check timer enabled
 * the oneAPI description, which no longer mentions interactive partitioning
+* packages added to the components after the baseline (PACKAGES_ADDED)
 """
 import copy
 import re
@@ -20,11 +21,13 @@ from intent_helpers import EXAMPLES, ROOT
 
 BASELINE = ROOT / "goals" / "standalone-workstation-hardening" / "baseline"
 HARDENING_PATHS = {
-    "/etc/audit/auditd.conf", "/etc/syncopated/audit-warn.conf", "/usr/local/sbin/syncopated-audit-warn",
+    "/etc/audit/auditd.conf", "/etc/sysconfig/syncopated-audit-warn", "/usr/local/sbin/syncopated-audit-warn",
     "/usr/local/bin/syncopated-audit-notify", "/etc/xdg/autostart/syncopated-audit-notify.desktop",
     "/etc/systemd/system/syncopated-audit-check.service", "/etc/systemd/system/syncopated-audit-check.timer",
-    "/usr/local/bin/syncopated-scan", "/etc/syncopated/scan.conf", "/etc/cockpit/cockpit.conf",
+    "/usr/local/bin/syncopated-scan", "/etc/sysconfig/syncopated-scan", "/etc/cockpit/cockpit.conf",
 }
+# Component packages added after the baseline was rendered (b66940c).
+PACKAGES_ADDED = {"python3-passlib", "pykickstart"}
 DESCRIPTION_CHANGES = {
     "rocky-10-2-workstation-intel-oneapi-components":
         ("Rocky Linux Workstation 10.2 (Intel oneAPI, components, interactive partitioning)",
@@ -35,6 +38,8 @@ DESCRIPTION_CHANGES = {
 def comparable(doc, name, side):
     doc = copy.deepcopy(doc)
     cust = doc["customizations"]
+    if side == "new":
+        doc["packages"] = [p for p in doc["packages"] if p["name"] not in PACKAGES_ADDED]
     cust["installer"].pop("kickstart", None)
     cust.get("openscap", {}).pop("tailoring", None)
     cust["files"] = [f for f in cust["files"] if f["path"] not in HARDENING_PATHS]

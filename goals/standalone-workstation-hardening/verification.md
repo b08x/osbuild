@@ -29,7 +29,7 @@ Test commands: `python3 -m pytest tests`, `bats -r roles/osbuild/tests`
 | 6 | /var/log/audit separate nodev,nosuid,noexec; 4 GiB CIS/PCI, 10 GiB HIPAA | `filter_plugins/disk_layout.py`, `tasks/disk_layout.yml` | `test_layout_has_fixed_sizes_from_the_declared_disk`, `test_disk_sizing.py` | verified |
 | 7 | <25% free: journal warning, motd/Cockpit line, persistent GNOME notification for wheel at each login | `files/scripts/syncopated-audit-{warn,notify}.sh`, `files/hardening/*` | `roles/osbuild/tests/hardening/audit-warn.bats` (10 tests) | verified (scripts); GNOME session on hardware |
 | 8 | 48 h on the test laptop under cap, no halt | — | README "Acceptance: 48-hour burn-in" procedure | **hardware — not done** |
-| 13 | `syncopated-scan`: stock + tailored, HTML and ARF in /var/lib/syncopated/scans/<ts>/ | `files/scripts/syncopated-scan.sh`, `/etc/syncopated/scan.conf` | `test_syncopated_scan_reports_tailored_rules_as_not_selected` (real oscap run) | verified |
+| 13 | `syncopated-scan`: stock + tailored, HTML and ARF in /var/lib/syncopated/scans/<ts>/ | `files/scripts/syncopated-scan.sh`, `/etc/sysconfig/syncopated-scan` | `test_syncopated_scan_reports_tailored_rules_as_not_selected` (real oscap run) | verified |
 
 ## Remote logging
 

@@ -131,6 +131,7 @@
       - marker: syncopated-remote-logging
         title: Remote logging (systemd-journal-upload over mTLS)
         files: "{{ _osbuild_remote_logging_files | default([]) }}"
+        dirs: "{{ _osbuild_remote_logging_dirs | default([]) }}"
   block:
     - name: Assert injected files fit in TOML literal strings
       ansible.builtin.assert:
@@ -152,6 +153,7 @@
         _osbuild_inject_title: "{{ item.title }}"
         _osbuild_inject_source: hardening.yml
         _osbuild_inject_files: "{{ item.files }}"
+        _osbuild_inject_dirs: "{{ item.dirs | default([]) }}"
       loop: "{{ _osbuild_inject_blocks }}"
       loop_control:
         label: "{{ item.marker }}"

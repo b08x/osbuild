@@ -13,7 +13,7 @@
 # selected. Exit status 0 when both evaluations ran (rule failures included),
 # 1 on an error.
 #
-# Settings: /etc/syncopated/scan.conf (written by the osbuild role):
+# Settings: /etc/sysconfig/syncopated-scan (written by the osbuild role):
 #   DATASTREAM        SCAP source data stream
 #   PROFILE           stock profile ID
 #   TAILORING_FILES   candidate tailoring files written by image-builder
@@ -21,7 +21,7 @@
 #                     tailoring with autotailor when no candidate exists
 set -uo pipefail
 
-CONF=${SYNC_SCAN_CONF:-/etc/syncopated/scan.conf}
+CONF=${SYNC_SCAN_CONF:-/etc/sysconfig/syncopated-scan}
 OUT_ROOT=${SYNC_SCAN_DIR:-/var/lib/syncopated/scans}
 OSCAP=${SYNC_SCAN_OSCAP:-oscap}
 AUTOTAILOR=${SYNC_SCAN_AUTOTAILOR:-autotailor}

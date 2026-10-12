@@ -16,11 +16,11 @@
 #     starts. syncopated-audit-notify repeats it at every login.
 # At or above the threshold it removes those files again.
 #
-# Settings: /etc/syncopated/audit-warn.conf (WARN_FREE_PERCENT). The SYNC_*
+# Settings: /etc/sysconfig/syncopated-audit-warn (WARN_FREE_PERCENT). The SYNC_*
 # variables point paths elsewhere for tests.
 set -uo pipefail
 
-CONF=${SYNC_AUDIT_CONF:-/etc/syncopated/audit-warn.conf}
+CONF=${SYNC_AUDIT_CONF:-/etc/sysconfig/syncopated-audit-warn}
 AUDIT_DIR=${SYNC_AUDIT_DIR:-/var/log/audit}
 STATE=${SYNC_AUDIT_STATE:-/run/syncopated/audit-space-low}
 MOTD=${SYNC_AUDIT_MOTD:-/etc/motd.d/90-syncopated-audit}

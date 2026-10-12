@@ -13,7 +13,7 @@
 #   - /etc/audit/auditd.conf (templates/auditd.conf.j2): rotation within a
 #     fixed cap, no halt/single/suspend actions, warning script on low space
 #   - syncopated-audit-warn, its hourly timer and the GNOME login notifier
-#   - syncopated-scan and /etc/syncopated/scan.conf
+#   - syncopated-scan and /etc/sysconfig/syncopated-scan
 # Remote logging (osbuild_remote_logging.enabled) adds systemd-journal-upload
 # with mTLS; when off, the uploader stays disabled.
 
@@ -42,6 +42,7 @@
     _osbuild_bp_services_disabled: []
     _osbuild_hardening_files: []
     _osbuild_remote_logging_files: []
+    _osbuild_remote_logging_dirs: []
     _osbuild_journal_upload_pki: /etc/pki/syncopated/journal-upload
 
 - name: Prepare the workstation audit policy
@@ -85,7 +86,7 @@
           - path: /etc/audit/auditd.conf
             mode: "0640"
             content: "{{ lookup('ansible.builtin.template', 'auditd.conf.j2', rstrip=false) }}"
-          - path: /etc/syncopated/audit-warn.conf
+          - path: /etc/sysconfig/syncopated-audit-warn
             mode: "0644"
             content: "WARN_FREE_PERCENT={{ osbuild_audit_warn_free_percent | int }}\n"
           - path: /usr/local/sbin/syncopated-audit-warn
@@ -106,7 +107,7 @@
           - path: /usr/local/bin/syncopated-scan
             mode: "0755"
             content: "{{ lookup('ansible.builtin.file', 'scripts/syncopated-scan.sh', rstrip=false) }}"
-          - path: /etc/syncopated/scan.conf
+          - path: /etc/sysconfig/syncopated-scan
             mode: "0644"
             content: |
               # Written by the osbuild role (tasks/hardening.yml) for {{ osbuild_hardening }}.
@@ -160,6 +161,19 @@
         _osbuild_bp_packages: "{{ (_osbuild_bp_packages + ['systemd-journal-remote']) | unique | list }}"
         _osbuild_bp_services: >-
           {{ (_osbuild_bp_services + ['systemd-journal-upload', 'systemd-journald-audit.socket']) | unique | list }}
+
+    # No package creates these; osbuild's copy stage does not create parent
+    # directories, so the blueprint declares them.
+    - name: List the remote logging directories
+      ansible.builtin.set_fact:
+        _osbuild_remote_logging_dirs:
+          - path: /etc/systemd/journal-upload.conf.d
+            mode: "0755"
+          - path: /etc/systemd/system/systemd-journal-upload.service.d
+            mode: "0755"
+          - path: "{{ _osbuild_journal_upload_pki }}"
+            mode: "0700"
+            ensure_parents: true
 
     - name: List the remote logging files
       no_log: true

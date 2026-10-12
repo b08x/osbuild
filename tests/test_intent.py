@@ -8,6 +8,7 @@ import re
 import shutil
 import stat
 import subprocess
+from pathlib import Path
 
 import jsonschema
 import pytest
@@ -341,13 +342,36 @@ def test_warning_and_scan_tools_are_installed(generated, example):
     assert g.file("/etc/systemd/system/syncopated-audit-check.timer")
     assert "syncopated-audit-check.timer" in g.customizations["services"]["enabled"]
     assert g.file("/usr/local/bin/syncopated-scan")["mode"] == "0755"
-    scan = g.file("/etc/syncopated/scan.conf")["data"]
+    scan = g.file("/etc/sysconfig/syncopated-scan")["data"]
     assert f"PROFILE={g.customizations['openscap']['profile_id']}" in scan
     assert "DATASTREAM=/usr/share/xml/scap/ssg/content/ssg-rhel10-ds.xml" in scan
     assert g.file("/etc/cockpit/cockpit.conf")["data"].endswith("Banner=/etc/cockpit/issue.cockpit\n")
     for f in g.customizations["files"]:
         assert f["path"].startswith(("/etc/", "/usr/local/bin/", "/usr/local/sbin/")), \
             f"{f['path']} is outside image-builder's allowed custom file paths"
+
+
+# osbuild's copy stage does not create parent directories, and its mkdir stage
+# fails on one that exists: a file goes into a directory a package creates, or
+# into one the blueprint declares in [[customizations.directories]].
+PACKAGE_DIRS = {
+    "/etc", "/etc/audit", "/etc/cockpit", "/etc/dnf", "/etc/flatpak/remotes.d",
+    "/etc/sysconfig", "/etc/systemd/system", "/etc/xdg/autostart",
+    "/etc/yum.repos.d", "/usr/local/bin", "/usr/local/sbin",
+}
+
+
+def assert_file_parents_exist(g):
+    declared = {d["path"] for d in g.customizations.get("directories", [])}
+    assert not declared & PACKAGE_DIRS, "declared directories a package already creates"
+    for f in g.customizations["files"]:
+        parent = str(Path(f["path"]).parent)
+        assert parent in PACKAGE_DIRS | declared, f"{f['path']}: nothing creates {parent}"
+
+
+@pytest.mark.parametrize("example", HARDENED)
+def test_injected_files_have_existing_parent_directories(generated, example):
+    assert_file_parents_exist(generated[example])
 
 
 def test_unhardened_builds_have_no_audit_policy(generated):
@@ -398,6 +422,12 @@ def test_remote_logging_on_is_one_switch(tmp_path):
     assert g.file("/etc/pki/syncopated/journal-upload/ca.pem")["data"] == PEM
     key = g.file("/etc/pki/syncopated/journal-upload/client.key")
     assert key["data"] == KEY and key["mode"] == "0600"
+    dirs = {d["path"]: d for d in g.customizations["directories"]}
+    assert dirs["/etc/pki/syncopated/journal-upload"]["mode"] == "0700"
+    assert dirs["/etc/pki/syncopated/journal-upload"]["ensure_parents"] is True
+    assert {"/etc/systemd/journal-upload.conf.d",
+            "/etc/systemd/system/systemd-journal-upload.service.d"} <= set(dirs)
+    assert_file_parents_exist(g)
     # the key is only in the 0600 blueprint, never in the play output
     assert "MIIBfakekey" not in g.log
 
