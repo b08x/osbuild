@@ -11,11 +11,13 @@ A *target* is one <distro>/<major>/<arch> directory (for example
 file. Comments, key order and the order of existing packages stay as they are;
 new packages are appended.
 
-Commands (``--target`` is required except for ``search``):
+Commands (``--target`` is required except for ``search`` and
+``add --all-targets``):
 
     list   --target T
     search NAME [--target T]
     add    --target T COMPONENT PKG... [--verify] [--force]
+    add    --all-targets COMPONENT PKG... [--verify] [--force]
     remove --target T COMPONENT PKG...
     verify --target T [COMPONENT]
     playbook PLAYBOOK list|add|remove [COMPONENT...] [--target T] [--after C]
@@ -493,6 +495,29 @@ def cli_add(
     return 1 if refused else 0
 
 
+def cli_add_all(
+    stores: Dict[str, ComponentStore],
+    component: str,
+    packages: Sequence[str],
+    verify: bool = False,
+    force: bool = False,
+) -> int:
+    """Add packages to ``component`` in every target that has it.
+
+    Targets without the component are skipped with a warning. Returns the
+    highest cli_add exit code, or 2 when no target has the component.
+    """
+    for name in packages:
+        validate_package_name(name)
+    having = {t: s for t, s in stores.items() if component in s.names()}
+    for target in stores:
+        if target not in having:
+            _say("warn", f"{target} has no component '{component}'; skipped")
+    if not having:
+        raise TrackerError(f"No target has a component '{component}'")
+    return max(cli_add(store, target, component, packages, verify, force) for target, store in having.items())
+
+
 def cli_remove(store: ComponentStore, target: str, component: str, packages: Sequence[str]) -> int:
     removed, absent = store.remove(component, [validate_package_name(p) for p in packages])
     for name in removed:
@@ -533,14 +558,18 @@ def cli_verify(store: ComponentStore, target: str, component: Optional[str] = No
 # Playbook component selection
 # =============================================================================
 
-_COMPONENTS_KEY = re.compile(r"^(?P<indent>\s*)osbuild_blueprint_components:\s*(?:#.*)?$")
-_DISTRO_LINE = re.compile(r"""^\s*osbuild_distro:\s*["']?(?P<distro>[a-z]+)-(?P<ver>\d+)""", re.M)
-_ARCH_LINE = re.compile(r"""^\s*osbuild_arch:\s*["']?(?P<arch>[\w]+)""", re.M)
+# Playbooks name the list osbuild_blueprint_components; build intents
+# (profiles/*.yml, schema/intent.schema.json) name it components.
+_COMPONENTS_KEY = re.compile(r"^(?P<indent>\s*)(?:osbuild_blueprint_)?components:\s*(?:#.*)?$")
+_DISTRO_LINE = re.compile(r"""^\s*(?:osbuild_)?distro:\s*["']?(?P<distro>[a-z]+)-(?P<ver>\d+)""", re.M)
+_ARCH_LINE = re.compile(r"""^\s*(?:osbuild_)?arch:\s*["']?(?P<arch>[\w]+)""", re.M)
 _NAME_ITEM = re.compile(r"^(?P<indent>\s*)-\s+(?P<name>[A-Za-z0-9][\w.-]*)\s*(?:#.*)?$")
 
 
 class PlaybookSelection:
-    """The ``osbuild_blueprint_components`` block list of one playbook file.
+    """The component block list of one playbook or build intent file.
+
+    ``osbuild_blueprint_components`` in a playbook, ``components`` in an intent.
 
     Edits touch only that list's item lines; everything else stays byte for byte.
     """
@@ -550,7 +579,7 @@ class PlaybookSelection:
         self.lines = self.path.read_text().split("\n")
         self._start = next((i for i, l in enumerate(self.lines) if _COMPONENTS_KEY.match(l)), None)
         if self._start is None:
-            raise TrackerError(f"{self.path}: no 'osbuild_blueprint_components:' block list found")
+            raise TrackerError(f"{self.path}: no 'osbuild_blueprint_components:' or 'components:' block list found")
         self._items = self._scan()
         if not self._items:
             raise TrackerError(f"{self.path}: osbuild_blueprint_components is not a block list of names")
@@ -765,11 +794,14 @@ def tui_playbook(targets: Dict[str, Path], root: Path) -> None:
     playbooks = sorted(
         p for p in (root / "playbooks").glob("*.yml")
         if "osbuild_blueprint_components:" in p.read_text() and not p.name.endswith("osbuild.yml")
+    ) + sorted(
+        p for p in [*(root / "profiles").glob("*.yml"), *(root / "profiles" / "examples").glob("*.yml")]
+        if re.search(r"(?m)^\s+components:", p.read_text())
     )
     if not playbooks:
         _say("warn", "No playbook with a component list found")
         return
-    choices = [Choice(p.name, value=str(p)) for p in playbooks] + [Separator(), Choice("Back", value=_BACK)]
+    choices = [Choice(str(p.relative_to(root)), value=str(p)) for p in playbooks] + [Separator(), Choice("Back", value=_BACK)]
     picked = questionary.select("Choose a playbook:", choices=choices).ask()
     if picked is None or picked == _BACK:
         return
@@ -863,6 +895,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("packages", nargs="+", metavar="PKG")
     p.add_argument("--verify", action="store_true", help="Check each package against the target's repos first")
     p.add_argument("--force", action="store_true", help="Add packages that another component already has")
+    p.add_argument(
+        "--all-targets",
+        action="store_true",
+        help="Add to COMPONENT in every target that has it (instead of --target)",
+    )
     p = sub.add_parser("remove", help="Remove packages from a component")
     target_arg(p)
     p.add_argument("component")
@@ -871,7 +908,7 @@ def build_parser() -> argparse.ArgumentParser:
     target_arg(p)
     p.add_argument("component", nargs="?")
     p = sub.add_parser("playbook", help="List, add or remove the components a playbook builds from")
-    p.add_argument("path", type=Path, help="Playbook file, e.g. playbooks/osbuild-rocky-iso-components.yml")
+    p.add_argument("path", type=Path, help="Playbook or intent file, e.g. profiles/examples/rocky-10-2-workstation-components.yml")
     p.add_argument("action", choices=["list", "add", "remove"])
     p.add_argument("components", nargs="*", metavar="COMPONENT")
     p.add_argument("--target", help="Override the target derived from the playbook's osbuild_distro")
@@ -903,6 +940,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if args.action != "list" and not args.components:
                 parser.error(f"playbook {args.action} needs at least one COMPONENT")
             return cli_playbook(targets, args.path, args.action, args.components, args.target, args.after)
+
+        if args.command == "add" and args.all_targets:
+            if args.target:
+                parser.error("add: --target and --all-targets are mutually exclusive")
+            return cli_add_all(stores, args.component, parse_packages(args.packages), args.verify, args.force)
 
         target = resolve_target(targets, args.target)
         store = stores[target]

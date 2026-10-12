@@ -11,25 +11,25 @@
 #   - Use https:// URLs for keys not bundled (fetched at build time by repo_keys.yml)
 #   - Omit gpgkey_url for repos with check_gpg: false
 
-repo:
+osbuild_repo:
   almalinux-baseos:
-    metalink: "https://mirrors.almalinux.org/metalink?repo=baseos-{{ _distro_version }}&arch={{ osbuild_arch }}"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-{{ _distro_major_version }}"
+    metalink: "https://mirrors.almalinux.org/metalink?repo=baseos-{{ _osbuild_distro_version }}&arch={{ osbuild_arch }}"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   almalinux-appstream:
-    metalink: "https://mirrors.almalinux.org/metalink?repo=appstream-{{ _distro_version }}&arch={{ osbuild_arch }}"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-{{ _distro_major_version }}"
+    metalink: "https://mirrors.almalinux.org/metalink?repo=appstream-{{ _osbuild_distro_version }}&arch={{ osbuild_arch }}"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   almalinux-crb:
-    metalink: "https://mirrors.almalinux.org/metalink?repo=crb-{{ _distro_version }}&arch={{ osbuild_arch }}"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-{{ _distro_major_version }}"
+    metalink: "https://mirrors.almalinux.org/metalink?repo=crb-{{ _osbuild_distro_version }}&arch={{ osbuild_arch }}"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/alma/RPM-GPG-KEY-AlmaLinux-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   # EPEL publishes major-version trees only (/epel/9/, /epel/10/) — with a
   # point-release osbuild_distro like almalinux-10.2 the major-only form is
   # required (verified: /epel/10/ 200, /epel/10.2/ 404, 2026-10-01).
   epel:
-    baseurl: "https://mirror.us.leaseweb.net/epel/{{ _distro_major_version }}/Everything/{{ osbuild_arch }}/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/epel/RPM-GPG-KEY-EPEL-{{ _distro_major_version }}"
+    baseurl: "https://mirror.us.leaseweb.net/epel/{{ _osbuild_distro_major_version }}/Everything/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/epel/RPM-GPG-KEY-EPEL-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   # RPM Fusion for EL only publishes an "updates" channel — el/releases/10
   # and el/nvidia-driver/10 both 404 upstream, so those repos are omitted
@@ -38,23 +38,23 @@ repo:
   # use the "-el-<major>" naming from distribution-gpg-keys, not Fedora's
   # "-fedora-2020" keys.
   rpmfusion-free-updates:
-    baseurl: "http://download1.rpmfusion.org/free/el/updates/{{ _distro_major_version }}/{{ osbuild_arch }}/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-el-{{ _distro_major_version }}"
+    baseurl: "http://download1.rpmfusion.org/free/el/updates/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-el-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   rpmfusion-nonfree-updates:
-    baseurl: "http://download1.rpmfusion.org/nonfree/el/updates/{{ _distro_major_version }}/{{ osbuild_arch }}/"
-    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-el-{{ _distro_major_version }}"
+    baseurl: "http://download1.rpmfusion.org/nonfree/el/updates/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/"
+    gpgkey_url: "file:///usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-nonfree-el-{{ _osbuild_distro_major_version }}"
     check_gpg: true
   cuda-el10-x86_64:
-    baseurl: "https://developer.download.nvidia.com/compute/cuda/repos/rhel{{ _distro_major_version }}/{{ osbuild_arch }}"
-    gpgkey_url: "https://developer.download.nvidia.com/compute/cuda/repos/rhel{{ _distro_major_version }}/{{ osbuild_arch }}/CDF6BA43.pub"
+    baseurl: "https://developer.download.nvidia.com/compute/cuda/repos/rhel{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}"
+    gpgkey_url: "https://developer.download.nvidia.com/compute/cuda/repos/rhel{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/CDF6BA43.pub"
     check_gpg: true
   nvidia-container-toolkit:
     baseurl: "https://nvidia.github.io/libnvidia-container/stable/rpm/{{ osbuild_arch }}"
     gpgkey_url: "https://nvidia.github.io/libnvidia-container/gpgkey"
     check_gpg: true
   docker-ce-stable:
-    baseurl: "https://download.docker.com/linux/centos/{{ _distro_major_version }}/{{ osbuild_arch }}/stable"
+    baseurl: "https://download.docker.com/linux/centos/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/stable"
     gpgkey_url: "https://download.docker.com/linux/centos/gpg"
     check_gpg: true
   vscode:

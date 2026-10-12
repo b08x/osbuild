@@ -16,7 +16,7 @@
 # See trackboi card card-should-refactor-gpgkeys-to-runtime-url-fetch-eli-1snigie
 # for the URL verification log and the distribution-gpg-keys package inventory.
 
-repo:
+osbuild_repo:
   fedora:
     metalink: "https://mirrors.fedoraproject.org/metalink?repo=fedora-43&arch=x86_64"
     gpgkey_url: "file:///usr/share/distribution-gpg-keys/fedora/RPM-GPG-KEY-fedora-43-primary"

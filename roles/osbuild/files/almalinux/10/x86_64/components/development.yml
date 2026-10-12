@@ -32,3 +32,4 @@ packages:
   - "python3-jupyterlab_pygments"
   - "python3-ipykernel"
   - "python3-nbconvert"
+  - "pykickstart"

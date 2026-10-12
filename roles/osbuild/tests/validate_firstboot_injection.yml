@@ -16,6 +16,9 @@
     _composed_distro: "fedora-43"
     _composed_components: [base, anaconda]
     _out_dir: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/osbuild-firstboot-validate"
+    # The injected kickstart needs users and a declared disk.
+    osbuild_users: [{ name: tester, gecos: "Firstboot Tester" }]
+    osbuild_disk_size_gib: 476
   tasks:
     - name: Reset output dir
       ansible.builtin.file:
@@ -29,11 +32,11 @@
         paths: "{{ _role_dir }}/files"
         patterns: "*.toml"
         recurse: true
-      register: _static
+      register: _osbuild_test_static
 
     - name: Keep only workstation blueprints
       ansible.builtin.set_fact:
-        _static_paths: "{{ _static.files | map(attribute='path') | select('search', '/workstation/') | sort }}"
+        _osbuild_test_static_paths: "{{ _osbuild_test_static.files | map(attribute='path') | select('search', '/workstation/') | sort }}"
 
     - name: Prepare each static blueprint twice
       ansible.builtin.include_role:
@@ -43,13 +46,14 @@
         osbuild_output_dir: "{{ _out_dir }}"
         osbuild_static_blueprint_path: "{{ item.0 }}"
         osbuild_blueprint_name: "{{ item.0 | basename | splitext | first }}"
-      loop: "{{ _static_paths | product([1, 2]) | list }}"
+      loop: "{{ _osbuild_test_static_paths | product([1, 2]) | list }}"
       loop_control:
         label: "{{ item.0 | basename }} (run {{ item.1 }})"
 
     - name: Load distribution repository variables
       ansible.builtin.include_vars:
-        file: "{{ _role_dir }}/vars/{{ ansible_distribution }}.yml"
+        # The build-host vars; any supported one serves a non-RedHat controller.
+        file: "{{ lookup('ansible.builtin.first_found', [_role_dir ~ '/vars/' ~ ansible_distribution ~ '.yml', _role_dir ~ '/vars/Fedora.yml']) }}"
 
     - name: Load the component files for the composed blueprint
       ansible.builtin.include_role:
@@ -80,10 +84,10 @@
           - "{{ _role_dir }}/tests/firstboot/check_injection.py"
           - "{{ _out_dir }}"
           - "{{ _role_dir }}/files/firstboot"
-          - "{{ _static_paths | length + 1 }}"
-      register: _check
+          - "{{ _osbuild_test_static_paths | length + 1 }}"
+      register: _osbuild_test_check
       changed_when: false
 
     - name: Show check result
       ansible.builtin.debug:
-        var: _check.stdout_lines
+        var: _osbuild_test_check.stdout_lines

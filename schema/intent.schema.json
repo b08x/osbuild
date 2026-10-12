@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/syncopatedX/osbuild/schema/intent.schema.json",
+  "title": "Syncopated build intent, version 1",
+  "description": "One installer ISO for one workstation. Pass the file with `ansible-playbook playbooks/build.yml -e @profiles/<name>.yml`; the file holds a single top-level key, `intent`. playbooks/build.yml validates it against this schema before any other task.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "distro", "arch", "hostname", "components", "hardening", "disk", "users", "locale"],
+  "properties": {
+    "version": {
+      "description": "Intent schema version.",
+      "const": 1
+    },
+    "name": {
+      "description": "Blueprint name: the outputs are <name>.toml, build-<name>.sh, <name>.credentials.txt and <name>-<commit>.iso.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+    },
+    "description": {
+      "description": "Blueprint description.",
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^[^\"\\\\\\n]*$"
+    },
+    "distro": {
+      "description": "Target distribution as `image-builder list` names it (point releases for EL).",
+      "type": "string",
+      "pattern": "^(rocky-(9|10)\\.[0-9]+|almalinux-(9|10)\\.[0-9]+|fedora-[0-9]+)$"
+    },
+    "arch": {
+      "type": "string",
+      "enum": ["x86_64"]
+    },
+    "hostname": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "components": {
+      "description": "Hardware and software stack: names of roles/osbuild/files/<distro>/<major>/<arch>/components/<name>.yml. The hardening profile adds its openscap-* component itself.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?!openscap-)[a-z0-9][a-z0-9-]*$"
+      }
+    },
+    "hardening": {
+      "description": "OpenSCAP profile applied at build time with the workstation tailoring, or none.",
+      "type": "string",
+      "enum": ["none", "cis-l2-workstation", "pci-dss", "hipaa"]
+    },
+    "disk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["size_gib"],
+      "properties": {
+        "size_gib": {
+          "description": "Declared size of the target disk in GiB (1 GiB = 1024^3 bytes; a 512 GB disk is 476 GiB). Volume sizes are computed from it; a smaller disk aborts the install, a larger one gives the surplus to /home.",
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 65536
+        },
+        "encrypt": {
+          "description": "LUKS on the physical volume. The installer then asks for the passphrase (the only prompt).",
+          "type": "boolean",
+          "default": false
+        },
+        "tmp": {
+          "description": "/tmp in the hardened layout: tmpfs, or an 8 GiB volume (lv).",
+          "type": "string",
+          "enum": ["tmpfs", "lv"],
+          "default": "tmpfs"
+        },
+        "serial": {
+          "description": "When set, the install aborts unless the selected disk has this serial (lsblk -dno SERIAL).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        }
+      }
+    },
+    "users": {
+      "description": "Users the installer creates. Each gets the initial password (osbuild_initial_password, default \"syncopated\"; changed at first login) and the groups wheel + the components' user_groups + groups.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "gecos"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+            "not": {"enum": ["root", "bin", "daemon", "adm", "nobody"]}
+          },
+          "gecos": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[^\"':,\\\\\\n]*$"
+          },
+          "groups": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
+            "default": []
+          },
+          "uid": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000
+          },
+          "ssh_pubkey": {
+            "type": "string",
+            "pattern": "^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\\.com) [A-Za-z0-9+/=]+( [^\"\\\\\\n]*)?$"
+          }
+        }
+      }
+    },
+    "password_min_length": {
+      "description": "Minimum password length that the hardening profile enforces (pam_pwquality minlen; SSG variable var_password_pam_minlen). Defaults to the profile's value: 14 for CIS, 12 for PCI-DSS. Only cis-l2-workstation and pci-dss check it.",
+      "type": "integer",
+      "minimum": 6,
+      "maximum": 64
+    },
+    "root": {
+      "description": "Root account. Locked by default (administration through sudo). enabled: true gives root the users' initial password (changed at first login).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false}
+      }
+    },
+    "locale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["language", "keyboard", "timezone"],
+      "properties": {
+        "language": {"type": "string", "pattern": "^[A-Za-z]{2,3}(_[A-Z]{2})?(\\.[A-Za-z0-9-]+)?(@[a-z]+)?$"},
+        "keyboard": {"type": "string", "pattern": "^[A-Za-z0-9_-]+(\\([A-Za-z0-9_-]+\\))?$"},
+        "timezone": {"type": "string", "pattern": "^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$"}
+      }
+    },
+    "remote_logging": {
+      "description": "Ship the journal (audit events included) to a log host with systemd-journal-upload over mTLS. Off by default; the workstation never depends on the log host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false},
+        "url": {"type": "string", "pattern": "^https://[^/\\s\"]+(/[^\\s\"]*)?$"},
+        "ca_cert": {"type": "string", "minLength": 1, "description": "PEM text or a path to a PEM file on the controller."},
+        "client_cert": {"type": "string", "minLength": 1, "description": "PEM text or a path to a PEM file on the controller."},
+        "client_key": {"type": "string", "minLength": 1, "description": "PEM text or a path to a PEM file on the controller."}
+      },
+      "if": {"properties": {"enabled": {"const": true}}},
+      "then": {"required": ["url", "ca_cert", "client_cert", "client_key"]}
+    },
+    "extra_packages": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^@?[A-Za-z0-9][A-Za-z0-9._+-]*$"},
+      "default": []
+    },
+    "package_pins": {
+      "description": "Version expression per package name, e.g. {python3: \"3.12.*\"}.",
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"},
+      "additionalProperties": {"type": "string", "pattern": "^[A-Za-z0-9.*:~^_+-]+$"},
+      "default": {}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"hardening": {"enum": ["cis-l2-workstation", "pci-dss", "hipaa"]}},
+        "required": ["hardening"]
+      },
+      "then": {
+        "properties": {"distro": {"pattern": "^rocky-10\\.[0-9]+$"}}
+      }
+    }
+  ]
+}

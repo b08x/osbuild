@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT-0
+---
+# The generated user passwords are hashed with passlib on the controller.
+# tasks/intent.yml runs this right after validating the intent, so a missing
+# passlib stops the play before any build-host work; tasks/credentials.yml
+# runs it again for callers that skip the intent.
+
+- name: Check that passlib is available on the controller
+  ansible.builtin.command:
+    argv: ["{{ osbuild_controller_python }}", "-c", "import passlib"]
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: _osbuild_passlib
+
+- name: Assert passlib is installed
+  ansible.builtin.assert:
+    that: _osbuild_passlib.rc == 0
+    fail_msg: >-
+      passlib is not importable by {{ osbuild_controller_python }} on the
+      controller; it is needed to hash the generated user passwords.
+      Install it (dnf install python3-passlib, or pip install passlib)
+      and run the play again.
+    quiet: true

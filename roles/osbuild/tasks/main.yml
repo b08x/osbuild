@@ -89,6 +89,12 @@
   tags:
     - always
 
+- name: Prepare the audit policy and remote logging
+  ansible.builtin.import_tasks: hardening.yml
+  when: osbuild_blueprint_components | length > 0
+  tags:
+    - always
+
 - name: Phase 1 - Infrastructure Setup
   tags:
     - always
@@ -138,7 +144,7 @@
 
     - name: Set build status to finished
       ansible.builtin.set_fact:
-        build_status: "FINISHED"
+        _osbuild_build_status: "FINISHED"
       tags:
         - always
 
@@ -156,7 +162,8 @@
       ansible.builtin.template:
         src: image-builder-build.sh.j2
         dest: "{{ osbuild_output_dir }}/build-{{ osbuild_blueprint_name }}.sh"
-        mode: "0755"
+        mode: "{{ osbuild_output_mode }}"
+        owner: "{{ osbuild_output_owner | default('', true) or omit }}"
 
     - name: Display configuration-only mode
       ansible.builtin.debug:
@@ -176,7 +183,7 @@
 
     - name: Set build status to generated
       ansible.builtin.set_fact:
-        build_status: "GENERATED"
+        _osbuild_build_status: "GENERATED"
       tags:
         - always
 
@@ -201,7 +208,7 @@
         - compose
 
     - name: Build retry logic
-      when: osbuild_build_retries | int > 0 and build_status != "FINISHED"
+      when: osbuild_build_retries | int > 0 and _osbuild_build_status != "FINISHED"
       block:
         - name: Wait before retry
           ansible.builtin.pause:
@@ -217,9 +224,28 @@
 
     - name: Set build status to finished
       ansible.builtin.set_fact:
-        build_status: "FINISHED"
+        _osbuild_build_status: "FINISHED"
       tags:
         - always
+
+# Shown once; the same passwords are in the 0600 credentials file.
+- name: Display the temporary user passwords
+  ansible.builtin.debug:
+    msg: |
+      Initial passwords for {{ osbuild_blueprint_name }} (also in
+      {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.credentials.txt, mode 0600).
+      Each user must choose a new password at first login; {{ 'so must root.' if osbuild_root_enabled | bool else 'root is locked.' }}
+      {% for u in _osbuild_users %}
+        {{ u.name }}: {{ _osbuild_user_passwords[u.name] }}
+      {% endfor %}
+      {% if osbuild_root_enabled | bool %}
+        root: {{ _osbuild_root_password }}
+      {% endif %}
+  when:
+    - _osbuild_users | default([]) | length > 0
+    - _osbuild_build_status | default('') in ['GENERATED', 'FINISHED']
+  tags:
+    - always
 
 - name: Display completion summary
   ansible.builtin.debug:
@@ -229,9 +255,9 @@
       ╚════════════════════════════════════════════════════════════════╝
 
       Blueprint: {{ osbuild_blueprint_name }}
-      Status: {{ build_status | default('UNKNOWN') }}
+      Status: {{ _osbuild_build_status | default('UNKNOWN') }}
 
-      {% if build_status == 'FINISHED' %}
+      {% if _osbuild_build_status == 'FINISHED' %}
       Image Location: {{ osbuild_output_dir }}/{{ osbuild_output_filename }}
 
       Verification Steps:
@@ -249,7 +275,7 @@
          sudo dd if={{ osbuild_output_dir }}/{{ osbuild_output_filename }} \
            of=/dev/sdX bs=4M status=progress oflag=sync
 
-      {% elif build_status == 'GENERATED' %}
+      {% elif _osbuild_build_status == 'GENERATED' %}
       Configuration ready in: {{ osbuild_output_dir }}
       Blueprint: {{ osbuild_output_dir }}/{{ osbuild_blueprint_name }}.toml
 

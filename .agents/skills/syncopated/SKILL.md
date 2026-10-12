@@ -1,13 +1,20 @@
 ---
 name: syncopated
-description: Builder agent for custom OS appliances and container images. Generates an osbuild-role playbook (plus a static blueprint or blueprint components when needed) that writes a blueprint and build-<name>.sh, then verifies both without building.
+description: Builder agent for custom OS appliances and container images. For installer ISOs it writes an intent file under profiles/ (validated against schema/intent.schema.json) and runs playbooks/build.yml; for containers and bootc images it writes an osbuild-role playbook. Generates the blueprint and build-<name>.sh, then verifies both without building.
 ---
 
 # Syncopated Appliance Builder Skill
 
-Turn a natural-language appliance request into a playbook for the `osbuild`
+Turn a natural-language appliance request into the input of the `osbuild`
 role (`roles/osbuild/`), verified to the point where the user only has to run
 the generated build script.
+
+- **Installer ISO** (any workstation): write an **intent file**
+  `profiles/<name>.yml` and run `ansible-playbook playbooks/build.yml -e
+  @profiles/<name>.yml`. Never write a per-variant ISO playbook; those were
+  retired. Never set role variables (`osbuild_*`) in an intent.
+- **Application container, bootc image, qcow2**: write or adapt a playbook
+  (`playbooks/osbuild-rocky-cuda-container.yml`, `playbooks/osbuild.yml`).
 
 Repository facts:
 
@@ -18,155 +25,173 @@ Repository facts:
   alternative. This skill targets `roles/osbuild/` only.
 - Package data: the component files in
   `roles/osbuild/files/<distro>/<major>/<arch>/components/*.yml`, selected by
-  `osbuild_blueprint_components` and resolved for the *target* distro
-  (`osbuild_target_distribution`, derived from `osbuild_distro`). Edit them
-  with `scripts/package_tracker.py` (`list|search|add|remove|verify|tui`).
+  an intent's `components` (or a playbook's `osbuild_blueprint_components`)
+  and resolved for the *target* distro. Edit them with
+  `scripts/package_tracker.py` (`list|search|add|remove|verify|playbook|tui`).
+- `profiles/` is gitignored except `profiles/examples/`. User intents are
+  local files; do not commit them unless asked, and never commit one with
+  remote logging keys inline.
 
 ## 1. Clarify (AskUserQuestion, max 3 questions)
 
-Ask only what changes the playbook; skip anything the request already states.
+Ask only what changes the intent; skip anything the request already states.
 Resolve these, in priority order:
 
 - **Image kind.** "Container" is ambiguous — always ask:
-  - *application container* → image-builder type `container` (OCI archive, no kernel, no driver);
-  - *bootc OS image* → `osbuild_build_bootc: true` (Rocky bootc is unverified, say so).
-  - Installer ISO → `image-installer` (EL) / `minimal-installer` (Fedora). VM → `qcow2`.
+  - *application container* → playbook, image-builder type `container` (OCI archive, no kernel, no driver);
+  - *bootc OS image* → playbook, `osbuild_build_bootc: true` (Rocky bootc is unverified, say so).
+  - Installer ISO → intent. VM image (`qcow2`) → playbook.
 - **Distro + version** as `image-builder list` names it (`rocky-10.2`,
-  `almalinux-10.2`, `fedora-43`; not `rocky-10`).
-- **Hardware/stack** (NVIDIA/CUDA, audio, desktop) and its package scope
-  (e.g. full `cuda-toolkit` vs runtime libraries).
-- **Disk layout** (ISO only): `auto` (`%pre` vg00 layout) or `interactive`
-  (Anaconda Installation Destination).
+  `almalinux-10.2`, `fedora-43`; not `rocky-10`). Hardening needs `rocky-10.x`.
+- **Hardware/stack** (NVIDIA/CUDA, Intel oneAPI, audio, desktop) → components.
+- **ISO only:** hardening profile (`none`, `cis-l2-workstation`, `pci-dss`,
+  `hipaa`), disk size in GiB (a "512 GB" disk is 476 GiB, "1 TB" is 931 GiB —
+  declare at most the real size, or the install aborts), LUKS (`disk.encrypt`
+  makes the passphrase the one installer prompt), the user name.
 
 Default to generate-only: the role writes files, the user runs the build.
 
-## 2. Pick the closest existing playbook and copy its structure
+## 2. Installer ISO: write the intent
+
+1. Copy the closest example from `profiles/examples/` to `profiles/<name>.yml`:
+
+   | Need | Example |
+   |------|---------|
+   | Rocky 10.2 workstation | `rocky-10-2-workstation-components.yml` |
+   | …with NVIDIA/CUDA | `rocky-10-2-workstation-nvidia-components.yml` |
+   | …with Intel GPU compute + oneAPI | `rocky-10-2-workstation-intel-oneapi-components.yml` |
+   | …hardened (CIS L2 / PCI-DSS / HIPAA) | `rocky-10-2-workstation-openscap-<profile>.yml` |
+   | …NVIDIA + CIS | `rocky-10-2-workstation-nvidia-openscap-cis-l2-workstation.yml` |
+   | AlmaLinux 10.2 (± NVIDIA) | `almalinux-10-2-workstation{,-nvidia}.yml` |
+
+2. Edit only intent fields (`schema/intent.schema.json`, additionalProperties
+   false — a typo fails validation):
+
+   ```yaml
+   intent:
+     version: 1
+     name: studio-gx            # outputs <name>.toml, build-<name>.sh, <name>.credentials.txt
+     description: "..."         # optional
+     distro: rocky-10.2
+     arch: x86_64
+     hostname: studio-gx
+     components: [base, anaconda, gnome-desktop, ..., nvidia]   # never openscap-*
+     hardening: cis-l2-workstation    # none | cis-l2-workstation | pci-dss | hipaa
+     password_min_length: 9   # optional; CIS/PCI only (default 14 / 12)
+     disk:
+       size_gib: 931            # declared target disk size (GiB)
+       encrypt: false           # true: LUKS, the installer asks the passphrase
+       tmp: tmpfs               # tmpfs | lv (hardened layout)
+       serial: S5GXNF0R123      # optional: abort unless the disk has this serial
+     users:
+       - name: ada
+         gecos: "Ada Lovelace"
+         groups: [audio]        # optional; wheel + component user_groups are added
+         uid: 1500              # optional
+         ssh_pubkey: "ssh-ed25519 AAAA... ada@laptop"   # optional
+     locale: {language: en_US.UTF-8, keyboard: us, timezone: America/New_York}
+     root: {enabled: false}             # true: root gets the initial password too
+     remote_logging: {enabled: false}   # or enabled: true + url, ca_cert, client_cert, client_key
+     extra_packages: []         # one-off packages for this machine
+     package_pins: {}           # {pkg: "1.2.*"}
+   ```
+
+3. Components: the names in `files/<target>/<major>/<arch>/components/`.
+   All four targets (`rocky/10`, `rocky/9`, `almalinux/10`, `fedora/43`)
+   share `base anaconda gnome-desktop fonts audio multimedia google-chrome
+   vscode intel-graphics development containers-virt cockpit nvidia`; Rocky 10
+   adds `gui-toolkit intel-oneapi cuda-container`; Rocky 10 and AlmaLinux 10
+   add `syncopated`; Fedora 43 adds `sway`. `python3 scripts/package_tracker.py
+   playbook profiles/<name>.yml list|add|remove <component>` edits the list in
+   place.
+
+### What the role derives (never put these in an intent)
+
+The former hard rules are enforced in the role; an intent cannot set them:
+
+- `openscap-<profile>` component, compliant disk layout, audit volume size
+  (4 GiB CIS/PCI, 10 GiB HIPAA) and the workstation audit tailoring follow
+  `hardening`.
+- `/usr` is 80 GiB when `nvidia` or `cuda-container` is selected.
+- Extra repositories come from the components' `repo_urls` only
+  (`osbuild_sources` is emptied for intents; the build host's repo list never
+  reaches another distro's compose). Rocky CRB, Plus and RT are in the Rocky
+  `base` components.
+- `[[customizations.repositories]]` only writes `.repo` files into the image;
+  depsolve uses `--extra-repo` (component `repo_urls`). A package from a new
+  repo needs both (component `repo_urls` + a fragment `[[customizations.repositories]]`).
+- No `[[customizations.user]]`/`[[customizations.group]]`/`unattended`/
+  `sudo-nopasswd` in any blueprint next to the kickstart (asserted). Users come
+  from the intent through kickstart `user` lines.
+- Image type: `image-installer` (EL), `minimal-installer` (Fedora).
+- Output name: `<name>-<commit>.iso` (the `-dirty` suffix marks uncommitted changes).
+
+### What the generated ISO does (to explain in the report)
+
+- Install asks nothing (LUKS passphrase only with `disk.encrypt`). The %pre
+  picks the disk (no install media/removable/read-only/USB; NVMe first, then
+  largest), checks `disk.serial`, aborts if the disk is smaller than
+  `disk.size_gib`, then counts down 30 s on tty8 naming model, serial and
+  size — any key aborts. Volume sizes are fixed in the kickstart, computed at
+  generation (`filter_plugins/disk_layout.py`); a larger disk's surplus goes to `/home`.
+- Root locked unless `root: {enabled: true}`. Users (and an enabled root) get
+  the initial password `syncopated` (`osbuild_initial_password`; SHA-512 hash
+  only in the ISO; also in `<output>/<name>.credentials.txt`, mode 0600, and
+  printed at the end of the play) and must change it at first login.
+- Hardened: auditd rotates within 512 MB (CIS/PCI) or 2 GiB (HIPAA), never
+  halts/suspends/single-users; below 25% free on `/var/log/audit`,
+  `syncopated-audit-warn` warns in the journal, motd, Cockpit, and a GNOME
+  critical notification for wheel users at each login. CIS/PCI unselect the
+  `dac_modification_*`/`file_deletion_events_*` rules; CIS also
+  unselects `unsuccessful_file_modification_*` (failed `/proc` reads by htop). The tailoring is a JSON
+  file in the image (`/etc/syncopated/openscap-tailoring.json`, blueprint
+  `json_tailoring`) carrying the unselected rules and SSG variables
+  (`password_min_length` → `var_password_pam_minlen`). `sudo syncopated-scan`
+  writes stock + tailored HTML/ARF reports to `/var/lib/syncopated/scans/<ts>/`.
+- `remote_logging.enabled: true` → systemd-journal-upload over mTLS; an
+  unreachable log host only produces log lines and retries.
+
+## 3. Containers, bootc and qcow2: playbooks
 
 | Need | Start from | Host | Blueprint source |
 |------|-----------|------|------------------|
-| Rocky 10 NVIDIA workstation ISO | `playbooks/osbuild-rocky-iso-nvidia-components.yml` | `builder` | components |
-| …without NVIDIA | `playbooks/osbuild-rocky-iso-components.yml` | `builder` | components |
-| …hardened with an OpenSCAP profile (CIS L2, HIPAA, PCI-DSS), compliant disk layout | `playbooks/osbuild-rocky-iso-openscap-components.yml` | `builder` | components (`openscap-<profile>`) |
-| …Intel GPU compute + oneAPI (DPC++, MKL), interactive disk | `playbooks/osbuild-rocky-iso-intel-oneapi-components.yml` | `builder` | components |
-| AlmaLinux 10 workstation ISO (± NVIDIA) | `playbooks/osbuild-almalinux-iso{,-nvidia}.yml` | `tinybot` | components |
 | CUDA application container | `playbooks/osbuild-rocky-cuda-container.yml` | `builder` | components (`cuda-container` + `frames/container.toml`) |
-| Host-native generic build | `playbooks/osbuild.yml` (= root `osbuild.yml`) | `osbuild_targets` | components, chosen per `ansible_distribution` |
+| Host-native bootc image, or a VM image (`-e osbuild_build_bootc=false -e osbuild_image_type=qcow2`; installer types are refused) | `playbooks/osbuild.yml` (= root `osbuild.yml`) | `osbuild_targets` | components, chosen per `ansible_distribution` |
 
-### Blueprint source (exactly one applies)
-
-1. **Components** — `osbuild_blueprint_components` non-empty. The role merges
-   `files/<target>/<major>/<arch>/components/<name>.yml` with the frame
-   `files/<target>/<major>/<arch>/frames/workstation.toml` (set
-   `osbuild_blueprint_frame_path` for another frame) through
-   `templates/blueprint-components.toml.j2`. Four targets ship components:
-   `rocky/10`, `rocky/9`, `almalinux/10` and `fedora/43` (all `x86_64`). They
-   share `base anaconda gnome-desktop fonts audio multimedia google-chrome
-   vscode intel-graphics development containers-virt cockpit nvidia`; Rocky 10
-   adds `gui-toolkit intel-oneapi cuda-container`; Rocky 10 and AlmaLinux 10 add
-   `syncopated` (b08x/syncopated COPR); Rocky 10 also has one `openscap-*`
-   component per profile (select at most one); Fedora 43 adds `sway`. Add or drop components instead of copying a monolithic
-   blueprint: `python3 scripts/package_tracker.py playbook <file> list|add|remove <component>...`
-   edits a playbook's `osbuild_blueprint_components` in place. bootc builds need components too.
-2. **Static** — `osbuild_blueprint_components: []` +
-   `osbuild_static_blueprint_path: "<distro>/<major>/<arch>/<kind>/<file>.toml"`
-   (relative to `roles/osbuild/files/`). Remaining static blueprints:
-   `fedora/43` `-intel-oneapi` and `-igx`, `rocky/10` workstation (± nvidia).
-   Use for non-installer types and for distros without components.
+- `roles: - role: osbuild`; `hosts: builder` for cross-distro playbooks (not
+  `localhost`: the role needs facts and `become`). Keep `gather_facts: false`
+  + a `setup` pre_task with `become: false`, the `_git_commit` pre_task and the
+  `image-builder list` assert, as the container playbook does.
+- For non-installer types set `osbuild_kickstart_enabled: false`,
+  `osbuild_kickstart_sudoers: false`, `osbuild_firstboot_enabled: false`;
+  containers also `osbuild_flathub_enabled: false`. Name container output
+  `.tar` and set `osbuild_container_tag` (the build script `podman load`s it).
+- NVIDIA in an application container: `cuda-toolkit` (or runtime libs), never
+  the `cuda` meta package (pulls `nvidia-driver` + kmod). The host supplies the
+  driver via nvidia-container-toolkit CDI (`podman run --device nvidia.com/gpu=all`).
+- `ruby-build-rbenv` needs `ruby-build-ruby` next to it.
 
 Component file schema (`tasks/components.yml` asserts `label` and a non-empty
-`packages`):
+`packages`; `python3 roles/osbuild/tests/validate_schema.py` checks every file):
 
 ```yaml
 label: "Human-readable name"          # required
 packages: ["pkg", "@comps-group"]     # required, non-empty; never versions
-repo_urls: ["https://..."]            # appended to osbuild_extra_repo_urls
+repo_urls: ["https://..."]            # --extra-repo for depsolve
 services: ["unit"]                    # merged into [customizations.services]
 kernel_args: ["arg=value"]            # merged into [customizations.kernel] append
-fragment: name.toml                   # optional, appended verbatim
+user_groups: ["libvirt"]              # installer users join these groups
+openscap_unselected: ["rule_id"]      # openscap-* only: tailoring unselects
+fragment: name.toml                   # optional, appended verbatim (array-of-tables only)
 flatpaks: ["org.app.Id"]              # optional, bootc builds only
 bootc_repos: ["shell snippet"]        # optional, bootc builds only
 copr_repos: ["owner/project"]         # optional, bootc builds only
 ```
 
-- A `fragment` file may only contain array-of-tables (`[[customizations.files]]`,
-  `[[customizations.repositories]]`). `[customizations.kernel]` and
-  `[customizations.services]` are rendered from the merged lists; defining
-  them in a fragment or the frame duplicates the table.
-- The frame must not define `name`, `description`, `version`, `distro`,
-  `packages`, `[customizations]`, `[customizations.kernel]` or
-  `[customizations.services]`.
-- `osbuild_extra_packages` is added to the merged package list.
-- `python3 roles/osbuild/tests/validate_schema.py` checks every component file.
-
-### Hard rules (each was a real failure or verified behavior)
-
-- `roles: - role: osbuild` — not `b08x.rhel_builder.osbuild`.
-- `hosts: builder` for cross-distro playbooks (they assert Fedora or EL 10);
-  `tinybot` only when the play asserts an EL 10 host. Not `localhost`: the
-  role needs facts and `become`. Keep `gather_facts: false` + a `setup`
-  pre_task with `become: false`, as the existing playbooks do.
-- **Cross-distro target:** `osbuild_sources` and its repo dictionary
-  (`vars/<host distro>.yml`) come from the *host's* `ansible_distribution`.
-  For an EL target on a Fedora host (Rocky/AlmaLinux on gir), set
-  `osbuild_sources: []` and supply every non-base repo through
-  `osbuild_extra_repo_urls` or component `repo_urls`. For an EL 10
-  target on an EL 10 host (Rocky or AlmaLinux target on tinybot), keep the
-  default `osbuild_sources`: both EL distros share `osbuild_distro_sources_el`,
-  and names missing from the host's `repo` dictionary (`rocky-*` on
-  AlmaLinux) are skipped, so add those URLs to `osbuild_extra_repo_urls`.
-- **Rocky depsolve repos:** Rocky playbooks pass CRB, Plus and RT as extra
-  repos (`https://dl.rockylinux.org/pub/rocky/<major>/{CRB,plus,RT}/x86_64/os/`);
-  the Rocky `base` components carry them in `repo_urls`. On EL 10,
-  `libyaml-devel` comes from CRB.
-- `[[customizations.repositories]]` in a blueprint only writes `.repo` files
-  into the image; depsolve ignores it. Every non-base repo a package comes from
-  must be an `--extra-repo`.
-- Blueprints must not contain `[[customizations.user]]`, `[[customizations.group]]`,
-  `unattended` or `sudo-nopasswd` while the kickstart is injected; the role
-  asserts this.
-- For non-installer image types (`container`, `qcow2`, …) set
-  `osbuild_kickstart_enabled: false`, `osbuild_kickstart_sudoers: false`,
-  `osbuild_firstboot_enabled: false`; containers also
-  `osbuild_flathub_enabled: false`.
-- Blocks the role appends must not use `[[packages]]`: static blueprints and
-  the component template define `packages = [...]` inline, and TOML forbids
-  extending it. Files appended with `'''` literal strings must not contain `'''`.
-- Variants of an existing build get their own `osbuild_blueprint_name` and
-  `osbuild_output_filename`, so they do not overwrite each other's files in
-  `/var/tmp/osbuild-images`. A variant may reuse the same components.
-- Stamp output names with `_git_commit` (pre_task copied from existing
-  playbooks) and keep the `image-builder list` assert pre_task.
-- Container images: name the output `.tar` and set `osbuild_container_tag`;
-  the build script then runs `podman load` + `podman tag`.
-- NVIDIA in an application container: install `cuda-toolkit` (or runtime
-  libs), never the `cuda` meta package — it pulls `nvidia-driver` and the
-  kernel module. The host supplies the driver via nvidia-container-toolkit CDI
-  (`podman run --device nvidia.com/gpu=all`).
-- `ruby-build-rbenv` needs `ruby-build-ruby` next to it; without it
-  `/usr/share/ruby-build` is empty and `rbenv install` fails.
-
-## 3. Role switches worth knowing
-
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `osbuild_only_generate` | `true` | Write `<name>.toml` + `build-<name>.sh`; `-e osbuild_only_generate=false` builds in the play |
-| `osbuild_build_bootc` | `false` | bootc mode; takes priority over `osbuild_only_generate` |
-| `osbuild_blueprint_components` | `[]` | The only package selector → component-composed blueprint (§2) |
-| `osbuild_components_dir` / `osbuild_blueprint_frame_path` | `<target>/<major>/<arch>/components`, `…/frames/workstation.toml` | Paths relative to `roles/osbuild/files/`, resolved from the target distro |
-| `osbuild_extra_packages` | `[]` | Extra packages (component blueprints only) |
-| `osbuild_package_pins` | `{}` | `{pkg: "ver.*"}`; component blueprints only, static files build with `*` |
-| `osbuild_kickstart_enabled` | `true` | Embed `files/kickstart/*.ks` as `[customizations.installer.kickstart]` |
-| `osbuild_kickstart_partitioning` | `auto` | `interactive` → `syncopated-interactive.ks`, no storage commands |
-| `osbuild_kickstart_{reserve_percent,reserve_max_gib,disk_min_gib}`, per volume `{root,usr,var,home}_{min_gib,max_gib,weight}` (home: no max) | `8,64,100`; `/` `20,64,1`, `/usr` `30,110,3`, `/var` `30,110,3`, `/home` `20,-,5` | `auto` layout: reserve, then every volume's minimum, then the rest shared by weight up to each maximum (Anaconda `min`/`max` + systemd-repart `Weight` model); `/home` is dropped when the minimums do not fit with it. NVIDIA workstation playbooks raise `/usr` to 80 GiB (`usr_min_gib: 80`, `disk_min_gib: 150`; compliant: `compliant_usr_gib: 80`, `compliant_disk_min_gib: 215`). Built-in defaults in `syncopated.ks` must match `defaults/main.yml` (bats checks) |
-| `osbuild_kickstart_partitioning` `compliant` | `auto` | Separate `/usr`, `/var`, `/var/tmp`, `/var/log`, `/var/log/audit`, `/home` (+ `/tmp` as tmpfs or `lv`) with hardening mount options, for OpenSCAP profiles; `osbuild_kickstart_compliant_*` sizes (fixed volumes; `/var` and `/home` share the rest by weight), 180 GiB minimum, `_encrypt` for LUKS |
-| `osbuild_kickstart_sudoers` | `false` | `/etc/sudoers.d/90-wheel-nopasswd` |
-| `osbuild_firstboot_enabled` | `true` | First-login splash (desktop images only): system setup (dnf update, reboot offer, graphical.target), then optional yadm dotfiles; `yadm bootstrap` runs in a new terminal |
-| `osbuild_flathub_enabled` | `true` | `/etc/flatpak/remotes.d/flathub.flatpakrepo` (system remote `flathub`) |
-| `osbuild_rocky_repo_files_enabled` | `true` | Rocky targets only: replace `rocky.repo`, `rocky-extras.repo`, `rocky-addons.repo` in the image with copies that enable `crb`, `plus`, `rt` |
-| `osbuild_release_file_enabled` | `true` | `/etc/syncopated-release`: blueprint name, distro, repo commit |
-
-Appended blocks carry `# BEGIN/END syncopated-<firstboot|flathub|rocky-repos|release|kickstart|sudoers>`
-markers; grep for them in the generated `.toml`.
+A fragment or frame must not define `name`, `description`, `version`,
+`distro`, `packages`, `[customizations]`, `[customizations.kernel]` or
+`[customizations.services]` (rendered from the merged lists). Files appended
+as `'''` literal strings must not contain `'''`.
 
 ## 4. Add or remove packages
 
@@ -199,8 +224,8 @@ Procedure:
    Leave the name out of a target that has no build of it, and say so in a
    comment (the files already do this for sway on EPEL 10).
 3. **Add the repo when the package needs one the build does not use yet.**
-   Depsolve: the component's `repo_urls` or the playbook's
-   `osbuild_extra_repo_urls`. Installed system: a
+   Depsolve: the component's `repo_urls` (intents cannot add
+   repositories; a playbook may set `osbuild_extra_repo_urls`). Installed system: a
    `[[customizations.repositories]]` entry (static blueprint, component
    fragment or frame). One without the other fails depsolve or leaves the
    installed system unable to update the package.
@@ -229,7 +254,7 @@ Procedure:
    `[customizations.repositories]` entries in fragments. An explicit
    removal does not exclude the package when another package requires it;
    confirm with the manifest RPM list (§5).
-7. **Verify** (§5) for every playbook whose files changed: regenerate,
+7. **Verify** (§5) for every example intent or playbook whose files changed: regenerate,
    depsolve with `image-builder manifest`, and check the package is present
    (added) or absent (removed) in the manifest RPM list. Run
    `ansible-playbook roles/osbuild/tests/validate_firstboot_injection.yml`
@@ -243,36 +268,52 @@ reason the package is needed.
 ## 5. Verify before reporting (all must pass)
 
 ```bash
-ansible-playbook playbooks/<new>.yml                      # rc=0, "generate_only"
+ansible-playbook playbooks/build.yml -e @profiles/<name>.yml   # rc=0, "generate_only"
 shellcheck /var/tmp/osbuild-images/build-<name>.sh
-# Validate + depsolve without building; run in bash, not zsh (zsh does not
-# word-split $args, so --extra-repo flags arrive as one argument):
-bash -c 'image-builder manifest <type> --distro <distro> --arch x86_64 \
-  --blueprint <name>.toml --extra-repo URL ... > m.json'  # rc=0
-ansible-lint playbooks/<new>.yml roles/osbuild
+# Depsolve without building; run in bash, not zsh (zsh does not word-split
+# $args, so --extra-repo flags arrive as one argument):
+bash -c 'image-builder manifest image-installer --distro <distro> --arch x86_64 \
+  --blueprint <name>.toml --extra-repo URL ... > m.json'        # rc=0
+ansible-lint
 ```
 
+- The play validates the intent first; a schema error names the field
+  (`intent.disk.size_gib: ...`). A too-small `disk.size_gib` fails at
+  generation with the minimum the layout needs.
+- Generated files are mode 0644 (0600 with remote logging; credentials always
+  0600) and owned by the connecting user;
+  `/var/tmp/osbuild-images` itself is root-owned on gir. Use a scratch
+  `-e osbuild_output_dir=...` for manual manifest runs. `passlib` must be
+  importable by the controller Python (`dnf install python3-passlib`).
 - Inspect the manifest, not just its exit code: list RPMs from
   `sources["org.osbuild.librepo"].items[*].path` and confirm wanted packages
-  are present and unwanted ones absent (e.g. no `nvidia-driver`/`kmod-nvidia`
-  in a container). For ISOs, read the final kickstart from
-  `sources["org.osbuild.inline"]` and run `ksvalidator -v RHEL10` on it.
-- `ksvalidator` comes from pykickstart, which is not in `requirements.txt`
-  and has no `.venv` in this repo by default:
-  `python3 -m venv .venv && .venv/bin/pip install pykickstart`.
+  are present and unwanted ones absent. Hardened builds must show
+  `org.osbuild.oscap.autotailor` and `org.osbuild.oscap.remediation`. For ISOs,
+  read the kickstart from `sources["org.osbuild.inline"]`, replace
+  `%include /tmp/partitions.ks` with the `syncopated-layout.ks` heredoc
+  (`@DISK@` → `vda`) and run `ksvalidator -v RHEL10` on it
+  (`pip install pykickstart`). `python3 -m pytest tests/test_manifest.py`
+  does all of this for every example on a build host.
 - When role files change, rerun the suites that cover them:
 
   | Changed | Command | Pass condition |
   |---------|---------|----------------|
-  | kickstart, `tasks/blueprint.yml` | `ansible-playbook roles/osbuild/tests/validate_kickstart_injection.yml -e ksvalidator=.venv/bin/ksvalidator` | `failed=0`; `rescued=1` is the expected conflict case, printed as "CRITICAL FAILURE" |
-  | kickstart | `bats roles/osbuild/tests/kickstart/kickstart.bats` | all ok |
+  | intents, schema, any role task/template | `python3 -m pytest tests -q` | all pass (manifest/VM tests skip off the build host) |
+  | `filter_plugins/disk_layout.py`, layout defaults | `python3 -m pytest tests/test_disk_sizing.py -q` | all pass |
+  | kickstart `%pre` | `bats roles/osbuild/tests/kickstart/kickstart.bats` | all ok |
+  | kickstart, `tasks/blueprint.yml` | `ansible-playbook roles/osbuild/tests/validate_kickstart_injection.yml -e ksvalidator=$(which ksvalidator)` | `failed=0`; `rescued=1` is the expected conflict case |
+  | audit scripts (`files/scripts/`) | `bats roles/osbuild/tests/hardening` and `shellcheck -x files/scripts/*.sh` | all ok / clean |
+  | OpenSCAP tailoring lists | `python3 -m pytest tests/test_openscap_tailoring.py` | all pass (needs oscap + SSG content) |
+  | remote logging templates | `python3 -m pytest tests/test_journal_remote_e2e.py` | all pass (needs systemd-journal-remote) |
   | firstboot, `tasks/blueprint.yml`, any static blueprint | `ansible-playbook roles/osbuild/tests/validate_firstboot_injection.yml` | `failed=0` |
-  | `files/firstboot/` | `shellcheck -x roles/osbuild/files/firstboot/syncopated-firstboot{,-launcher}` and `bats roles/osbuild/tests/firstboot/` | clean / all ok |
+  | `files/firstboot/` | `shellcheck -x -P SCRIPTDIR roles/osbuild/files/firstboot/syncopated-firstboot{,-launcher}` and `bats roles/osbuild/tests/firstboot/` (as a non-root user) | clean / all ok |
   | `tasks/select_build_mode.yml` | `ansible-playbook -i roles/osbuild/tests/inventory roles/osbuild/tests/validate_build_modes.yml` | `failed=0` |
   | a component file | `python3 roles/osbuild/tests/validate_schema.py` and `python3 -m pytest tests -q` | rc=0 / all pass |
 
-- `/var/tmp/osbuild-images` is root-owned on gir; use a scratch dir for manual
-  manifest runs.
+- Unattended install test (KVM host, after building the CIS example ISO):
+  `SYNCOPATED_VM_ISO=<iso> python3 -m pytest tests/test_vm_install.py -s`
+  (wraps `tests/vm/run-install-test.sh`: no-input install, layout,
+  auditd.conf and a `syncopated-scan` run are checked).
 
 ### Expected `image-builder build --verbose` noise (not failures)
 
@@ -296,6 +337,8 @@ Post-install check: `sudo grubby --info=ALL` (paths `/vmlinuz-…`, no prefix),
 
 ## 6. Report
 
-Give the build command (`bash /var/tmp/osbuild-images/build-<name>.sh`), what
+Give the build command (`bash /var/tmp/osbuild-images/build-<name>.sh`), the
+intent file path, where the temporary passwords are
+(`<name>.credentials.txt`, mode 0600, and the end of the play output), what
 was verified, and what was not (no image built, no VM install test). Do not
-commit unless asked.
+commit unless asked; never commit `profiles/<name>.yml` (gitignored).

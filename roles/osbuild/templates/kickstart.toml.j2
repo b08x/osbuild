@@ -1,52 +1,69 @@
 # Installer kickstart (roles/osbuild/files/{{ osbuild_kickstart_file }}). Injected
 # into every prepared blueprint by tasks/blueprint.yml; edit the source file,
-# not this. lang/keyboard/timezone come from osbuild_locale, osbuild_keyboard
-# and osbuild_timezone{{ '; the first %pre writes the osbuild_kickstart_* disk
-# layout variables for the %pre in the source file' if osbuild_kickstart_partitioning in ['auto', 'compliant'] else '' }}.
+# not this. Rendered here: lang/keyboard/timezone (osbuild_locale,
+# osbuild_keyboard, osbuild_timezone), the root account (locked unless
+# osbuild_root_enabled), the users
+# (tasks/credentials.yml: SHA-512 hashes of the initial password) and the
+# {{ _osbuild_disk_layout.layout }} disk layout computed at generation time
+# for a {{ osbuild_disk_size_gib }} GiB disk (tasks/disk_layout.yml).
 
 [customizations.installer.kickstart]
 contents = '''
 lang {{ osbuild_locale }}
 keyboard {{ osbuild_keyboard }}
 timezone {{ osbuild_timezone }} --utc
-{% if osbuild_kickstart_partitioning in ['auto', 'compliant'] %}
+{% if osbuild_root_enabled | bool %}
+rootpw --iscrypted {{ _osbuild_root_password_hash }}
+{% else %}
+rootpw --lock
+{% endif %}
+{% for u in _osbuild_users %}
+user --name={{ u.name }} --gecos="{{ u.gecos }}" --groups={{ u.groups | join(',') }}{{ (' --uid=' ~ u.uid) if u.uid | default('', true) else '' }} --iscrypted --password={{ u.password_hash }}
+{% if u.ssh_pubkey | default('', true) | length > 0 %}
+sshkey --username={{ u.name }} "{{ u.ssh_pubkey }}"
+{% endif %}
+{% endfor %}
 %pre --interpreter=/usr/bin/bash --erroronfail
 cat >/tmp/syncopated-layout.env <<'EOF'
-{% if osbuild_kickstart_partitioning == 'compliant' %}
-LAYOUT_MODE=compliant
-MIN_MIB={{ (osbuild_kickstart_compliant_disk_min_gib | int) * 1024 }}
-RESERVE_PCT={{ osbuild_kickstart_compliant_reserve_percent | int }}
-RESERVE_MAX_MIB={{ (osbuild_kickstart_reserve_max_gib | int) * 1024 }}
-C_ROOT_MIB={{ (osbuild_kickstart_compliant_root_gib | int) * 1024 }}
-C_USR_MIB={{ (osbuild_kickstart_compliant_usr_gib | int) * 1024 }}
-C_TMP_MIB={{ (osbuild_kickstart_compliant_tmp_gib | int) * 1024 }}
-C_VARTMP_MIB={{ (osbuild_kickstart_compliant_var_tmp_gib | int) * 1024 }}
-C_VARLOG_MIB={{ (osbuild_kickstart_compliant_var_log_gib | int) * 1024 }}
-C_AUDIT_MIB={{ (osbuild_kickstart_compliant_audit_gib | int) * 1024 }}
-C_VAR_MIN_MIB={{ (osbuild_kickstart_compliant_var_min_gib | int) * 1024 }}
-C_VAR_MAX_MIB={{ (osbuild_kickstart_compliant_var_max_gib | int) * 1024 }}
-C_VAR_W={{ osbuild_kickstart_compliant_var_weight | int }}
-C_HOME_MIN_MIB={{ (osbuild_kickstart_compliant_home_min_gib | int) * 1024 }}
-C_HOME_W={{ osbuild_kickstart_compliant_home_weight | int }}
-TMP_MODE={{ osbuild_kickstart_compliant_tmp }}
-ENCRYPT={{ 1 if osbuild_kickstart_compliant_encrypt | bool else 0 }}
+DECLARED_MIB={{ _osbuild_disk_layout.disk_mib }}
+DISK_SERIAL={{ osbuild_disk_serial }}
+COUNTDOWN={{ osbuild_kickstart_countdown | int }}
+EOF
+cat >/tmp/syncopated-layout.ks <<'EOF'
+ignoredisk --only-use=@DISK@
+zerombr
+clearpart --all --initlabel --disklabel=gpt --drives=@DISK@
+bootloader --boot-drive=@DISK@
+reqpart
+{% if _osbuild_disk_layout.layout == 'compliant' %}
+part /boot --size=2048 --fstype=xfs --fsoptions="nodev,nosuid" --ondisk=@DISK@
 {% else %}
-MIN_MIB={{ (osbuild_kickstart_disk_min_gib | int) * 1024 }}
-RESERVE_PCT={{ osbuild_kickstart_reserve_percent | int }}
-RESERVE_MAX_MIB={{ (osbuild_kickstart_reserve_max_gib | int) * 1024 }}
-ROOT_MIN_MIB={{ (osbuild_kickstart_root_min_gib | int) * 1024 }}
-ROOT_MAX_MIB={{ (osbuild_kickstart_root_max_gib | int) * 1024 }}
-ROOT_W={{ osbuild_kickstart_root_weight | int }}
-USR_MIN_MIB={{ (osbuild_kickstart_usr_min_gib | int) * 1024 }}
-USR_MAX_MIB={{ (osbuild_kickstart_usr_max_gib | int) * 1024 }}
-USR_W={{ osbuild_kickstart_usr_weight | int }}
-VAR_MIN_MIB={{ (osbuild_kickstart_var_min_gib | int) * 1024 }}
-VAR_MAX_MIB={{ (osbuild_kickstart_var_max_gib | int) * 1024 }}
-VAR_W={{ osbuild_kickstart_var_weight | int }}
-HOME_MIN_MIB={{ (osbuild_kickstart_home_min_gib | int) * 1024 }}
-HOME_W={{ osbuild_kickstart_home_weight | int }}
+part /boot --size=2048 --fstype=xfs --ondisk=@DISK@
 {% endif %}
+part pv.00 --size=1 --grow --ondisk=@DISK@{{ ' --encrypted' if osbuild_disk_encrypt | bool else '' }}
+volgroup vg00 pv.00
+{% for v in _osbuild_disk_layout.volumes %}
+logvol {{ v.mount }} --vgname=vg00 --name={{ v.name }} --size={{ v.size_mib }} --fstype=xfs{{ (' --fsoptions="' ~ v.fsoptions ~ '"') if v.fsoptions else '' }}
+{% endfor %}
 EOF
 %end
+{{ lookup('ansible.builtin.file', osbuild_kickstart_file, rstrip=false) }}
+{% if _osbuild_disk_layout.layout == 'compliant' and osbuild_disk_tmp == 'tmpfs' %}
+# /tmp as tmpfs with the hardening mount options (disk.tmp: tmpfs).
+%post --interpreter=/usr/bin/bash
+echo 'tmpfs /tmp tmpfs defaults,nodev,nosuid,noexec,mode=1777,size={{ (osbuild_kickstart_compliant_tmp_gib | int) * 1024 }}M 0 0' >>/etc/fstab
+%end
 {% endif %}
-{{ lookup('ansible.builtin.file', osbuild_kickstart_file, rstrip=false) }}'''
+{% if _osbuild_users | length > 0 %}
+# The initial password is known: each user picks a new one at first
+# login (GDM asks).
+%post --interpreter=/usr/bin/bash --log=/root/syncopated-users.log
+{% for u in _osbuild_users %}
+chage -d 0 {{ u.name }}
+{% endfor %}
+{% if osbuild_root_enabled | bool %}
+chage -d 0 root
+{% endif %}
+%end
+{% endif %}
+'''

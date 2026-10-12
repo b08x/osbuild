@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Validate a build intent (schema/intent.schema.json) and turn it into role
+# variables. playbooks/build.yml runs this first:
+#
+#   ansible-playbook playbooks/build.yml -e @profiles/<name>.yml
+#
+# The profile file holds one top-level key, `intent`. Everything an intent
+# does not say is derived here or in the role: the openscap-* component and
+# the compliant disk layout follow `hardening`; component repo_urls supply
+# every extra repository (osbuild_sources is emptied, so no build-host repo
+# reaches another distribution's compose); /usr sizing follows the
+# nvidia/cuda components; no blueprint user is ever written next to the
+# kickstart.
+
+- name: Assert an intent was given
+  ansible.builtin.assert:
+    that:
+      - intent is defined
+      - intent is mapping
+    fail_msg: >-
+      No intent. Run ansible-playbook playbooks/build.yml -e @profiles/<name>.yml
+      with a profile whose top-level key is `intent` (see profiles/examples/).
+    quiet: true
+
+- name: Validate the intent against schema/intent.schema.json
+  ansible.utils.validate:
+    data: "{{ intent }}"
+    criteria: "{{ lookup('ansible.builtin.file', osbuild_intent_schema) | from_json }}"
+    engine: ansible.utils.jsonschema
+  register: _osbuild_intent_validation
+  ignore_errors: true
+  # The intent may carry remote logging keys; the next task reports the errors.
+  no_log: true
+
+- name: Fail naming the offending intent fields
+  ansible.builtin.fail:
+    msg: |-
+      The intent does not match schema/intent.schema.json:
+      {% for e in _osbuild_intent_validation.errors | default([]) %}
+        - intent.{{ e.data_path | default('', true) or '(top level)' }}: {{ e.message }}
+      {% endfor %}
+      {% if not _osbuild_intent_validation.errors | default([]) %}
+        {{ _osbuild_intent_validation.msg | default('validation failed') }}
+      {% endif %}
+  when: _osbuild_intent_validation is failed
+
+- name: Check passlib on the controller
+  ansible.builtin.include_tasks: passlib.yml
+
+- name: Map the intent to role variables
+  ansible.builtin.set_fact:
+    osbuild_blueprint_name: "{{ intent.name }}"
+    osbuild_blueprint_version: "1.0.0"
+    osbuild_blueprint_description: "{{ intent.description | default(intent.name) }}"
+    osbuild_distro: "{{ intent.distro }}"
+    osbuild_arch: "{{ intent.arch }}"
+    osbuild_hostname: "{{ intent.hostname }}"
+    osbuild_hardening: "{{ intent.hardening }}"
+    osbuild_blueprint_components: >-
+      {{ intent.components
+         + ([] if intent.hardening == 'none' else ['openscap-' ~ intent.hardening]) }}
+    osbuild_disk_size_gib: "{{ intent.disk.size_gib }}"
+    osbuild_disk_encrypt: "{{ intent.disk.encrypt | default(false) }}"
+    osbuild_disk_tmp: "{{ intent.disk.tmp | default('tmpfs') }}"
+    osbuild_disk_serial: "{{ intent.disk.serial | default('') }}"
+    osbuild_users: "{{ intent.users }}"
+    osbuild_root_enabled: "{{ intent.root.enabled | default(false) }}"
+    osbuild_openscap_variables: >-
+      {{ {'var_password_pam_minlen': intent.password_min_length} if intent.password_min_length is defined else {} }}
+    osbuild_locale: "{{ intent.locale.language }}"
+    osbuild_keyboard: "{{ intent.locale.keyboard }}"
+    osbuild_timezone: "{{ intent.locale.timezone }}"
+    osbuild_remote_logging: "{{ intent.remote_logging | default({'enabled': false}) }}"
+    osbuild_extra_packages: "{{ intent.extra_packages | default([]) }}"
+    osbuild_package_pins: "{{ intent.package_pins | default({}) }}"
+    # Derived, never set by an intent.
+    osbuild_image_type: "{{ 'minimal-installer' if intent.distro is match('fedora-') else 'image-installer' }}"
+    osbuild_build_bootc: false
+    osbuild_kickstart_enabled: true
+    osbuild_sources: []
+    osbuild_extra_repo_urls: []
+
+- name: Assert the selected components exist for the target
+  ansible.builtin.assert:
+    that: lookup('ansible.builtin.fileglob', _dir ~ '/' ~ item ~ '.yml') | length > 0
+    fail_msg: >-
+      intent.components: '{{ item }}' has no component file for {{ intent.distro }}
+      (roles/osbuild/files/{{ osbuild_components_dir }}/{{ item }}.yml).
+      {% if item is match('openscap-') %}Hardening profiles exist only for rocky-10.{% endif %}
+    quiet: true
+  vars:
+    _dir: "{{ role_path }}/files/{{ osbuild_components_dir }}"
+  loop: "{{ osbuild_blueprint_components }}"

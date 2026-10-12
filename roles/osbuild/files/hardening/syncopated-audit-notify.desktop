@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Audit log space warning
+Comment=Warns wheel users while the audit log volume is nearly full
+Exec=/usr/local/bin/syncopated-audit-notify
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=10
+OnlyShowIn=GNOME;

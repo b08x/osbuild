@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Generate an unattended installer ISO build from a validated intent.
+#
+#   ansible-playbook playbooks/build.yml -e @profiles/<name>.yml
+#
+# The profile (schema/intent.schema.json; examples in profiles/examples/)
+# names the distro, components, hardening profile, disk, users, locale and
+# remote logging. The play validates it before anything else, then the osbuild
+# role writes, mode 0644 (0600 with remote logging; credentials always 0600),
+# into osbuild_output_dir:
+#   <name>.toml               blueprint with the kickstart (users, disk layout)
+#   build-<name>.sh           run it to build <name>-<commit>.iso
+#   <name>.credentials.txt    the initial user passwords (also printed once)
+#
+#   bash /var/tmp/osbuild-images/build-<name>.sh
+#
+# Build host: Fedora or an EL 10 distribution in group `builder`. Build-host
+# details an intent never sets (extra repositories, image type, /usr sizing
+# for CUDA, no blueprint user next to the kickstart) are derived by the role.
+# -e osbuild_only_generate=false builds inside the play.
+
+- name: Generate an installer ISO build from an intent
+  hosts: builder
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Validate the intent and map it to role variables
+      ansible.builtin.include_role:
+        name: osbuild
+        tasks_from: intent.yml
+        public: true
+      tags: ["always"]
+
+    - name: Gather facts as unprivileged connection user
+      ansible.builtin.setup:
+      become: false
+      tags: ["always"]
+
+    - name: Verify build host is Fedora or an EL 10 distribution
+      ansible.builtin.assert:
+        that:
+          - >-
+            ansible_distribution == "Fedora" or
+            (ansible_distribution in ["AlmaLinux", "Rocky"] and
+             ansible_distribution_major_version == "10")
+        fail_msg: >-
+          playbooks/build.yml runs on a Fedora or EL 10 build host. Detected:
+          {{ ansible_distribution }} {{ ansible_distribution_version }}.
+        success_msg: "Build host '{{ ansible_distribution }} {{ ansible_distribution_version }}' is supported."
+      tags: ["always"]
+
+    # Lookups run on the controller; set_fact evaluates this once, so every
+    # role task sees the same image name. Generated files belong to the
+    # connecting user.
+    - name: Set image name and output owner
+      ansible.builtin.set_fact:
+        _git_commit: >-
+          {{ lookup('ansible.builtin.pipe',
+             'git -C ' ~ (playbook_dir | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*"') }}
+        osbuild_output_owner: "{{ ansible_user_id }}"
+      tags: ["always"]
+
+    - name: Name the ISO after the intent and commit
+      ansible.builtin.set_fact:
+        osbuild_output_filename: "{{ osbuild_blueprint_name }}-{{ _git_commit }}.iso"
+      tags: ["always"]
+
+    - name: List image types known to the installed image-builder
+      ansible.builtin.command: image-builder list
+      register: _image_builder_list
+      changed_when: false
+      tags: ["always"]
+
+    - name: Verify image-builder can build the requested distro and image type
+      ansible.builtin.assert:
+        that:
+          - _wanted in _image_builder_list.stdout_lines
+        fail_msg: >-
+          '{{ _wanted }}' is not in `image-builder list` on {{ inventory_hostname }}.
+          Upgrade image-builder or change the intent's distro.
+        success_msg: "image-builder supports '{{ _wanted }}'."
+      vars:
+        _wanted: "{{ osbuild_distro }} type:{{ osbuild_image_type }} arch:{{ osbuild_arch }}"
+      tags: ["always"]
+
+  roles:
+    - role: osbuild

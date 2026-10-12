@@ -1,0 +1,243 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Workstation audit policy and remote logging. Runs after tasks/components.yml
+# and before the blueprint is rendered: it adjusts the merged package,
+# service and tailoring lists and prepares the files tasks/blueprint.yml
+# injects.
+#
+# Hardened builds (osbuild_hardening != none) get
+#   - the OpenSCAP tailoring: the openscap-* component's openscap_unselected
+#     rules (+ the journal-upload rule while remote logging is off) and the
+#     osbuild_openscap_variables values, written as a JSON tailoring file
+#     (osbuild_openscap_tailoring_json) and referenced from
+#     [customizations.openscap.json_tailoring] by blueprint-components.toml.j2;
+#     image-builder runs autotailor on it and remediates with the result
+#   - /etc/audit/auditd.conf (templates/auditd.conf.j2): rotation within a
+#     fixed cap, no halt/single/suspend actions, warning script on low space
+#   - syncopated-audit-warn, its hourly timer and the GNOME login notifier
+#   - syncopated-scan and /etc/sysconfig/syncopated-scan
+# Remote logging (osbuild_remote_logging.enabled) adds systemd-journal-upload
+# with mTLS; when off, the uploader stays disabled.
+
+- name: Assert the hardening profile is known
+  ansible.builtin.assert:
+    that: osbuild_hardening == 'none' or osbuild_hardening in osbuild_audit_policy
+    fail_msg: >-
+      hardening must be none or one of {{ osbuild_audit_policy | list | join(', ') }},
+      got '{{ osbuild_hardening }}'
+    quiet: true
+
+- name: Assert the selected openscap-* component matches the hardening profile
+  ansible.builtin.assert:
+    that: >-
+      osbuild_blueprint_components | select('match', '^openscap-') | list
+      == ([] if osbuild_hardening == 'none' else ['openscap-' ~ osbuild_hardening])
+    fail_msg: >-
+      hardening '{{ osbuild_hardening }}' needs exactly the component
+      {{ 'none' if osbuild_hardening == 'none' else 'openscap-' ~ osbuild_hardening }};
+      selected: {{ osbuild_blueprint_components | select('match', '^openscap-') | join(', ') or 'none' }}.
+      Set the hardening profile, not the component.
+    quiet: true
+
+- name: Start with no extra services or injected files
+  ansible.builtin.set_fact:
+    _osbuild_bp_services_disabled: []
+    _osbuild_hardening_files: []
+    _osbuild_hardening_dirs: []
+    _osbuild_remote_logging_files: []
+    _osbuild_remote_logging_dirs: []
+    _osbuild_journal_upload_pki: /etc/pki/syncopated/journal-upload
+
+- name: Assert the OpenSCAP variables apply to the hardening profile
+  ansible.builtin.assert:
+    that:
+      - osbuild_openscap_variables is mapping
+      - osbuild_openscap_variables | length == 0 or osbuild_hardening != 'none'
+      - >-
+        'var_password_pam_minlen' not in osbuild_openscap_variables
+        or osbuild_hardening in ['cis-l2-workstation', 'pci-dss']
+    fail_msg: >-
+      password_min_length (osbuild_openscap_variables: {{ osbuild_openscap_variables }})
+      needs hardening cis-l2-workstation or pci-dss; '{{ osbuild_hardening }}'
+      does not check the password length.
+    quiet: true
+
+- name: Prepare the workstation audit policy
+  when: osbuild_hardening != 'none'
+  vars:
+    _osbuild_audit: "{{ osbuild_audit_policy[osbuild_hardening] }}"
+    _fragment: >-
+      {{ lookup('ansible.builtin.file',
+                osbuild_components_dir ~ '/' ~ _osbuild_bp_components['openscap-' ~ osbuild_hardening].fragment) }}
+    _profile_id: "{{ _fragment | regex_search('(?m)^profile_id\\s*=\\s*\"([^\"]+)\"', '\\1') | first }}"
+    _datastream: "{{ _fragment | regex_search('(?m)^datastream\\s*=\\s*\"([^\"]+)\"', '\\1') | first }}"
+    _journal_upload_rule: service_systemd-journal-upload_enabled
+    _tailored_profile_id: "{{ _profile_id }}_syncopated"
+  block:
+    - name: Unselect the journal-upload rule while remote logging is off
+      ansible.builtin.set_fact:
+        _osbuild_bp_openscap_unselected: "{{ (_osbuild_bp_openscap_unselected + [_journal_upload_rule]) | unique | list }}"
+      when:
+        - not osbuild_remote_logging.enabled | default(false) | bool
+        - osbuild_hardening == 'cis-l2-workstation'
+
+    # templates/openscap-tailoring.json.j2: the unselected rules and
+    # osbuild_openscap_variables for autotailor --json-tailoring.
+    - name: Set the tailored profile ID
+      ansible.builtin.set_fact:
+        _osbuild_openscap_tailored_profile_id: "{{ _tailored_profile_id }}"
+
+    - name: Write the JSON tailoring
+      ansible.builtin.set_fact:
+        _osbuild_hardening_dirs:
+          - path: "{{ osbuild_openscap_tailoring_json | dirname }}"
+            mode: "0755"
+        _osbuild_hardening_files:
+          - path: "{{ osbuild_openscap_tailoring_json }}"
+            mode: "0644"
+            # A mapping; templates/injected-files.toml.j2 writes it as JSON.
+            json: "{{ lookup('ansible.builtin.template', 'openscap-tailoring.json.j2') | from_json }}"
+
+    - name: Run the audit space check hourly
+      ansible.builtin.set_fact:
+        _osbuild_bp_services: "{{ (_osbuild_bp_services + ['syncopated-audit-check.timer']) | unique | list }}"
+
+    - name: Show the audit warning on the Cockpit login page
+      ansible.builtin.set_fact:
+        _osbuild_cockpit_banner:
+          - path: /etc/cockpit/cockpit.conf
+            mode: "0644"
+            content: |
+              # Written by the osbuild role (tasks/hardening.yml).
+              # syncopated-audit-warn writes the banner while the audit log
+              # volume is nearly full and removes it afterwards.
+              [Session]
+              Banner=/etc/cockpit/issue.cockpit
+      when: "'cockpit' in osbuild_blueprint_components"
+
+    - name: List the audit policy and scan files
+      ansible.builtin.set_fact:
+        _osbuild_hardening_files: "{{ _osbuild_hardening_files + _audit_files }}"
+      vars:
+        _audit_files:
+          - path: /etc/audit/auditd.conf
+            mode: "0640"
+            content: "{{ lookup('ansible.builtin.template', 'auditd.conf.j2', rstrip=false) }}"
+          - path: /etc/sysconfig/syncopated-audit-warn
+            mode: "0644"
+            content: "WARN_FREE_PERCENT={{ osbuild_audit_warn_free_percent | int }}\n"
+          - path: /usr/local/sbin/syncopated-audit-warn
+            mode: "0755"
+            content: "{{ lookup('ansible.builtin.file', 'scripts/syncopated-audit-warn.sh', rstrip=false) }}"
+          - path: /usr/local/bin/syncopated-audit-notify
+            mode: "0755"
+            content: "{{ lookup('ansible.builtin.file', 'scripts/syncopated-audit-notify.sh', rstrip=false) }}"
+          - path: /etc/xdg/autostart/syncopated-audit-notify.desktop
+            mode: "0644"
+            content: "{{ lookup('ansible.builtin.file', 'hardening/syncopated-audit-notify.desktop', rstrip=false) }}"
+          - path: /etc/systemd/system/syncopated-audit-check.service
+            mode: "0644"
+            content: "{{ lookup('ansible.builtin.file', 'hardening/syncopated-audit-check.service', rstrip=false) }}"
+          - path: /etc/systemd/system/syncopated-audit-check.timer
+            mode: "0644"
+            content: "{{ lookup('ansible.builtin.file', 'hardening/syncopated-audit-check.timer', rstrip=false) }}"
+          - path: /usr/local/bin/syncopated-scan
+            mode: "0755"
+            content: "{{ lookup('ansible.builtin.file', 'scripts/syncopated-scan.sh', rstrip=false) }}"
+          - path: /etc/sysconfig/syncopated-scan
+            mode: "0644"
+            content: |
+              # Written by the osbuild role (tasks/hardening.yml) for {{ osbuild_hardening }}.
+              DATASTREAM={{ _datastream }}
+              PROFILE={{ _profile_id }}
+              # Where image-builder leaves the autotailor output, newest layout first.
+              TAILORING_FILES="/usr/share/xml/osbuild-openscap-data/tailoring.xml /oscap_data/tailoring.xml"
+              # The tailoring input; autotailor rebuilds from it when no output is found.
+              TAILORING_JSON={{ osbuild_openscap_tailoring_json }}
+
+    - name: Add the Cockpit banner setting
+      ansible.builtin.set_fact:
+        _osbuild_hardening_files: "{{ _osbuild_hardening_files + (_osbuild_cockpit_banner | default([])) }}"
+
+- name: Prepare remote logging
+  when: osbuild_remote_logging.enabled | default(false) | bool
+  vars:
+    _rl: "{{ osbuild_remote_logging }}"
+  block:
+    - name: Assert the remote logging settings are complete
+      ansible.builtin.assert:
+        that:
+          - _rl.url | default('') is match('^https://[^/\s]+')
+          - _rl.ca_cert | default('') | length > 0
+          - _rl.client_cert | default('') | length > 0
+          - _rl.client_key | default('') | length > 0
+        fail_msg: >-
+          remote_logging.enabled needs url (https://host[:port]), ca_cert,
+          client_cert and client_key (PEM text or controller paths).
+        quiet: true
+
+    - name: Read the remote logging certificates
+      no_log: true
+      ansible.builtin.set_fact:
+        _osbuild_journal_upload_pem: >-
+          {{ _osbuild_journal_upload_pem | default({})
+             | combine({item: _rl[item] if '-----BEGIN' in _rl[item]
+                              else lookup('ansible.builtin.file', _rl[item], rstrip=false)}) }}
+      loop: [ca_cert, client_cert, client_key]
+
+    - name: Assert the certificates are PEM
+      ansible.builtin.assert:
+        that:
+          - "'-----BEGIN' in _osbuild_journal_upload_pem[item]"
+          - "\"'''\" not in _osbuild_journal_upload_pem[item]"
+        fail_msg: "remote_logging.{{ item }} is not PEM text or a readable PEM file on the controller"
+        quiet: true
+      loop: [ca_cert, client_cert, client_key]
+
+    - name: Add the uploader package and services
+      ansible.builtin.set_fact:
+        _osbuild_bp_packages: "{{ (_osbuild_bp_packages + ['systemd-journal-remote']) | unique | list }}"
+        _osbuild_bp_services: >-
+          {{ (_osbuild_bp_services + ['systemd-journal-upload', 'systemd-journald-audit.socket']) | unique | list }}
+
+    # No package creates these; osbuild's copy stage does not create parent
+    # directories, so the blueprint declares them.
+    - name: List the remote logging directories
+      ansible.builtin.set_fact:
+        _osbuild_remote_logging_dirs:
+          - path: /etc/systemd/journal-upload.conf.d
+            mode: "0755"
+          - path: /etc/systemd/system/systemd-journal-upload.service.d
+            mode: "0755"
+          - path: "{{ _osbuild_journal_upload_pki }}"
+            mode: "0700"
+            ensure_parents: true
+
+    - name: List the remote logging files
+      no_log: true
+      ansible.builtin.set_fact:
+        _osbuild_remote_logging_files:
+          - path: /etc/systemd/journal-upload.conf.d/50-syncopated.conf
+            mode: "0644"
+            content: "{{ lookup('ansible.builtin.template', 'systemd/journal-upload.conf.j2', rstrip=false) }}"
+          - path: /etc/systemd/system/systemd-journal-upload.service.d/50-syncopated.conf
+            mode: "0644"
+            content: "{{ lookup('ansible.builtin.template', 'systemd/journal-upload-service.conf.j2', rstrip=false) }}"
+          - path: "{{ _osbuild_journal_upload_pki }}/ca.pem"
+            mode: "0600"
+            content: "{{ _osbuild_journal_upload_pem.ca_cert }}"
+          - path: "{{ _osbuild_journal_upload_pki }}/client.pem"
+            mode: "0600"
+            content: "{{ _osbuild_journal_upload_pem.client_cert }}"
+          - path: "{{ _osbuild_journal_upload_pki }}/client.key"
+            mode: "0600"
+            content: "{{ _osbuild_journal_upload_pem.client_key }}"
+
+# Off: keep the uploader disabled. Only when its package is in the image;
+# disabling a unit that does not exist fails the build.
+- name: Keep systemd-journal-upload disabled
+  ansible.builtin.set_fact:
+    _osbuild_bp_services_disabled: ['systemd-journal-upload']
+  when:
+    - not osbuild_remote_logging.enabled | default(false) | bool
+    - "'systemd-journal-remote' in _osbuild_bp_packages"

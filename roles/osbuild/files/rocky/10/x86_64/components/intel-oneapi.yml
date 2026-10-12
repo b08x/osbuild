@@ -12,6 +12,8 @@ repo_urls:
   - "https://yum.repos.intel.com/oneapi"
 services: []
 kernel_args: []
+# GPU compute (Level Zero, OpenCL) needs /dev/dri/renderD*: render group.
+user_groups: ["render", "video"]
 fragment: intel-oneapi.toml
 packages:
   - "intel-compute-runtime"

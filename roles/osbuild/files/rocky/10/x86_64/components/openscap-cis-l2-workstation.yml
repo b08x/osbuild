@@ -25,3 +25,55 @@ packages:
   - "libselinux"
   - "cronie"
   - "postfix"
+# Workstation audit policy (tasks/hardening.yml writes auditd.conf): rotate
+# within a fixed cap, never halt, suspend or single-user. The stock rules that
+# demand keep_logs, a small max_log_file, and halt/single/suspend/email space
+# actions are unselected in the OpenSCAP tailoring, so a scan with the tailored
+# profile lists them as not selected rather than failed.
+# Desktop noise filter: the per-syscall DAC-modification and file-deletion
+# rules fire on every file save, chmod and rename a desktop session makes.
+# The unsuccessful-access rules log every open() that fails with EACCES or
+# EPERM, read-only opens included: htop, top and GNOME System Monitor fail to
+# open /proc/<pid>/io of root-owned processes at each refresh (95% of all
+# audit events on a CIS L2 workstation, 2026-10-12).
+openscap_unselected:
+  - "auditd_data_retention_max_log_file_action"
+  - "auditd_data_retention_max_log_file_action_stig"
+  - "auditd_data_retention_max_log_file"
+  - "auditd_data_retention_num_logs"
+  - "auditd_data_retention_space_left"
+  - "auditd_data_retention_space_left_action"
+  - "auditd_data_retention_space_left_percentage"
+  - "auditd_data_retention_admin_space_left_action"
+  - "auditd_data_retention_admin_space_left_percentage"
+  - "auditd_data_disk_full_action"
+  - "auditd_data_disk_full_action_stig"
+  - "auditd_data_disk_error_action"
+  - "auditd_data_disk_error_action_stig"
+  - "audit_rules_dac_modification_chmod"
+  - "audit_rules_dac_modification_chown"
+  - "audit_rules_dac_modification_fchmod"
+  - "audit_rules_dac_modification_fchmodat"
+  - "audit_rules_dac_modification_fchmodat2"
+  - "audit_rules_dac_modification_fchown"
+  - "audit_rules_dac_modification_fchownat"
+  - "audit_rules_dac_modification_fremovexattr"
+  - "audit_rules_dac_modification_fsetxattr"
+  - "audit_rules_dac_modification_lchown"
+  - "audit_rules_dac_modification_lremovexattr"
+  - "audit_rules_dac_modification_lsetxattr"
+  - "audit_rules_dac_modification_removexattr"
+  - "audit_rules_dac_modification_setxattr"
+  - "audit_rules_dac_modification_umount"
+  - "audit_rules_dac_modification_umount2"
+  - "audit_rules_file_deletion_events_rename"
+  - "audit_rules_file_deletion_events_renameat"
+  - "audit_rules_file_deletion_events_renameat2"
+  - "audit_rules_file_deletion_events_rmdir"
+  - "audit_rules_file_deletion_events_unlink"
+  - "audit_rules_file_deletion_events_unlinkat"
+  - "audit_rules_unsuccessful_file_modification_creat"
+  - "audit_rules_unsuccessful_file_modification_ftruncate"
+  - "audit_rules_unsuccessful_file_modification_open"
+  - "audit_rules_unsuccessful_file_modification_openat"
+  - "audit_rules_unsuccessful_file_modification_truncate"

@@ -19,7 +19,10 @@ osbuild_distro: "fedora-43"
 # Unknown prefixes fall back to the host distribution.
 osbuild_target_distribution: >-
   {{ {'fedora': 'Fedora', 'rocky': 'Rocky', 'almalinux': 'AlmaLinux'}
-     .get(osbuild_distro.split('-')[0], ansible_distribution) }}
+     .get(osbuild_distro.split('-')[0], ansible_distribution | default('Fedora')) }}
+
+# JSON Schema for build intents (tasks/intent.yml, playbooks/build.yml).
+osbuild_intent_schema: "{{ role_path }}/../../schema/intent.schema.json"
 
 # Architecture (x86_64, aarch64)
 osbuild_arch: "x86_64"
@@ -65,11 +68,11 @@ osbuild_build_bootc: false
 # Target Version Helpers
 # =============================================================================
 
-_distro_version: "{{ osbuild_distro | regex_replace('^[a-z]+-', '') }}"
+_osbuild_distro_version: "{{ osbuild_distro | regex_replace('^[a-z]+-', '') }}"
 # Major version only (e.g. "10"): distribution-gpg-keys, RPM Fusion EL,
 # NVIDIA CUDA (rhel*), and Docker CE publish per-major artifacts. AlmaLinux
-# metalinks and EPEL point-release paths use the full _distro_version.
-_distro_major_version: "{{ _distro_version | regex_replace('\\..*', '') }}"
+# metalinks and EPEL point-release paths use the full _osbuild_distro_version.
+_osbuild_distro_major_version: "{{ _osbuild_distro_version | regex_replace('\\..*', '') }}"
 
 # =============================================================================
 # Component File Schema
@@ -93,6 +96,11 @@ _distro_major_version: "{{ _distro_version | regex_replace('\\..*', '') }}"
 #   flatpaks:     Flatpak application IDs installed by bootc builds (list)
 #   bootc_repos:  Shell snippets that add repositories in bootc builds (list)
 #   copr_repos:   COPR repositories enabled in bootc builds (list)
+#   user_groups:  Supplementary groups the installer users join when the
+#                 component is selected, e.g. libvirt (list; the groups must
+#                 be created by the component's packages or the base system)
+#   openscap_unselected: Rule IDs (suffix after content_rule_) unselected in
+#                 the OpenSCAP tailoring of an openscap-* component (list)
 #
 # All list fields except label and packages are optional. scripts/package_tracker.py
 # lists, searches, adds and removes packages in these files.
@@ -161,7 +169,7 @@ osbuild_distro_sources_fedora:
 # Google Chrome — so one list serves both; per-distro URLs and GPG keys
 # live in vars/AlmaLinux.yml and vars/Rocky.yml.
 osbuild_distro_sources_el:
-  # Rocky CRB, Plus and RT. Names absent from the host's `repo` dictionary
+  # Rocky CRB, Plus and RT. Names absent from the host's `osbuild_repo` dictionary
   # (e.g. on an AlmaLinux host) are skipped by tasks/sources.yml.
   - rocky-crb
   - rocky-plus
@@ -180,14 +188,18 @@ osbuild_distro_sources_el:
 # package resolution.
 osbuild_extra_repo_urls: []
 
-# Repository names (keys of vars/<build host distribution>.yml `repo`) turned
+# Repository names (keys of vars/<build host distribution>.yml `osbuild_repo`) turned
 # into --extra-repo URLs: the host distribution's common list. Selected
-# components add their own repo_urls (tasks/components.yml). Set [] when the
-# target distro differs from the build host's (e.g. a Rocky image built on
-# Fedora); the components' repo_urls then supply the target's repos.
+# components add their own repo_urls (tasks/components.yml). Derived, never
+# set by an intent: empty when the target family (Fedora vs EL) differs from
+# the build host's (e.g. a Rocky image built on Fedora), because the list and
+# its URLs describe the host; the components' repo_urls then supply the
+# target's repos.
 osbuild_sources: >-
-  {{ (ansible_distribution == 'Fedora') | ternary(osbuild_distro_sources_fedora,
-  osbuild_distro_sources_el) }}
+  {{ []
+     if ((ansible_distribution == 'Fedora') != (osbuild_target_distribution == 'Fedora'))
+     else ((ansible_distribution == 'Fedora') | ternary(osbuild_distro_sources_fedora,
+           osbuild_distro_sources_el)) }}
 
 # Optional sources (uncomment to add manually):
 # - docker-ce
@@ -208,12 +220,12 @@ osbuild_sources: >-
 # that selects packages.
 osbuild_blueprint_components: []
 osbuild_components_dir: >-
-  {{ osbuild_target_distribution | lower }}/{{ _distro_major_version }}/{{ osbuild_arch }}/components
+  {{ osbuild_target_distribution | lower }}/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/components
 # Static, non-composable blueprint part (firewall, locale, timezone, files).
 # Playbooks that build another image kind point this at another frame, e.g.
 # frames/container.toml.
 osbuild_blueprint_frame_path: >-
-  {{ osbuild_target_distribution | lower }}/{{ _distro_major_version }}/{{ osbuild_arch }}/frames/workstation.toml
+  {{ osbuild_target_distribution | lower }}/{{ _osbuild_distro_major_version }}/{{ osbuild_arch }}/frames/workstation.toml
 
 # Hand-written blueprint copied as is. Used only when
 # osbuild_blueprint_components is empty; the path is relative to the role's
@@ -224,7 +236,39 @@ osbuild_static_blueprint_path: ""
 # User Customization
 # =============================================================================
 
-# Default user account to create
+# Installer users (kickstart `user` commands), from the intent's `users`. Each
+# entry: name, gecos, optional groups, uid and ssh_pubkey. Every user gets
+# osbuild_initial_password: only its SHA-512 hash goes into the blueprint, it
+# is printed at the end of the play and written to
+# <output_dir>/<blueprint>.credentials.txt (mode 0600), and the user must
+# choose a new password at first login (chage -d 0). Supplementary groups are
+# wheel + the selected components' user_groups + the entry's groups. Root is
+# locked unless osbuild_root_enabled; administration is through sudo for wheel.
+osbuild_users: []
+
+# Initial password of every installer user (and root when enabled). It is
+# known, so it only lasts until the first login, which forces a new one.
+osbuild_initial_password: syncopated
+
+# Unlock root (intent `root.enabled`). Root then gets osbuild_initial_password
+# and must change it at first login, like the users.
+osbuild_root_enabled: false
+
+# Python that runs the play on the controller; it must import passlib to hash
+# the generated passwords (tasks/credentials.yml checks first).
+osbuild_controller_python: "{{ ansible_playbook_python }}"
+
+# Owner of generated files (blueprint, build script, credentials, ISO).
+# playbooks/build.yml sets it to the connecting user.
+osbuild_output_owner: ""
+
+# Mode of the blueprint, the build script and the built image. 0600 when
+# remote logging is on: the blueprint and the image then carry the client
+# private key. The credentials file is always 0600.
+osbuild_output_mode: >-
+  {{ '0600' if (osbuild_remote_logging | default({})).enabled | default(false) | bool else '0644' }}
+
+# bootc builds only (templates/build.sh.j2): user created in the container image.
 osbuild_user_name: "osadmin"
 osbuild_user_description: "Ansible User"
 osbuild_user_password: "$6$PHHYWL.kMffMRnd.$AVI7wxwSAHG.mUu3cI7QbW/zItvc/mqn0IM7RJNufD3jPUtoGzhZ5NJZJqJ6VEoP4alRRGXOejr6jw4OoBWSj/"
@@ -334,71 +378,84 @@ osbuild_release_commit: >-
      'git -C ' ~ (role_path | quote) ~ ' describe --always --abbrev=7 --dirty --exclude "*" 2>/dev/null || echo unknown') }}
 
 # Append files/kickstart/syncopated.ks to every prepared blueprint as
-# [customizations.installer.kickstart]. Anaconda then asks only for the root
-# password and the user; %pre picks the target disk and lays it out. Blueprints
+# [customizations.installer.kickstart]. The install asks nothing: the kickstart
+# creates the users in osbuild_users, locks root (unless osbuild_root_enabled),
+# and lays out the disk from
+# sizes computed at generation time (tasks/disk_layout.yml). The only possible
+# prompt is the LUKS passphrase when osbuild_disk_encrypt is true. Blueprints
 # must not carry [[customizations.user]], [[customizations.group]], unattended
 # or sudo-nopasswd while this is on: image-builder rejects them next to a kickstart.
 osbuild_kickstart_enabled: true
+osbuild_kickstart_file: kickstart/syncopated.ks
 
-# How the installer kickstart handles disks:
-#   auto        — files/kickstart/syncopated.ks: %pre picks the target disk and
-#                 writes the vg00 layout; no storage screen.
-#   interactive — files/kickstart/syncopated-interactive.ks: no storage
-#                 commands; Anaconda's Installation Destination screen must be
-#                 completed by the user.
-#   compliant   — files/kickstart/syncopated.ks with a layout for the OpenSCAP
-#                 profiles (CIS, PCI-DSS, HIPAA): separate /usr, /var,
-#                 /var/tmp, /var/log, /var/log/audit, /home and (tmp=lv) /tmp,
-#                 with nodev/nosuid/noexec mount options. See below.
-osbuild_kickstart_partitioning: auto
-osbuild_kickstart_file: "kickstart/{{ 'syncopated-interactive.ks' if osbuild_kickstart_partitioning == 'interactive' else 'syncopated.ks' }}"
+# OpenSCAP hardening profile: none | cis-l2-workstation | pci-dss | hipaa.
+# Set from the intent's `hardening`. Any profile other than none adds the
+# openscap-<profile> component, the compliant disk layout, the workstation
+# auditd.conf and tailoring (tasks/hardening.yml) and syncopated-scan.
+osbuild_hardening: none
 
-# Sizing for both layouts (the same method as Anaconda's default_partitioning
-# and systemd-repart). Usable space = disk size - 4 GiB (/boot, EFI partition,
-# LVM metadata). All logical volumes are XFS in vg00 on the selected disk.
+# SSG variable values for the tailoring of hardened builds, as
+# {variable: value} without the xccdf_org.ssgproject.content_value_ prefix.
+# tasks/hardening.yml writes them, with the unselected rules, to
+# osbuild_openscap_tailoring_json; image-builder runs autotailor on that file
+# (blueprint [customizations.openscap.json_tailoring]) and remediates with the
+# result, and syncopated-scan evaluates against it. The intent's
+# password_min_length sets var_password_pam_minlen here (CIS: 14, PCI-DSS: 12).
+osbuild_openscap_variables: {}
+# Where the JSON tailoring is written in the image (a file image-builder may
+# write: under /etc, not /usr).
+osbuild_openscap_tailoring_json: /etc/syncopated/openscap-tailoring.json
+
+# Disk the installer lays out, from the intent's `disk` block.
+#   size_gib  declared size of the target disk. Volume sizes are computed from
+#             it at generation time; a smaller disk aborts the install, a
+#             larger one gives the surplus to /home.
+#   encrypt   LUKS on the physical volume (Anaconda asks for the passphrase;
+#             no passphrase is ever written to a generated file).
+#   tmp       tmpfs | lv: /tmp in the compliant layout.
+#   serial    when set, the install aborts unless the selected disk has it.
+osbuild_disk_size_gib: 0
+osbuild_disk_encrypt: false
+osbuild_disk_tmp: tmpfs
+osbuild_disk_serial: ""
+
+# Seconds the installer shows the target disk on a tty before partitioning;
+# any key aborts the install.
+osbuild_kickstart_countdown: 30
+
+# Layout sizes. Usable space = declared disk size - 4 GiB (/boot, EFI
+# partition, LVM metadata). All logical volumes are XFS in vg00.
 #   1. reserve  reserve_percent of the usable space, at most reserve_max_gib,
 #               stays unassigned in vg00 so a full volume can be grown with
 #               `lvextend -r` (README: "When a volume fills up")
 #   2. minimums every volume gets its *_min_gib
 #   3. the rest is shared in proportion to the *_weight values until a volume
 #      reaches its *_max_gib; space no volume can take stays unassigned
-# XFS cannot shrink: prefer maxima that are too small (grow later) over too large.
+# filter_plugins/disk_layout.py does the arithmetic; tests/test_disk_sizing.py
+# covers it. XFS cannot shrink: prefer maxima that are too small (grow later).
 osbuild_kickstart_reserve_max_gib: 64
 
-# Layout for osbuild_kickstart_partitioning: compliant. Fixed volumes (/, /usr,
-# /var/tmp, /var/log, /var/log/audit, and /tmp when compliant_tmp is lv); /var
-# and /home share the rest (var_min_gib..var_max_gib by var_weight, home_min_gib
-# and up by home_weight). Mount options live in the kickstart because Anaconda
-# writes /etc/fstab after the build-time remediation. Disks smaller than
-# disk_min_gib, or too small for the fixed volumes plus the /var and /home
-# minimums, abort the install.
-#   compliant_tmp   tmpfs: fstab line added in %post (size = tmp_gib); a
-#                   partition_for_tmp rule may still flag it.
-#                   lv: a tmp_gib volume.
-#   compliant_encrypt  true: LUKS on the physical volume; Anaconda asks for a
-#                   passphrase at install.
-osbuild_kickstart_compliant_tmp: tmpfs
-osbuild_kickstart_compliant_encrypt: false
-osbuild_kickstart_compliant_disk_min_gib: 180
+# Compliant layout (osbuild_hardening other than none): separate /usr, /var,
+# /var/tmp, /var/log, /var/log/audit, /home and (disk tmp: lv) /tmp with
+# nodev/nosuid/noexec mount options. Fixed volumes; /var and /home share the
+# rest (var_min_gib..var_max_gib by var_weight, home_min_gib and up by
+# home_weight). /var/log/audit is 4 GiB for CIS and PCI-DSS, 10 GiB for HIPAA
+# (osbuild_audit_volume_gib); /usr is 80 GiB when nvidia or cuda-container
+# is selected (osbuild_kickstart_cuda_usr_gib).
 osbuild_kickstart_compliant_root_gib: 35
-osbuild_kickstart_compliant_usr_gib: 45
+osbuild_kickstart_compliant_usr_gib: 60
 osbuild_kickstart_compliant_tmp_gib: 8
 osbuild_kickstart_compliant_var_tmp_gib: 8
 osbuild_kickstart_compliant_var_log_gib: 10
-osbuild_kickstart_compliant_audit_gib: 10
 osbuild_kickstart_compliant_var_min_gib: 40
-osbuild_kickstart_compliant_var_max_gib: 200
+osbuild_kickstart_compliant_var_max_gib: 185
 osbuild_kickstart_compliant_var_weight: 2
 osbuild_kickstart_compliant_home_min_gib: 10
 osbuild_kickstart_compliant_home_weight: 5
 osbuild_kickstart_compliant_reserve_percent: 8
 
-# Layout for osbuild_kickstart_partitioning: auto (workstation sizes; measured
-# install footprint of the NVIDIA CIS build: / 5 GiB, /usr 17 GiB, /var 5 GiB).
-# /home is optional: when the minimums do not fit with it, it is dropped and
-# /home is a directory on /. /home has no maximum. Disks smaller than
-# disk_min_gib abort the install with a message on tty1.
-osbuild_kickstart_disk_min_gib: 100
+# Simple layout (osbuild_hardening: none): /, /usr, /var and /home. /home is
+# dropped (a directory on /) when the minimums do not fit with it.
 osbuild_kickstart_reserve_percent: 8
 osbuild_kickstart_root_min_gib: 20
 osbuild_kickstart_root_max_gib: 64
@@ -412,9 +469,40 @@ osbuild_kickstart_var_weight: 3
 osbuild_kickstart_home_min_gib: 20
 osbuild_kickstart_home_weight: 5
 
-# Ship /etc/sudoers.d/90-wheel-nopasswd (%wheel ALL=(ALL) NOPASSWD: ALL) so the
-# admin user created in Anaconda runs sudo without a password.
+# The CUDA toolkit needs a large /usr (measured: 17 GiB right after install).
+# Selecting any of these components raises /usr to osbuild_kickstart_cuda_usr_gib
+# (simple layout: its minimum; compliant: its fixed size).
+osbuild_kickstart_cuda_components: [nvidia, cuda-container]
+osbuild_kickstart_cuda_usr_gib: 80
+
+# Ship /etc/sudoers.d/90-wheel-nopasswd (%wheel ALL=(ALL) NOPASSWD: ALL).
 osbuild_kickstart_sudoers: false
+
+# =============================================================================
+# Audit Policy (hardened builds)
+# =============================================================================
+# A standalone workstation keeps no long audit history: auditd rotates within
+# a fixed cap and never halts, suspends or drops to single-user mode. Records
+# that must be kept belong on a log host (osbuild_remote_logging).
+osbuild_audit_policy:
+  cis-l2-workstation: { max_log_file: 32, num_logs: 16, volume_gib: 4, noise_filter: true }
+  pci-dss: { max_log_file: 32, num_logs: 16, volume_gib: 4, noise_filter: true }
+  hipaa: { max_log_file: 64, num_logs: 32, volume_gib: 10, noise_filter: false }
+# Free-space percentage below which syncopated-audit-warn warns (auditd
+# space_left), and at which auditd rotates out the oldest log (admin_space_left).
+osbuild_audit_warn_free_percent: 25
+osbuild_audit_admin_free_percent: 10
+
+# =============================================================================
+# Remote Logging
+# =============================================================================
+# From the intent's `remote_logging` block. enabled: false (default) disables
+# systemd-journal-upload and unselects its CIS rule. enabled: true ships the
+# journal (audit events included, via journald) to url over mTLS. ca_cert,
+# client_cert and client_key are PEM text or paths of PEM files on the
+# controller; they are embedded in the blueprint (mode 0600 while they are).
+osbuild_remote_logging:
+  enabled: false
 
 # [COMPATIBILITY] Retained for backward compatibility.
 # Deprecated: composer-era output naming convention carried over for backward compatibility.
@@ -429,7 +517,7 @@ osbuild_container_tag: "localhost/{{ osbuild_blueprint_name }}:latest"
 # Major-version based: the template tree is files/almalinux/10/... and
 # files/rocky/10/..., so a point-release osbuild_distro (almalinux-10.2,
 # rocky-10.2) must resolve to the major-only template name.
-osbuild_repo_config_template: "{{ ansible_distribution | lower }}-{{ _distro_major_version }}.json.j2"
+osbuild_repo_config_template: "{{ ansible_distribution | lower }}-{{ _osbuild_distro_major_version }}.json.j2"
 
 # Keep build logs on failure
 # [COMPATIBILITY] Retained for backward compatibility.

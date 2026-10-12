@@ -1,0 +1,13 @@
+# {{ ansible_managed | default('Managed by Ansible') }}
+# An unreachable log host must not affect the workstation: the uploader
+# retries every 30 s forever, journald keeps every entry locally, and the
+# upload failure is only logged.
+[Unit]
+StartLimitIntervalSec=0
+
+[Service]
+LoadCredential=client.key:{{ _osbuild_journal_upload_pki }}/client.key
+LoadCredential=client.pem:{{ _osbuild_journal_upload_pki }}/client.pem
+LoadCredential=ca.pem:{{ _osbuild_journal_upload_pki }}/ca.pem
+Restart=always
+RestartSec=30s

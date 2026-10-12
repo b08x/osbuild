@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Compute the installer disk layout at generation time from the declared disk
+# size (osbuild_disk_size_gib, intent disk.size_gib). The result,
+# _osbuild_disk_layout, carries fixed MiB sizes that templates/kickstart.toml.j2
+# renders as literal logvol lines; the kickstart %pre only selects the disk,
+# checks it and gives a larger disk's surplus to /home. Arithmetic:
+# filter_plugins/disk_layout.py.
+
+- name: Assert the disk settings are usable
+  ansible.builtin.assert:
+    that:
+      - osbuild_disk_size_gib | string is match('^[0-9]+$')
+      - osbuild_disk_size_gib | int > 0
+      - osbuild_disk_tmp in ['tmpfs', 'lv']
+      - osbuild_disk_serial | string is match('^[A-Za-z0-9._-]*$')
+      - osbuild_kickstart_countdown | string is match('^[0-9]+$')
+    fail_msg: >-
+      disk.size_gib must be a positive integer (got {{ osbuild_disk_size_gib }}),
+      disk.tmp tmpfs or lv (got {{ osbuild_disk_tmp }}), and disk.serial only
+      letters, digits, '.', '_' and '-' (got '{{ osbuild_disk_serial }}').
+    quiet: true
+
+- name: Compute the disk layout
+  ansible.builtin.set_fact:
+    _osbuild_disk_layout: >-
+      {{ osbuild_disk_size_gib | int | syncopated_disk_layout(_layout, _params) }}
+  vars:
+    _layout: "{{ 'simple' if osbuild_hardening == 'none' else 'compliant' }}"
+    _cuda: "{{ osbuild_blueprint_components | intersect(osbuild_kickstart_cuda_components) | length > 0 }}"
+    _params:
+      tmp: "{{ osbuild_disk_tmp }}"
+      reserve_max_gib: "{{ osbuild_kickstart_reserve_max_gib }}"
+      reserve_percent: "{{ osbuild_kickstart_reserve_percent }}"
+      root_min_gib: "{{ osbuild_kickstart_root_min_gib }}"
+      root_max_gib: "{{ osbuild_kickstart_root_max_gib }}"
+      root_weight: "{{ osbuild_kickstart_root_weight }}"
+      usr_min_gib: >-
+        {{ [osbuild_kickstart_usr_min_gib | int, osbuild_kickstart_cuda_usr_gib | int] | max
+           if _cuda else osbuild_kickstart_usr_min_gib }}
+      usr_max_gib: >-
+        {{ [osbuild_kickstart_usr_max_gib | int, osbuild_kickstart_cuda_usr_gib | int] | max
+           if _cuda else osbuild_kickstart_usr_max_gib }}
+      usr_weight: "{{ osbuild_kickstart_usr_weight }}"
+      var_min_gib: "{{ osbuild_kickstart_var_min_gib }}"
+      var_max_gib: "{{ osbuild_kickstart_var_max_gib }}"
+      var_weight: "{{ osbuild_kickstart_var_weight }}"
+      home_min_gib: "{{ osbuild_kickstart_home_min_gib }}"
+      home_weight: "{{ osbuild_kickstart_home_weight }}"
+      compliant_reserve_percent: "{{ osbuild_kickstart_compliant_reserve_percent }}"
+      compliant_root_gib: "{{ osbuild_kickstart_compliant_root_gib }}"
+      compliant_usr_gib: >-
+        {{ osbuild_kickstart_cuda_usr_gib if _cuda else osbuild_kickstart_compliant_usr_gib }}
+      compliant_tmp_gib: "{{ osbuild_kickstart_compliant_tmp_gib }}"
+      compliant_var_tmp_gib: "{{ osbuild_kickstart_compliant_var_tmp_gib }}"
+      compliant_var_log_gib: "{{ osbuild_kickstart_compliant_var_log_gib }}"
+      compliant_audit_gib: >-
+        {{ osbuild_audit_policy[osbuild_hardening].volume_gib if osbuild_hardening != 'none' else 0 }}
+      compliant_var_min_gib: "{{ osbuild_kickstart_compliant_var_min_gib }}"
+      compliant_var_max_gib: "{{ osbuild_kickstart_compliant_var_max_gib }}"
+      compliant_var_weight: "{{ osbuild_kickstart_compliant_var_weight }}"
+      compliant_home_min_gib: "{{ osbuild_kickstart_compliant_home_min_gib }}"
+      compliant_home_weight: "{{ osbuild_kickstart_compliant_home_weight }}"
+
+- name: Show the disk layout
+  ansible.builtin.debug:
+    msg: >-
+      {{ _osbuild_disk_layout.layout }} layout for a {{ osbuild_disk_size_gib }} GiB disk
+      (minimum {{ _osbuild_disk_layout.minimum_disk_gib }} GiB):
+      {% for v in _osbuild_disk_layout.volumes %}{{ v.mount }} {{ (v.size_mib / 1024) | round(1) }} GiB, {% endfor %}
+      unassigned {{ (_osbuild_disk_layout.unassigned_mib / 1024) | round(1) }} GiB

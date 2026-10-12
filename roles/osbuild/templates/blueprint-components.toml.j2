@@ -21,16 +21,32 @@ hostname = "{{ osbuild_hostname }}"
 append = "{{ _osbuild_bp_kernel_args | join(' ') }}"
 
 {% endif %}
-{% if _osbuild_bp_services %}
+{% if _osbuild_bp_services or _osbuild_bp_services_disabled | default([]) %}
 [customizations.services]
 enabled = [
 {% for s in _osbuild_bp_services %}
     "{{ s }}",
 {% endfor %}
 ]
+{% if _osbuild_bp_services_disabled | default([]) %}
+disabled = [
+{% for s in _osbuild_bp_services_disabled %}
+    "{{ s }}",
+{% endfor %}
+]
+{% endif %}
 
 {% endif %}
 {% for f in _osbuild_bp_fragments %}
 # --- component fragment: {{ f }} ---
 {{ lookup('ansible.builtin.file', osbuild_components_dir ~ '/' ~ f) }}
 {% endfor %}
+{% if osbuild_hardening | default('none') != 'none' %}
+
+# OpenSCAP tailoring (tasks/hardening.yml, templates/openscap-tailoring.json.j2):
+# the JSON file is injected into the image; image-builder runs autotailor on
+# it and remediates with the tailored profile.
+[customizations.openscap.json_tailoring]
+profile_id = "{{ _osbuild_openscap_tailored_profile_id }}"
+filepath = "{{ osbuild_openscap_tailoring_json }}"
+{% endif %}

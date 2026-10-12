@@ -4,9 +4,12 @@ Package parity: the packages rendered from a component list equal the package
 set recorded (goals/component-files-only-tracker/baseline/*.pkgs) from each
 static workstation TOML that the components replaced.
 
-Snapshot parity: the three Rocky 10 *-components.yml playbooks render the same
-blueprint, byte for byte, as before the legacy variables were removed
-(baseline/*.toml).
+Packages added on purpose after the baseline was recorded are listed in
+ADDED_SINCE_BASELINE with the commit that added them.
+
+The blueprint snapshots of the retired Rocky 10 ISO playbooks live on in
+tests/test_intent_parity.py, which compares each example intent with the
+blueprint its playbook made.
 """
 from pathlib import Path
 
@@ -32,24 +35,16 @@ PACKAGE_CASES = {
     "rocky10-cuda-container": ("rocky-10.2", ["cuda-container"], "rocky-10-2-cuda-container"),
 }
 
-_ROCKY10_COMMON = ["base", "anaconda", "gnome-desktop", "fonts", "audio", "multimedia", "google-chrome", "vscode"]
-
-# (stem, components, blueprint name, hostname, description)
-SNAPSHOT_CASES = {
-    "rocky-iso": (
-        "rocky-10-2-workstation-components",
-        _ROCKY10_COMMON + ["gui-toolkit", "intel-graphics", "development", "containers-virt", "cockpit", "syncopated"],
-        "syncopated-dx", "Rocky Linux Workstation 10.2 (components)"),
-    "rocky-iso-nvidia": (
-        "rocky-10-2-workstation-nvidia-components",
-        _ROCKY10_COMMON + ["intel-graphics", "development", "containers-virt", "cockpit", "nvidia",
-                           "cuda-container", "gui-toolkit", "syncopated"],
-        "syncopated-dx-nvidia", "Rocky Linux Workstation 10.2 (NVIDIA, components)"),
-    "rocky-iso-intel-oneapi": (
-        "rocky-10-2-workstation-intel-oneapi-components",
-        _ROCKY10_COMMON + ["intel-graphics", "development", "containers-virt", "cockpit", "intel-oneapi", "syncopated"],
-        "syncopated-dx-intel",
-        "Rocky Linux Workstation 10.2 (Intel oneAPI, components, interactive partitioning)"),
+# Added to components after baseline/*.pkgs was recorded.
+#   82c4e7a  lld in every target's base component
+#   b123a31  JupyterLab in the EL 10 development component
+ADDED_SINCE_BASELINE = {
+    "almalinux-10.2": {"lld", "jupyterlab", "python3-ipykernel", "python3-jupyter-core",
+                       "python3-jupyter-events", "python3-jupyter-server", "python3-jupyterlab-server",
+                       "python3-jupyterlab_pygments", "python3-nbconvert"},
+    "rocky-9.8": {"lld"},
+    "fedora-43": {"lld"},
+    "rocky-10.2": set(),
 }
 
 
@@ -62,12 +57,6 @@ def test_package_set_equals_static_blueprint(case):
         # Packages added after the baseline was recorded, plus those moved in
         # from base/fonts (input-remapper, yaru-theme), which the baseline has.
         expected |= set(package_names(render(distro, ["syncopated"])))
+    expected |= ADDED_SINCE_BASELINE[distro]
     assert rendered == expected, (
         f"missing: {sorted(expected - rendered)}; extra: {sorted(rendered - expected)}")
-
-
-@pytest.mark.parametrize("case", SNAPSHOT_CASES)
-def test_components_playbook_blueprint_is_unchanged(case):
-    stem, components, hostname, description = SNAPSHOT_CASES[case]
-    rendered = render("rocky-10.2", components, name=stem, hostname=hostname, description=description)
-    assert rendered == (BASELINE / f"{stem}.toml").read_text()

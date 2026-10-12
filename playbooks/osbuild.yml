@@ -1,7 +1,14 @@
 ---
-# Build a custom image using image-builder CLI
-# Targets: Fedora, AlmaLinux, Rocky Linux
-# Tooling: image-builder (unified CLI), osbuild
+# Build a host-native bootc container image (default) or a VM disk image
+# with the image-builder CLI. Targets: Fedora, AlmaLinux, Rocky Linux.
+#
+# Installer ISOs are not built here: they come from a validated intent,
+#   ansible-playbook playbooks/build.yml -e @profiles/<name>.yml
+# (see profiles/examples/). The play refuses installer image types.
+#
+#   ansible-playbook osbuild.yml                                   # bootc image
+#   ansible-playbook osbuild.yml -e osbuild_build_bootc=false \
+#     -e osbuild_image_type=qcow2                                  # VM disk image
 
 - name: Build custom workstation image
   hosts: osbuild_targets
@@ -26,16 +33,19 @@
     osbuild_blueprint_version: "1.0.0"
     osbuild_blueprint_description: "Custom Workstation"
 
-    # Build mode. Generates blueprint + build script by default;
-    # -e osbuild_only_generate=false builds in the play.
-    osbuild_build_bootc: false
+    # Build mode: bootc container image. With -e osbuild_build_bootc=false the
+    # role generates a blueprint + build script for osbuild_image_type
+    # (-e osbuild_only_generate=false builds in the play).
+    osbuild_build_bootc: true
 
-    # Image type
-    # Live `image-builder list` (tinybot, 2026-10-01): `minimal-installer`
-    # exists only for Fedora (42–45); EL distros (almalinux-*, rocky-*)
-    # build installer images as `image-installer`/`network-installer`.
-    # Mirrors the role default in roles/osbuild/defaults/main.yml.
-    osbuild_image_type: "{{ 'minimal-installer' if ansible_distribution == 'Fedora' else 'image-installer' }}"
+    # Image type for non-bootc builds: a VM disk image (qcow2, vmdk, ami, ...).
+    # Installer types (image-installer, minimal-installer, network-installer)
+    # go through playbooks/build.yml.
+    osbuild_image_type: qcow2
+
+    # VM images are not installed by Anaconda: no kickstart, no splash.
+    osbuild_kickstart_enabled: false
+    osbuild_firstboot_enabled: false
 
     # Components: names of files in
     # roles/osbuild/files/<distro>/<major>/<arch>/components/ (all four
@@ -75,13 +85,6 @@
       Rocky: *components_el
     osbuild_blueprint_components: "{{ osbuild_blueprint_components_default[ansible_distribution] }}"
 
-    # Disk layout (auto): the nvidia component (CUDA toolkit) needs a larger
-    # /usr than the role default of 30 GiB, as in the NVIDIA playbooks
-    # (measured install: 17 GiB used right after installation). Disks under
-    # 150 GiB abort when nvidia is selected. See the role README, "Layout".
-    osbuild_kickstart_usr_min_gib: "{{ 80 if 'nvidia' in osbuild_blueprint_components else 30 }}"
-    osbuild_kickstart_disk_min_gib: "{{ 150 if 'nvidia' in osbuild_blueprint_components else 100 }}"
-
     # Output
     osbuild_output_dir: "/var/tmp/osbuild-images"
 
@@ -105,6 +108,17 @@
           This playbook targets Fedora, AlmaLinux, and Rocky Linux only.
         success_msg: >-
           Target distribution '{{ ansible_distribution }}' is supported.
+
+    - name: Refuse installer ISOs (they are built from intents)
+      ansible.builtin.assert:
+        that: >-
+          osbuild_build_bootc | bool
+          or osbuild_image_type not in ['image-installer', 'minimal-installer', 'network-installer']
+        fail_msg: >-
+          Installer ISOs are generated from a validated intent:
+          ansible-playbook playbooks/build.yml -e @profiles/<name>.yml
+          (examples in profiles/examples/).
+        quiet: true
 
   roles:
     - role: osbuild

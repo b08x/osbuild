@@ -3,7 +3,7 @@
 - CIS and PCI builds set auditd.conf max_log_file_action = rotate, max_log_file = 32, num_logs = 16 (512 MB cap).
 - HIPAA builds set auditd.conf max_log_file_action = rotate, max_log_file = 64, num_logs = 32 (2 GiB cap).
 - No build sets any auditd space/disk action to single, halt or suspend: admin_space_left_action = rotate, disk_full_action = rotate, disk_error_action = syslog, space_left_action = exec (warning script).
-- CIS and PCI builds do not load the file_deletion_events_* and dac_modification_* audit rules; HIPAA builds load every audit rule of the stock profile.
+- CIS and PCI builds do not load the file_deletion_events_* and dac_modification_* audit rules (including the RHEL 10 fchmodat2/renameat2 variants); CIS builds also do not load unsuccessful_file_modification_*; HIPAA builds load every audit rule of the stock profile.
 - All audit deviations are applied through an OpenSCAP tailoring on top of the stock profile, not a %post override; a scan with the tailored profile shows them as tailored/not selected, not as failures.
 - /var/log/audit stays a separate nodev,nosuid,noexec volume: 4 GiB for CIS and PCI, 10 GiB for HIPAA.
 - When /var/log/audit falls below 25% free, the system logs a warning-priority journal entry, shows a motd/Cockpit line, and shows wheel users a persistent GNOME critical notification that reappears at each login while the condition holds.

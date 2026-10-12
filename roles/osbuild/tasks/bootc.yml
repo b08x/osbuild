@@ -72,7 +72,7 @@
       format: oci
       extra_args: "--pull=newer --network=host"
   become: true
-  register: bootc_build_result
+  register: _osbuild_bootc_build_result
 
 - name: Display bootc container build result
   ansible.builtin.debug:
@@ -82,12 +82,12 @@
   ansible.builtin.command:
     cmd: "podman run --rm {{ osbuild_bootc_image_name }}:{{ osbuild_bootc_image_tag }} rpm -qa"
   become: true
-  register: podman_verify_rpm
+  register: _osbuild_podman_verify_rpm
   changed_when: false
 
 - name: Display package count in built container
   ansible.builtin.debug:
-    msg: "Built container contains {{ podman_verify_rpm.stdout_lines | length }} RPM packages."
+    msg: "Built container contains {{ _osbuild_podman_verify_rpm.stdout_lines | length }} RPM packages."
 
 - name: Build bootable disk image using image-builder
   when: osbuild_bootc_build_disk_image | default(false)
@@ -109,7 +109,7 @@
           --bootc-default-fs {{ osbuild_bootc_rootfs }}
           --output-dir {{ osbuild_bootc_output_dir }}
           --progress verbose
-      register: bootc_disk_build
+      register: _osbuild_bootc_disk_build
       become: true
       timeout: "{{ osbuild_bootc_build_timeout }}"
       changed_when: true

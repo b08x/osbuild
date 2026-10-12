@@ -1,0 +1,20 @@
+# {{ _osbuild_inject_title }}. Injected into the prepared blueprint by
+# tasks/{{ _osbuild_inject_source }}; edit the sources, not this. A file has
+# either `content` (text) or `json` (a mapping written as JSON).
+{% for d in _osbuild_inject_dirs | default([]) %}
+
+[[customizations.directories]]
+path = "{{ d.path }}"
+mode = "{{ d.mode }}"
+{% if d.ensure_parents | default(false) %}
+ensure_parents = true
+{% endif %}
+{% endfor %}
+{% for f in _osbuild_inject_files %}
+
+[[customizations.files]]
+path = "{{ f.path }}"
+mode = "{{ f.mode }}"
+data = '''
+{{ f.content if f.content is defined else f.json | to_nice_json(indent=2) ~ '\n' }}'''
+{% endfor %}

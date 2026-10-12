@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # systemctl stub. $SYSTEMCTL_DM_UNITS lists installed display-manager units;
 # $SYSTEMCTL_DEFAULT is the current default target.
+# shellcheck source=_lib.sh
 source "${STUB_DIR:?}/_lib.sh"
 stub_log "systemctl $*"
 case ${1:-} in

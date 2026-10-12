@@ -1,0 +1,5 @@
+---
+# ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: ansible.utils    # ansible.utils.validate (playbooks/build.yml intent check)
+    version: ">=2.10.0"

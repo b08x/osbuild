@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # curl stub: exit codes come from the $CURL_QUEUE file (default 0). On
 # success it writes a yadm wrapper that delegates to the yadm stub.
+# shellcheck source=_lib.sh
 source "${STUB_DIR:?}/_lib.sh"
 stub_log "curl $*"
 rc=$(stub_pop "${CURL_QUEUE:-/nonexistent}") || rc=0
