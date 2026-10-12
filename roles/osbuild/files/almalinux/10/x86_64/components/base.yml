@@ -65,3 +65,4 @@ packages:
   - "zsh"
   - "yq"
   - "lld"
+  - "python3-passlib"

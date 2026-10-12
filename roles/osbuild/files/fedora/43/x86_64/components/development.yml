@@ -29,3 +29,4 @@ packages:
   - "postgresql16-contrib"
   - "postgresql16-pgvector"
   - "vips-devel"
+  - "pykickstart"

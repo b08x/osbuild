@@ -81,3 +81,4 @@ packages:
   - "tuned-switcher"
   - "zoxide"
   - "lld"
+  - "python3-passlib"
