@@ -11,11 +11,13 @@ A *target* is one <distro>/<major>/<arch> directory (for example
 file. Comments, key order and the order of existing packages stay as they are;
 new packages are appended.
 
-Commands (``--target`` is required except for ``search``):
+Commands (``--target`` is required except for ``search`` and
+``add --all-targets``):
 
     list   --target T
     search NAME [--target T]
     add    --target T COMPONENT PKG... [--verify] [--force]
+    add    --all-targets COMPONENT PKG... [--verify] [--force]
     remove --target T COMPONENT PKG...
     verify --target T [COMPONENT]
     playbook PLAYBOOK list|add|remove [COMPONENT...] [--target T] [--after C]
@@ -493,6 +495,29 @@ def cli_add(
     return 1 if refused else 0
 
 
+def cli_add_all(
+    stores: Dict[str, ComponentStore],
+    component: str,
+    packages: Sequence[str],
+    verify: bool = False,
+    force: bool = False,
+) -> int:
+    """Add packages to ``component`` in every target that has it.
+
+    Targets without the component are skipped with a warning. Returns the
+    highest cli_add exit code, or 2 when no target has the component.
+    """
+    for name in packages:
+        validate_package_name(name)
+    having = {t: s for t, s in stores.items() if component in s.names()}
+    for target in stores:
+        if target not in having:
+            _say("warn", f"{target} has no component '{component}'; skipped")
+    if not having:
+        raise TrackerError(f"No target has a component '{component}'")
+    return max(cli_add(store, target, component, packages, verify, force) for target, store in having.items())
+
+
 def cli_remove(store: ComponentStore, target: str, component: str, packages: Sequence[str]) -> int:
     removed, absent = store.remove(component, [validate_package_name(p) for p in packages])
     for name in removed:
@@ -870,6 +895,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("packages", nargs="+", metavar="PKG")
     p.add_argument("--verify", action="store_true", help="Check each package against the target's repos first")
     p.add_argument("--force", action="store_true", help="Add packages that another component already has")
+    p.add_argument(
+        "--all-targets",
+        action="store_true",
+        help="Add to COMPONENT in every target that has it (instead of --target)",
+    )
     p = sub.add_parser("remove", help="Remove packages from a component")
     target_arg(p)
     p.add_argument("component")
@@ -910,6 +940,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if args.action != "list" and not args.components:
                 parser.error(f"playbook {args.action} needs at least one COMPONENT")
             return cli_playbook(targets, args.path, args.action, args.components, args.target, args.after)
+
+        if args.command == "add" and args.all_targets:
+            if args.target:
+                parser.error("add: --target and --all-targets are mutually exclusive")
+            return cli_add_all(stores, args.component, parse_packages(args.packages), args.verify, args.force)
 
         target = resolve_target(targets, args.target)
         store = stores[target]

@@ -194,6 +194,41 @@ def test_add_unknown_component_exits_2(tree, capsys):
     assert "Available components" in capsys.readouterr().out
 
 
+def test_add_all_targets_adds_to_every_target(tree):
+    assert run(tree, "add", "--all-targets", "base", "htop") == 0
+    for target in ("rocky/10/x86_64", "fedora/43/x86_64"):
+        store = pt.ComponentStore(pt.discover_targets(tree)[target])
+        assert yaml.safe_load(text(store, "base"))["packages"][-1] == "htop"
+
+
+def test_add_all_targets_skips_targets_without_the_component(tree, store, capsys):
+    assert run(tree, "add", "--all-targets", "single", "extra") == 0
+    assert yaml.safe_load(text(store, "single"))["packages"] == ["only", "extra"]
+    assert "fedora/43/x86_64 has no component 'single'; skipped" in capsys.readouterr().out
+
+
+def test_add_all_targets_unknown_component_exits_2(tree, capsys):
+    assert run(tree, "add", "--all-targets", "nope", "x") == 2
+    assert "No target has a component 'nope'" in capsys.readouterr().out
+
+
+def test_add_all_targets_returns_worst_exit_code(tree, store):
+    # zsh is already in rocky base (no change); nvtop is in nvidia in both targets (refused)
+    assert run(tree, "add", "--all-targets", "base", "nvtop") == 1
+    assert "nvtop" not in yaml.safe_load(text(store, "base"))["packages"]
+
+
+def test_add_all_targets_with_target_is_an_error(tree):
+    with pytest.raises(SystemExit):
+        run(tree, "add", "--all-targets", "--target", "rocky/10/x86_64", "base", "htop")
+
+
+def test_add_all_targets_invalid_name_changes_nothing(tree, store):
+    before = text(store, "base")
+    assert run(tree, "add", "--all-targets", "base", "ok", "a/b") == 2
+    assert text(store, "base") == before
+
+
 @pytest.mark.parametrize("bad", ["--installroot=/x", "-x", "", "a/b"])
 def test_add_rejects_option_like_names(store, bad):
     with pytest.raises(pt.TrackerError):

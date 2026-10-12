@@ -226,11 +226,16 @@ Procedure:
 
    ```bash
    python3 scripts/package_tracker.py add    --target rocky/10/x86_64 base a b --verify
+   python3 scripts/package_tracker.py add    --all-targets base a b --verify
    python3 scripts/package_tracker.py remove --target rocky/10/x86_64 base a
    python3 scripts/package_tracker.py tui    # Edit / Add / Show details per component
    ```
 
-   - `--target` is required (exit 2 with the target list otherwise).
+   - `--target` is required (exit 2 with the target list otherwise), except
+     `add --all-targets`, which adds to the component in every target that has
+     it, warns for each target that does not, and exits with the worst
+     per-target code. `--verify` checks each target against its own repos, so
+     a name missing from one distro is skipped there only.
    - `add` appends to the end of the `packages:` list and keeps comments, key
      order and the existing order. A name already in another component of the
      same target is refused with a warning naming it, unless `--force`.
