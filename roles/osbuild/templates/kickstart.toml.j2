@@ -13,7 +13,7 @@ keyboard {{ osbuild_keyboard }}
 timezone {{ osbuild_timezone }} --utc
 rootpw --lock
 {% for u in _osbuild_users %}
-user --name={{ u.name }} --gecos="{{ u.gecos }}" --groups={{ u.groups | join(',') }}{{ (' --uid=' ~ u.uid) if u.uid is defined and u.uid is not none else '' }} --iscrypted --password={{ u.password_hash }}
+user --name={{ u.name }} --gecos="{{ u.gecos }}" --groups={{ u.groups | join(',') }}{{ (' --uid=' ~ u.uid) if u.uid | default('', true) else '' }} --iscrypted --password={{ u.password_hash }}
 {% if u.ssh_pubkey | default('', true) | length > 0 %}
 sshkey --username={{ u.name }} "{{ u.ssh_pubkey }}"
 {% endif %}
